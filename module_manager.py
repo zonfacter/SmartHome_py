@@ -127,14 +127,25 @@ class ModuleManager:
             return False
     
     def load_all_modules(self):
-        """Lädt alle Module aus dem Verzeichnis"""
+        """Lädt alle Module aus dem Verzeichnis (inkl. Unterordner)"""
         if not os.path.exists(self.modules_dir):
             return
         
+        # Lade Module aus Hauptverzeichnis
         for filename in sorted(os.listdir(self.modules_dir)):
             if filename.endswith('_module.py'):
                 filepath = os.path.join(self.modules_dir, filename)
                 self.load_module_from_file(filepath)
+        
+        # Lade Module aus Unterordnern (core, ui, integrations, plugins)
+        for subdir in ['core', 'ui', 'integrations', 'plugins']:
+            subdir_path = os.path.join(self.modules_dir, subdir)
+            if os.path.exists(subdir_path) and os.path.isdir(subdir_path):
+                for filename in sorted(os.listdir(subdir_path)):
+                    # Lade .py Dateien (außer __init__.py)
+                    if filename.endswith('.py') and not filename.startswith('__'):
+                        filepath = os.path.join(subdir_path, filename)
+                        self.load_module_from_file(filepath)
     
     def get_module(self, name: str) -> Optional[Any]:
         """Holt Modul-API"""

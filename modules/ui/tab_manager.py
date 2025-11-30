@@ -58,8 +58,11 @@ class TabManager(BaseModule):
     def set_notebook(self, notebook: ttk.Notebook):
         """Setzt Notebook-Widget"""
         self.notebook = notebook
+        
+        # Lade gespeicherte Custom-Tabs
+        self._load_tabs()
     
-    def add_tab(self, name: str, icon: str = "", create_content_callback=None) -> str:
+    def add_tab(self, name: str, icon: str = "", create_content_callback=None, tab_id: str = None, skip_save: bool = False) -> str:
         """
         Fügt neuen Tab hinzu
         
@@ -67,6 +70,8 @@ class TabManager(BaseModule):
             name: Tab-Name
             icon: Optional icon
             create_content_callback: Funktion die Tab-Inhalt erstellt
+            tab_id: Optional feste ID (für Laden aus Config)
+            skip_save: Wenn True, wird nicht gespeichert (beim Laden aus Config)
         
         Returns:
             tab_id
@@ -81,7 +86,10 @@ class TabManager(BaseModule):
         )
         
         # Tab-ID
-        tab_id = f"tab_{len(self.tabs)}"
+        if tab_id is None:
+            # Generiere eindeutige ID mit Timestamp
+            import time
+            tab_id = f"tab_{int(time.time() * 1000)}"  # Millisekunden-Timestamp
         
         # Füge zu Notebook hinzu
         tab_text = f"{icon} {name}" if icon else name
@@ -99,7 +107,77 @@ class TabManager(BaseModule):
         if create_content_callback:
             create_content_callback(tab_frame)
         
+        # WICHTIG: Speichere Tabs (außer beim Laden!)
+        if not skip_save:
+            self._save_tabs()
+        
         return tab_id
+    
+    def _save_tabs(self):
+        """Speichert Tab-Konfiguration"""
+        if not self.config:
+            return
+        
+        # Erstelle serialisierbares Dict (ohne callbacks und frames)
+        tabs_config = {}
+        for tab_id, tab_info in self.tabs.items():
+            # Nur Name und Icon speichern
+            tabs_config[tab_id] = {
+                'name': tab_info['name'],
+                'icon': tab_info['icon']
+            }
+        
+        # Speichere in Config
+        config_data = self.config.config
+        config_data['custom_tabs'] = tabs_config
+        self.config.save_config()
+    
+    def _load_tabs(self):
+        """Lädt gespeicherte Tabs"""
+        if not self.config:
+            return
+        
+        config_data = self.config.config
+        tabs_config = config_data.get('custom_tabs', {})
+        
+        # Lade jeden Tab
+        for tab_id, tab_info in tabs_config.items():
+            # Erstelle Tab mit Callback der tab_info übergib (closure!)
+            def make_callback(info):
+                return lambda parent: self._create_custom_tab_content(parent, info)
+            
+            self.add_tab(
+                name=tab_info['name'],
+                icon=tab_info.get('icon', ''),
+                create_content_callback=make_callback(tab_info),
+                tab_id=tab_id,
+                skip_save=True  # WICHTIG: Nicht speichern beim Laden!
+            )
+    
+    def _create_custom_tab_content(self, parent, tab_info):
+        """Erstellt Inhalt für benutzerdefinierten Tab"""
+        # Nutze die gleiche Logik wie für Standard-Floors
+        # Tab-Name = Floor-Name für Cards
+        floor_name = f"{tab_info['icon']} {tab_info['name']}" if tab_info['icon'] else tab_info['name']
+        
+        if self.app and hasattr(self.app, 'create_floor_content'):
+            self.app.create_floor_content(parent, floor_name)
+        else:
+            # Fallback: Zeige Info
+            tk.Label(
+                parent,
+                text="📝 Custom Tab",
+                font=('Segoe UI', 16, 'bold'),
+                bg=self.gui.colors['bg'] if self.gui else 'white'
+            ).pack(pady=20)
+            
+            tk.Label(
+                parent,
+                text="Füge Cards über 'Card-Verwaltung' hinzu\nund wähle diesen Tab als Etage.",
+                font=('Segoe UI', 10),
+                bg=self.gui.colors['bg'] if self.gui else 'white',
+                fg='gray'
+            ).pack(pady=10)
     
     def remove_tab(self, tab_id: str) -> bool:
         """Entfernt Tab"""
@@ -123,6 +201,9 @@ class TabManager(BaseModule):
         
         # Entferne aus Dict
         del self.tabs[tab_id]
+        
+        # WICHTIG: Speichere Änderung!
+        self._save_tabs()
         
         return True
     
@@ -257,7 +338,13 @@ class TabManager(BaseModule):
                 
                 def confirm_icon():
                     icon_dialog.destroy()
-                    self.add_tab(name, selected_icon.get())
+                    # Erstelle Tab mit content_callback für Cards
+                    tab_id = self.add_tab(
+                        name, 
+                        selected_icon.get(),
+                        create_content_callback=lambda parent: self.app.create_floor_content(parent, f"{selected_icon.get()} {name}")
+                    )
+                    # Tab wird automatisch in add_tab() gespeichert
                     dialog.destroy()
                     self.create_management_dialog()  # Refresh
                 
@@ -297,8 +384,8 @@ class TabManager(BaseModule):
         return self.tabs
     
     def shutdown(self):
-        """Aufräumen"""
-        pass
+        """Speichert Tabs beim Beenden"""
+        self._save_tabs()
 
 
 def register(module_manager):

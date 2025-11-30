@@ -472,7 +472,16 @@ Nach Etage:
         floor_frame = tk.Frame(parent, bg='white')
         floor_frame.grid(row=row, column=1, sticky='ew', pady=5, padx=(10, 0))
         
+        # Lade Floors dynamisch (Standard + Custom Tabs)
         floors = ['🏡 Erdgeschoss', '🔼 Obergeschoss', '⬆️ Dachboden']
+        
+        # Füge Custom Tabs hinzu
+        if self.app and hasattr(self.app, 'tab_manager') and self.app.tab_manager:
+            for tab_id, tab_info in self.app.tab_manager.tabs.items():
+                tab_name = f"{tab_info['icon']} {tab_info['name']}" if tab_info['icon'] else tab_info['name']
+                if tab_name not in floors:  # Vermeide Duplikate
+                    floors.append(tab_name)
+        
         for floor in floors:
             tk.Radiobutton(
                 floor_frame,

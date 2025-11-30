@@ -45,7 +45,7 @@ class SmartHomeApp:
     Vollständig modulare Architektur
     """
     
-    VERSION = "2.1.0"
+    VERSION = "2.2.6"
     NAME = "TwinCAT Smart Home"
     BUILD_DATE = "2025-11-30"
     
@@ -171,6 +171,32 @@ class SmartHomeApp:
             # PLC-Referenz an Plugins übergeben
             self._inject_plc_to_plugins()
         
+        # MQTT verbinden (falls konfiguriert)
+        self.mqtt = self.module_manager.get_module('mqtt_integration')
+        if self.mqtt:
+            # Lade MQTT-Config
+            if self.config:
+                mqtt_config = self.config.get_config_value('mqtt', None)
+                if mqtt_config and isinstance(mqtt_config, dict):
+                    broker = mqtt_config.get('broker', 'localhost')
+                    port = mqtt_config.get('port', 1883)
+                    username = mqtt_config.get('username', None)
+                    password = mqtt_config.get('password', None)
+                    
+                    # Konfiguriere und verbinde
+                    self.mqtt.configure(broker, port, username, password)
+                    success = self.mqtt.connect()
+                    
+                    if success:
+                        print(f"  ✓ MQTT wird verbunden: {broker}:{port}")
+                        
+                        # Abonniere Topics aus allen SolarAssistant Cards
+                        self._subscribe_mqtt_topics()
+                    else:
+                        print(f"  ⚠️  MQTT-Verbindung fehlgeschlagen!")
+                else:
+                    print(f"  ℹ️  Keine MQTT-Config gefunden")
+        
         # Finalisiere
         self.finalize_initialization()
     
@@ -186,6 +212,28 @@ class SmartHomeApp:
                 if plugin and hasattr(plugin, 'plc'):
                     plugin.plc = self.plc
                     print(f"  ✓ PLC-Referenz an {name} übergeben")
+    
+    def _subscribe_mqtt_topics(self):
+        """Abonniert MQTT-Topics aus allen SolarAssistant Cards"""
+        if not self.mqtt or not self.config:
+            return
+        
+        # Hole alle Cards
+        custom_lights = self.config.get_custom_lights()
+        topics_to_subscribe = set()
+        
+        # Sammle alle Topics
+        for card_id, card_data in custom_lights.items():
+            if card_data.get('plugin_type') == 'solarassistant':
+                topics = card_data.get('topics', {})
+                for topic_name, topic_path in topics.items():
+                    if topic_path:  # Nur wenn Topic definiert
+                        topics_to_subscribe.add(topic_path)
+        
+        # Abonniere alle Topics
+        for topic in topics_to_subscribe:
+            self.mqtt.subscribe(topic)
+            print(f"    📥 MQTT Subscribe: {topic}")
     
     def finalize_initialization(self):
         """Finalisiert Initialisierung"""
@@ -236,14 +284,19 @@ class SmartHomeApp:
     
     def create_tabs(self):
         """Erstellt alle Tabs"""
-        # Etagen-Tabs - über Tab-Manager
+        # Etagen-Tabs - über Tab-Manager (NICHT speichern, sind Standard!)
         if self.tab_manager:
             self.tab_manager.add_tab("Erdgeschoss", "🏡", 
-                                     lambda parent: self.create_floor_content(parent, "🏡 Erdgeschoss"))
+                                     lambda parent: self.create_floor_content(parent, "🏡 Erdgeschoss"),
+                                     skip_save=True)  # Standard-Tab, nicht speichern!
             self.tab_manager.add_tab("Obergeschoss", "🔼",
-                                     lambda parent: self.create_floor_content(parent, "🔼 Obergeschoss"))
+                                     lambda parent: self.create_floor_content(parent, "🔼 Obergeschoss"),
+                                     skip_save=True)  # Standard-Tab, nicht speichern!
             self.tab_manager.add_tab("Dachboden", "⬆️",
-                                     lambda parent: self.create_floor_content(parent, "⬆️ Dachboden"))
+                                     lambda parent: self.create_floor_content(parent, "⬆️ Dachboden"),
+                                     skip_save=True)  # Standard-Tab, nicht speichern!
+            
+            # Custom Tabs werden automatisch in tab_manager.set_notebook() geladen
         
         # Card-Management Tab
         if self.card_manager:
@@ -351,7 +404,18 @@ class SmartHomeApp:
     def start_update_loop(self):
         """Startet Update-Loop"""
         if self.update_loop:
-            self.update_loop.start(interval=1.0)
+            # Lade gespeicherte Performance-Settings
+            interval = 1.0  # Default
+            
+            if self.config:
+                config_data = self.config.config
+                perf_settings = config_data.get('performance', {})
+                interval = perf_settings.get('update_interval', 1.0)
+                
+                if interval != 1.0:
+                    print(f"  ℹ️  Lade Performance-Settings: {interval}s Intervall")
+            
+            self.update_loop.start(interval=interval)
     
     def reconnect_plc(self):
         """Reconnect PLC"""
@@ -434,8 +498,8 @@ class SmartHomeApp:
                 self.gui.apply_theme(theme_name)
                 # Speichere Theme
                 if self.config:
-                    config_data = self.config.config
-                    config_data['theme'] = theme_name
+                    self.config.current_theme = theme_name  # Update Objekt
+                    self.config.config['theme'] = theme_name  # Update Dict
                     self.config.save_config()
             messagebox.showinfo("Theme geändert", f"Theme '{theme_name}' wurde aktiviert!\n\nBitte starte die App neu für vollständige Anwendung.")
         
@@ -586,7 +650,13 @@ Cache: {status['cached_variables']} Variablen
         tk.Label(symbol_frame, text="Symbol-Browser Live-Limit:",
                 font=('Segoe UI', 10, 'bold')).grid(row=0, column=0, sticky='w', pady=5)
         
-        limit_var = tk.IntVar(value=100)
+        # Lade aus Config
+        saved_limit = 100  # Default
+        if self.config:
+            perf_settings = self.config.config.get('performance', {})
+            saved_limit = perf_settings.get('symbol_browser_limit', 100)
+        
+        limit_var = tk.IntVar(value=saved_limit)
         
         tk.Label(symbol_frame, text="10 Symbole").grid(row=1, column=0, sticky='w')
         limit_scale = tk.Scale(
@@ -614,14 +684,34 @@ Cache: {status['cached_variables']} Variablen
         def apply_performance():
             if self.update_loop:
                 new_interval = interval_var.get()
+                new_limit = limit_var.get()
+                
+                # Wende Einstellungen an
                 self.update_loop.update_interval = new_interval
+                
                 # Restart Loop mit neuem Intervall
                 self.update_loop.stop()
                 self.update_loop.start(interval=new_interval)
+                
+                # WICHTIG: Speichere in Config!
+                if self.config:
+                    # Hole aktuelle Config
+                    config_data = self.config.config
+                    
+                    # Erstelle/Update Performance-Sektion
+                    if 'performance' not in config_data:
+                        config_data['performance'] = {}
+                    
+                    config_data['performance']['update_interval'] = new_interval
+                    config_data['performance']['symbol_browser_limit'] = new_limit
+                    
+                    # Speichere
+                    self.config.save_config()
+                
                 messagebox.showinfo("Performance", 
                     f"✓ Live-Update Intervall: {new_interval}s\n"
-                    f"✓ Symbol-Browser Limit: {limit_var.get()} Symbole\n\n"
-                    "Einstellungen aktiv!")
+                    f"✓ Symbol-Browser Limit: {new_limit} Symbole\n\n"
+                    "Einstellungen gespeichert und aktiv!")
         
         tk.Button(
             perf_frame,
@@ -638,6 +728,169 @@ Cache: {status['cached_variables']} Variablen
         tk.Label(perf_frame, 
                 text="💡 Tipp: Für schnelle Reaktionszeit: 0.2s Intervall\n"
                      "Für weniger CPU-Last: 2.0s+ Intervall",
+                font=('Segoe UI', 9),
+                fg='gray').pack(pady=10)
+        
+        # MQTT-Tab (NEU!)
+        mqtt_frame = tk.Frame(settings_nb)
+        settings_nb.add(mqtt_frame, text="📡 MQTT")
+        
+        tk.Label(mqtt_frame, text="MQTT-Konfiguration",
+                font=('Segoe UI', 12, 'bold')).pack(pady=20)
+        
+        # Status
+        if self.mqtt:
+            status_text = "✓ Verbunden" if self.mqtt.connected else "✗ Nicht verbunden"
+            status_color = '#4CAF50' if self.mqtt.connected else '#f44336'
+            
+            tk.Label(mqtt_frame, text=f"Status: {status_text}",
+                    font=('Segoe UI', 11, 'bold'),
+                    fg=status_color).pack(pady=10)
+            
+            if self.mqtt.connected:
+                broker_info = f"Broker: {self.mqtt.config['broker']}:{self.mqtt.config['port']}"
+                tk.Label(mqtt_frame, text=broker_info,
+                        font=('Segoe UI', 10)).pack()
+        
+        # Config-Frame
+        config_frame = tk.Frame(mqtt_frame, relief=tk.RAISED, borderwidth=1)
+        config_frame.pack(fill=tk.X, padx=40, pady=20)
+        
+        # Broker
+        tk.Label(config_frame, text="Broker:", font=('Segoe UI', 10, 'bold')).grid(
+            row=0, column=0, sticky='w', padx=10, pady=5)
+        broker_var = tk.StringVar(
+            value=self.config.get_config_value('mqtt', {}).get('broker', 'localhost') if self.config else 'localhost'
+        )
+        tk.Entry(config_frame, textvariable=broker_var, width=30).grid(
+            row=0, column=1, padx=10, pady=5)
+        
+        # Port
+        tk.Label(config_frame, text="Port:", font=('Segoe UI', 10, 'bold')).grid(
+            row=1, column=0, sticky='w', padx=10, pady=5)
+        port_var = tk.IntVar(
+            value=self.config.get_config_value('mqtt', {}).get('port', 1883) if self.config else 1883
+        )
+        tk.Spinbox(config_frame, from_=1, to=65535, textvariable=port_var, width=28).grid(
+            row=1, column=1, padx=10, pady=5)
+        
+        # Username (optional)
+        tk.Label(config_frame, text="Username (opt):", font=('Segoe UI', 10, 'bold')).grid(
+            row=2, column=0, sticky='w', padx=10, pady=5)
+        username_var = tk.StringVar(
+            value=self.config.get_config_value('mqtt', {}).get('username', '') if self.config else ''
+        )
+        tk.Entry(config_frame, textvariable=username_var, width=30).grid(
+            row=2, column=1, padx=10, pady=5)
+        
+        # Password (optional)
+        tk.Label(config_frame, text="Password (opt):", font=('Segoe UI', 10, 'bold')).grid(
+            row=3, column=0, sticky='w', padx=10, pady=5)
+        password_var = tk.StringVar(
+            value=self.config.get_config_value('mqtt', {}).get('password', '') if self.config else ''
+        )
+        tk.Entry(config_frame, textvariable=password_var, width=30, show='*').grid(
+            row=3, column=1, padx=10, pady=5)
+        
+        # Buttons
+        btn_frame = tk.Frame(mqtt_frame)
+        btn_frame.pack(pady=20)
+        
+        def save_mqtt_config():
+            if self.config:
+                # Speichere Config
+                config_data = self.config.config
+                config_data['mqtt'] = {
+                    'broker': broker_var.get(),
+                    'port': port_var.get(),
+                    'username': username_var.get() if username_var.get() else None,
+                    'password': password_var.get() if password_var.get() else None
+                }
+                self.config.save_config()
+                messagebox.showinfo("Gespeichert", 
+                    "MQTT-Konfiguration gespeichert!\n\n"
+                    "Starte App neu für Anwendung.")
+        
+        def test_mqtt_connection():
+            # Hole MQTT-Modul (falls nicht schon vorhanden)
+            mqtt = self.mqtt
+            if not mqtt:
+                mqtt = self.module_manager.get_module('mqtt_integration')
+            
+            if not mqtt:
+                messagebox.showerror("Fehler", 
+                    "MQTT-Modul nicht geladen!\n\n"
+                    "Prüfe:\n"
+                    "1. Console-Output für 'mqtt_integration'\n"
+                    "2. Module-Status (📦 Module)\n"
+                    "3. Ist paho-mqtt installiert?\n"
+                    "   pip install paho-mqtt --break-system-packages\n\n"
+                    "Starte App neu nach Installation!")
+                return
+            
+            # Prüfe ob paho-mqtt verfügbar ist
+            try:
+                import paho.mqtt.client as mqtt_client
+                print(f"  ✓ paho-mqtt ist verfügbar")
+            except ImportError:
+                messagebox.showerror("Fehler", 
+                    "paho-mqtt nicht installiert!\n\n"
+                    "Installiere mit:\n"
+                    "pip install paho-mqtt --break-system-packages\n\n"
+                    "Dann App neu starten!")
+                return
+            
+            # Teste Verbindung
+            try:
+                print(f"\n🔌 Teste MQTT-Verbindung...")
+                print(f"  Broker: {broker_var.get()}")
+                print(f"  Port: {port_var.get()}")
+                
+                mqtt.disconnect()
+                mqtt.configure(
+                    broker_var.get(),
+                    port_var.get(),
+                    username_var.get() if username_var.get() else None,
+                    password_var.get() if password_var.get() else None
+                )
+                
+                success = mqtt.connect()
+                
+                if success:
+                    print(f"  ✓ MQTT-Verbindung erfolgreich!")
+                    messagebox.showinfo("Erfolg", "✓ MQTT-Verbindung erfolgreich!")
+                    # Speichere für zukünftige Nutzung
+                    self.mqtt = mqtt
+                else:
+                    print(f"  ✗ MQTT-Verbindung fehlgeschlagen!")
+                    messagebox.showerror("Fehler", 
+                        "✗ MQTT-Verbindung fehlgeschlagen!\n\n"
+                        "Prüfe:\n"
+                        "1. Broker-Adresse korrekt?\n"
+                        "2. Port korrekt? (Standard: 1883)\n"
+                        "3. Broker läuft?\n"
+                        "4. Firewall?\n\n"
+                        "Siehe Console für Details.")
+            except Exception as e:
+                print(f"  ✗ Fehler beim Testen: {e}")
+                import traceback
+                traceback.print_exc()
+                messagebox.showerror("Fehler", 
+                    f"Fehler beim Testen:\n{e}\n\n"
+                    "Siehe Console für Details.")
+        
+        tk.Button(btn_frame, text="💾 Speichern", command=save_mqtt_config,
+                 font=('Segoe UI', 10, 'bold'), bg='#4CAF50', fg='white',
+                 padx=20, pady=8).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(btn_frame, text="🔌 Verbindung testen", command=test_mqtt_connection,
+                 font=('Segoe UI', 10, 'bold'), bg='#2196F3', fg='white',
+                 padx=20, pady=8).pack(side=tk.LEFT, padx=5)
+        
+        # Hinweis
+        tk.Label(mqtt_frame, 
+                text="💡 Tipp: Für SolarAssistant Cards MQTT-Broker konfigurieren\n"
+                     "Topics werden in den Card-Einstellungen festgelegt.",
                 font=('Segoe UI', 9),
                 fg='gray').pack(pady=10)
         
