@@ -1,13 +1,17 @@
 """
-Update Loop Module  
-Version: 2.0.6
-Live-Update System für PLC-Werte mit Smart-Update
+Update Loop Module v2.1.0
+Plugin-basiertes Update-System
 
 📁 SPEICHERORT: modules/core/update_loop.py
 
+🆕 v2.1.0:
+- Generisches Plugin-Update (statt hardcoded)
+- Ruft plugin.update_card() auf
+- Plugins managen ihre eigenen Updates
+- Keine hardcoded Plugin-Logik mehr!
+
 Features:
-- Live-Updates von PLC
-- **GEFIXT: Liest OUTPUT statt INPUT (wie v1.2)!**
+- Live-Updates von PLC über Plugins
 - Thread-Safe GUI-Updates
 - Smart-Update (nur sichtbare Cards)
 - Fehler-Handling & Auto-Reconnect
@@ -18,23 +22,27 @@ from module_manager import BaseModule
 from typing import Any, Dict, Set
 import threading
 import time
-import pyads
 
 
 class UpdateLoop(BaseModule):
     """
-    Update-Loop
+    Update-Loop v2.1.0
+    
+    ⭐ NEU: Generisches Plugin-Update-System!
+    - Keine hardcoded Plugin-Logik
+    - Jedes Plugin managed seine eigenen Updates
+    - Sauber & erweiterbar
     
     Features:
-    - Live-Updates von PLC
+    - Live-Updates über plugin.update_card()
     - Smart-Update (nur sichtbare Cards)
     - Fehler-Handling & Auto-Reconnect
     - Konfigurierbare Intervalle
     """
     
     NAME = "update_loop"
-    VERSION = "2.0.6"
-    DESCRIPTION = "Live-Update System"
+    VERSION = "2.1.0"
+    DESCRIPTION = "Plugin-basiertes Update-System"
     AUTHOR = "TwinCAT Team"
     DEPENDENCIES = ['plc_communication', 'card_renderer']
     
@@ -42,10 +50,15 @@ class UpdateLoop(BaseModule):
         super().__init__()
         self.plc = None
         self.cards = None
+        self.app = None
         self.running = False
         self.update_thread = None
         self.update_interval = 1.0  # Sekunden
-        self.visible_cards = set()
+        self.visible_cards = set()  # Für Smart-Update (zukünftig)
+        
+        # Statistik
+        self.update_count = 0
+        self.error_count = 0
     
     def initialize(self, app_context: Any):
         """Initialisiert Update-Loop"""
@@ -59,13 +72,20 @@ class UpdateLoop(BaseModule):
         print(f"  ⚡ {self.NAME} v{self.VERSION} initialisiert")
     
     def start(self, interval: float = 1.0):
-        """Startet Update-Loop"""
+        """
+        Startet Update-Loop
+        
+        Args:
+            interval: Update-Intervall in Sekunden (default: 1.0)
+        """
         if self.running:
+            print("  ⚠️  Update-Loop läuft bereits!")
             return
         
         self.update_interval = interval
         self.running = True
         
+        # Starte Worker-Thread
         self.update_thread = threading.Thread(target=self._update_worker, daemon=True)
         self.update_thread.start()
         
@@ -73,256 +93,116 @@ class UpdateLoop(BaseModule):
     
     def stop(self):
         """Stoppt Update-Loop"""
+        if not self.running:
+            return
+        
         self.running = False
+        
         if self.update_thread:
             self.update_thread.join(timeout=2.0)
-        print("  ⏸️ Update-Loop gestoppt")
+        
+        print(f"  ⏸️ Update-Loop gestoppt")
+        print(f"     📊 Updates: {self.update_count}, Fehler: {self.error_count}")
     
     def set_visible_cards(self, card_ids: Set[str]):
-        """Setzt Liste sichtbarer Cards (für Smart-Update)"""
+        """
+        Setzt Liste sichtbarer Cards (für Smart-Update)
+        
+        Args:
+            card_ids: Set von Card-IDs die aktuell sichtbar sind
+        """
         self.visible_cards = card_ids
     
     def _update_worker(self):
-        """Update-Worker Thread"""
+        """
+        Update-Worker Thread
+        
+        Läuft in separatem Thread und ruft zyklisch Updates auf
+        """
+        print(f"  🔄 Update-Worker gestartet")
+        
         while self.running:
             try:
+                # ⭐ Haupt-Update
                 self._update_all_cards()
+                self.update_count += 1
+                
             except Exception as e:
-                print(f"  ⚠️ Update-Fehler: {e}")
+                self.error_count += 1
+                print(f"  ⚠️  Update-Fehler: {e}")
+                # Keine Details im normalen Betrieb (zu viel Spam)
             
+            # Warte bis nächster Zyklus
             time.sleep(self.update_interval)
+        
+        print(f"  🛑 Update-Worker beendet")
     
     def _update_all_cards(self):
-        """Aktualisiert alle sichtbaren Cards"""
-        if not self.plc or not self.cards:
+        """
+        Aktualisiert alle Cards über ihre Plugins
+        
+        ⭐ v2.1.0: Generisch! Keine hardcoded Plugin-Logik!
+        """
+        if not self.cards:
             return
         
-        all_cards = self.cards.get_all_cards()
-        
-        for card_id, card_widgets in all_cards.items():
-            # Smart-Update: Nur sichtbare Cards
-            if self.visible_cards and card_id not in self.visible_cards:
-                continue
-            
-            self._update_single_card(card_id, card_widgets)
-    
-    def _update_single_card(self, card_id: str, card_widgets: Dict):
-        """Aktualisiert einzelne Card"""
-        if card_id not in self.cards.card_data:
-            return
-        
-        card_data = self.cards.card_data[card_id]
-        plugin_type = card_data.get('plugin_type', 'light')
-        
+        # Hole alle Cards vom Renderer
         try:
-            if plugin_type == 'light':
-                self._update_light_card(card_widgets, card_data)
-            elif plugin_type == 'temperature':
-                self._update_temperature_card(card_widgets, card_data)
-            elif plugin_type == 'gauge':
-                self._update_gauge_card(card_widgets, card_data)
-            elif plugin_type == 'weather':
-                self._update_weather_card(card_widgets, card_data)
+            all_cards = self.cards.get_all_cards()
+        except Exception as e:
+            # Card-Renderer noch nicht bereit
+            return
+        
+        # Update jede Card
+        for card_id, widgets in all_cards.items():
+            # Smart-Update: Nur sichtbare Cards (zukünftig)
+            # TODO: Implementiere Sichtbarkeits-Tracking
+            # if self.visible_cards and card_id not in self.visible_cards:
+            #     continue
+            
+            # Update diese Card
+            self._update_single_card(card_id, widgets)
+    
+    def _update_single_card(self, card_id: str, widgets: Dict):
+        """
+        Aktualisiert einzelne Card über ihr Plugin
+        
+        ⭐ v2.1.0: Ruft plugin.update_card() auf!
+        
+        Args:
+            card_id: Card-ID
+            widgets: Widget-Dict vom Renderer
+        """
+        # Hole Card-Daten
+        card_data = widgets.get('data', {})
+        if not card_data:
+            return
+        
+        # Hole Plugin-Typ
+        plugin_type = card_data.get('plugin_type')
+        if not plugin_type:
+            return
+        
+        # Hole Plugin vom Manager
+        plugin = self.app.module_manager.get_module(plugin_type)
+        if not plugin:
+            return
+        
+        # ⭐ Hat Plugin update_card() Methode?
+        if not hasattr(plugin, 'update_card'):
+            # Plugin unterstützt keine Updates (ist OK)
+            return
+        
+        # ⭐ Rufe Plugin-Update auf!
+        try:
+            plugin.update_card(card_id, card_data)
         except Exception as e:
             # Stille Fehler bei einzelnen Cards
+            # (Card könnte gelöscht/versteckt sein, etc.)
             pass
     
-    def _update_light_card(self, widgets: Dict, data: Dict):
-        """Aktualisiert Light-Card"""
-        # WICHTIG: Nutze INPUT für Status-Anzeige (echte Rückmeldung)!
-        # OUTPUT ist nur zum Schreiben (Impuls)
-        input_var = data.get('input')
-        
-        if not input_var:
-            # Fallback: Wenn kein Input definiert, nutze Output
-            input_var = data.get('output')
-        
-        if not input_var:
-            return
-        
-        # Lese Wert vom PLC
-        try:
-            value = self.plc.read_by_name(input_var, pyads.PLCTYPE_BOOL)
-        except:
-            value = None
-        
-        if value is not None and self.cards and self.cards.gui:
-            # Update GUI im Main-Thread (Thread-Safety!)
-            def update_gui():
-                if 'status_canvas' in widgets and 'status_circle' in widgets:
-                    color = self.cards.gui.colors['success'] if value else '#cccccc'
-                    try:
-                        widgets['status_canvas'].itemconfig(
-                            widgets['status_circle'],
-                            fill=color
-                        )
-                    except:
-                        pass
-                
-                if 'status_text' in widgets:
-                    text = "EIN" if value else "AUS"
-                    text_color = self.cards.gui.colors['success'] if value else self.cards.gui.colors['text_light']
-                    try:
-                        widgets['status_text'].config(text=text, fg=text_color)
-                    except:
-                        pass
-                
-                # Card-Border wie in v1.2
-                if 'frame' in widgets:
-                    try:
-                        widgets['frame'].config(
-                            borderwidth=2 if value else 1
-                        )
-                    except:
-                        pass
-            
-            # Führe im Main-Thread aus
-            try:
-                self.cards.gui.root.after(0, update_gui)
-            except:
-                pass
-    
-    def _update_temperature_card(self, widgets: Dict, data: Dict):
-        """Aktualisiert Temperature-Card"""
-        variable = data.get('variable')
-        if not variable:
-            return
-        
-        # Lese Temperatur
-        try:
-            value = self.plc.read_by_name(variable, pyads.PLCTYPE_REAL)
-        except:
-            value = None
-        
-        if value is not None and 'temp_label' in widgets:
-            # Einheit
-            unit = data.get('unit', 'celsius')
-            if unit == 'fahrenheit':
-                value = value * 9/5 + 32
-                symbol = "°F"
-            else:
-                symbol = "°C"
-            
-            # Farbe basierend auf Temperatur
-            if value < 15:
-                color = '#2196F3'
-            elif value < 25:
-                color = '#4CAF50'
-            else:
-                color = '#FF9800'
-            
-            def update_gui():
-                try:
-                    widgets['temp_label'].config(text=f"{value:.1f}{symbol}", fg=color)
-                except:
-                    pass
-            
-            try:
-                self.cards.gui.root.after(0, update_gui)
-            except:
-                pass
-    
-    def _update_gauge_card(self, widgets: Dict, data: Dict):
-        """Aktualisiert Gauge-Card"""
-        variable = data.get('variable')
-        if not variable:
-            return
-        
-        # Bestimme Typ
-        var_type = data.get('var_type', 'REAL')
-        if var_type == 'REAL':
-            plc_type = pyads.PLCTYPE_REAL
-        elif var_type == 'INT':
-            plc_type = pyads.PLCTYPE_INT
-        else:
-            plc_type = pyads.PLCTYPE_DINT
-        
-        # Lese Wert
-        try:
-            value = self.plc.read_by_name(variable, plc_type)
-        except:
-            value = None
-        
-        if value is not None:
-            min_val = data.get('min_value', 0)
-            max_val = data.get('max_value', 100)
-            unit = data.get('unit', '')
-            
-            # Berechne Prozent
-            if max_val > min_val:
-                percent = ((value - min_val) / (max_val - min_val)) * 100
-                percent = max(0, min(100, percent))
-            else:
-                percent = 0
-            
-            def update_gui():
-                # Update Wert-Label
-                if 'value_label' in widgets:
-                    try:
-                        widgets['value_label'].config(text=f"{value:.1f} {unit}")
-                    except:
-                        pass
-                
-                # Update Balken
-                if 'bar_canvas' in widgets and 'bar' in widgets:
-                    try:
-                        bar_height = int(150 * (percent / 100))
-                        widgets['bar_canvas'].coords(
-                            widgets['bar'],
-                            0, 150 - bar_height, 30, 150
-                        )
-                        
-                        # Farbe basierend auf Prozent
-                        if percent < 33:
-                            color = '#4CAF50'
-                        elif percent < 66:
-                            color = '#FF9800'
-                        else:
-                            color = '#f44336'
-                        
-                        widgets['bar_canvas'].itemconfig(widgets['bar'], fill=color)
-                    except:
-                        pass
-            
-            try:
-                self.cards.gui.root.after(0, update_gui)
-            except:
-                pass
-    
-    def _update_weather_card(self, widgets: Dict, data: Dict):
-        """Aktualisiert Weather-Card"""
-        # Temperatur
-        temp_var = data.get('temp_var')
-        if temp_var:
-            temp = self.plc.read_by_name(temp_var, pyads.PLCTYPE_REAL)
-            if temp is not None and 'temp_label' in widgets:
-                try:
-                    widgets['temp_label'].config(text=f"{temp:.1f}°C")
-                except:
-                    pass
-        
-        # Luftfeuchtigkeit
-        humidity_var = data.get('humidity_var')
-        if humidity_var:
-            humidity = self.plc.read_by_name(humidity_var, pyads.PLCTYPE_REAL)
-            if humidity is not None and 'humidity_label' in widgets:
-                try:
-                    widgets['humidity_label'].config(text=f"{humidity:.0f}%")
-                except:
-                    pass
-        
-        # Wind
-        wind_var = data.get('wind_var')
-        if wind_var:
-            wind = self.plc.read_by_name(wind_var, pyads.PLCTYPE_REAL)
-            if wind is not None and 'wind_label' in widgets:
-                try:
-                    widgets['wind_label'].config(text=f"{wind:.1f} km/h")
-                except:
-                    pass
-    
     def shutdown(self):
-        """Stoppt Update-Loop"""
+        """Cleanup beim Beenden"""
         self.stop()
 
 

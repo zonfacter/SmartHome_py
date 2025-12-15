@@ -1,7 +1,13 @@
 """
 PLC Communication Module
-Version: 1.0.0
+Version: 1.1.0
 Verwaltet ADS-Verbindung zum TwinCAT PLC
+
+🆕 v1.1.0:
+- max_errors erhöht (5 → 20)
+- Reconnect-Cooldown (30s)
+- Besseres Error-Handling
+- Verhindert Reconnect-Spam!
 """
 
 from module_manager import BaseModule
@@ -13,17 +19,22 @@ import time
 
 class PLCCommunication(BaseModule):
     """
-    PLC-Kommunikations-Modul
+    PLC-Kommunikations-Modul v1.1.0
+    
+    ⭐ NEU: Anti-Reconnect-Spam!
+    - max_errors: 5 → 20
+    - Reconnect-Cooldown: 30s
+    - Besseres Logging
     
     Funktionen:
     - Verbindungsaufbau/-verwaltung
     - Lesen/Schreiben von Variablen
-    - Auto-Reconnect
+    - Smart Auto-Reconnect
     - Caching
     """
     
     NAME = "plc_communication"
-    VERSION = "1.0.0"
+    VERSION = "1.1.0"
     DESCRIPTION = "TwinCAT ADS Kommunikation"
     AUTHOR = "TwinCAT Team"
     
@@ -39,13 +50,23 @@ class PLCCommunication(BaseModule):
         }
         self.cache = {}
         self.cache_timeout = 0.1  # 100ms Cache
+        
+        # ⭐ v1.1.0: Verbessertes Error-Handling
         self.consecutive_errors = 0
-        self.max_errors = 5
+        self.max_errors = 20  # ERHÖHT von 5!
+        self.last_reconnect = 0  # Letzter Reconnect-Timestamp
+        self.reconnect_cooldown = 30  # 30s zwischen Reconnects
+        
+        # Statistik
+        self.total_reads = 0
+        self.total_writes = 0
+        self.total_errors = 0
         
     def initialize(self, app_context: Any):
         """Initialisiert PLC-Verbindung"""
         super().initialize(app_context)
         print(f"  ⚡ {self.NAME} v{self.VERSION} initialisiert")
+        print(f"     Max Errors: {self.max_errors}, Reconnect-Cooldown: {self.reconnect_cooldown}s")
     
     def configure(self, ams_net_id: str, port: int = None, timeout: int = 5000):
         """Konfiguriert PLC-Verbindung"""
@@ -88,11 +109,31 @@ class PLCCommunication(BaseModule):
                 pass
     
     def reconnect(self) -> bool:
-        """Versucht Reconnect"""
-        print("  🔄 Versuche PLC-Reconnect...")
+        """
+        Versucht Reconnect
+        
+        ⭐ v1.1.0: Mit Cooldown!
+        """
+        now = time.time()
+        
+        # ⭐ Prüfe Cooldown
+        if now - self.last_reconnect < self.reconnect_cooldown:
+            remaining = int(self.reconnect_cooldown - (now - self.last_reconnect))
+            print(f"  ⏳ Reconnect-Cooldown aktiv ({remaining}s verbleibend)")
+            return False
+        
+        print(f"  🔄 Versuche PLC-Reconnect... (Fehler: {self.consecutive_errors}/{self.max_errors})")
+        
+        self.last_reconnect = now
         self.disconnect()
         time.sleep(1)
-        return self.connect()
+        
+        success = self.connect()
+        
+        if success:
+            print(f"  ✅ Reconnect erfolgreich! (Stats: {self.total_reads} reads, {self.total_errors} errors)")
+        
+        return success
     
     def read_by_name(self, variable: str, plc_type: int, use_cache: bool = True) -> Optional[Any]:
         """
@@ -121,18 +162,33 @@ class PLCCommunication(BaseModule):
             # Cache speichern
             self.cache[variable] = (value, time.time())
             
-            # Reset Fehler-Counter
-            self.consecutive_errors = 0
+            # ⭐ Reset Fehler-Counter bei Erfolg
+            if self.consecutive_errors > 0:
+                self.consecutive_errors = 0
             
+            self.total_reads += 1
             return value
             
         except Exception as e:
             self.consecutive_errors += 1
+            self.total_errors += 1
             
+            # ⭐ DEBUG: Logge fehlerhafte Variablen (nur erste 3 mal)
+            if self.consecutive_errors <= 3:
+                print(f"  ⚠️  Read-Fehler [{self.consecutive_errors}/{self.max_errors}]: {variable} → {e}")
+            
+            # ⭐ Nur bei schweren Fehlern reconnecten
             if self.consecutive_errors >= self.max_errors:
                 if self.config['auto_reconnect']:
-                    threading.Thread(target=self.reconnect, daemon=True).start()
+                    # Prüfe ob Reconnect erlaubt (Cooldown)
+                    now = time.time()
+                    if now - self.last_reconnect >= self.reconnect_cooldown:
+                        threading.Thread(target=self.reconnect, daemon=True).start()
+                    else:
+                        # Cooldown aktiv, reset Error-Counter um weitere Reconnects zu vermeiden
+                        self.consecutive_errors = self.max_errors - 5
             
+            # Stille Fehler (kein Print für jede fehlerhafte Variable)
             return None
     
     def write_by_name(self, variable: str, value: Any, plc_type: int) -> bool:
@@ -157,11 +213,17 @@ class PLCCommunication(BaseModule):
             if variable in self.cache:
                 del self.cache[variable]
             
-            self.consecutive_errors = 0
+            # ⭐ Reset Fehler-Counter bei Erfolg
+            if self.consecutive_errors > 0:
+                self.consecutive_errors = 0
+            
+            self.total_writes += 1
             return True
             
         except Exception as e:
             self.consecutive_errors += 1
+            self.total_errors += 1
+            print(f"  ⚠️  Write-Fehler {variable}: {e}")
             return False
     
     def toggle_bool(self, variable: str) -> bool:
@@ -189,20 +251,37 @@ class PLCCommunication(BaseModule):
         return True
     
     def get_connection_status(self) -> dict:
-        """Gibt Verbindungs-Status zurück"""
+        """
+        Gibt Verbindungs-Status zurück
+        
+        ⭐ v1.1.0: Erweiterte Statistik
+        """
         return {
             'connected': self.connected,
             'ams_net_id': self.config['ams_net_id'],
             'consecutive_errors': self.consecutive_errors,
-            'cached_variables': len(self.cache)
+            'max_errors': self.max_errors,
+            'cached_variables': len(self.cache),
+            'total_reads': self.total_reads,
+            'total_writes': self.total_writes,
+            'total_errors': self.total_errors,
+            'error_rate': f"{(self.total_errors / max(self.total_reads, 1) * 100):.1f}%"
         }
     
     def clear_cache(self):
         """Leert Cache"""
         self.cache.clear()
     
+    def reset_statistics(self):
+        """⭐ v1.1.0: Reset Statistik"""
+        self.total_reads = 0
+        self.total_writes = 0
+        self.total_errors = 0
+        self.consecutive_errors = 0
+    
     def shutdown(self):
         """Beendet Verbindung"""
+        print(f"  📊 PLC-Statistik: {self.total_reads} reads, {self.total_writes} writes, {self.total_errors} errors")
         self.disconnect()
 
 

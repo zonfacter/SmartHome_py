@@ -1,17 +1,22 @@
 """
-Status Bar Module
-Version: 2.0.0
-Erweiterte Statusleiste mit PLC-Status, Uhrzeit, Sonnen-/Mondinfo
+Status Bar Module v2.1.0
+Erweiterte Statusleiste mit Fehler-Anzeige
 
 📁 SPEICHERORT: modules/ui/status_bar.py
 
+🆕 v2.1.0:
+- Besserer PLC-Status (zeigt Timeouts/Fehler)
+- MQTT-Status
+- Error-Warning bei Netzwerk-Problemen
+- Visuelles Feedback
+
 Features:
-- PLC-Verbindungsstatus (● grün/rot, AMS Net ID)
-- Datum & Uhrzeit (Wochentag, DD.MM.YYYY, HH:MM:SS)
-- Sonnenauf-/untergang (astronomische Berechnung)
-- Mondphase (8 Phasen: 🌑🌒🌓🌔🌕🌖🌗🌘)
+- PLC-Verbindungsstatus mit Error-Details
+- MQTT-Status
+- Datum & Uhrzeit (Live)
+- Sonnenauf-/untergang
+- Mondphase
 - Auto-Update jede Sekunde
-- Zeitzonen-Handling (MEZ/MESZ)
 """
 
 from module_manager import BaseModule
@@ -23,18 +28,24 @@ import math
 
 class StatusBar(BaseModule):
     """
-    Status-Leiste
+    Status-Leiste v2.1.0
+    
+    ⭐ NEU: Error-Warnings!
+    - Zeigt PLC-Timeouts
+    - Zeigt Fehler-Count
+    - Visuelles Warning
     
     Features:
-    - PLC-Verbindungsstatus
+    - PLC-Verbindungsstatus mit Details
+    - MQTT-Status
     - Datum & Uhrzeit
     - Sonnenauf-/untergang
     - Mondphase
     """
     
     NAME = "status_bar"
-    VERSION = "2.0.0"
-    DESCRIPTION = "Erweiterte Statusleiste"
+    VERSION = "2.1.0"
+    DESCRIPTION = "Erweiterte Statusleiste mit Error-Anzeige"
     AUTHOR = "TwinCAT Team"
     DEPENDENCIES = ['gui_manager', 'plc_communication']
     
@@ -42,13 +53,14 @@ class StatusBar(BaseModule):
         super().__init__()
         self.gui = None
         self.plc = None
+        self.mqtt = None
         self.status_frame = None
         self.labels = {}
         self.update_job = None
         
-        # Standort (Haltern am See)
-        self.latitude = 51.7453
-        self.longitude = 7.1836
+        # Standort (Neuenkirchen, NRW)
+        self.latitude = 52.0
+        self.longitude = 7.4
     
     def initialize(self, app_context: Any):
         """Initialisiert Status-Leiste"""
@@ -58,6 +70,7 @@ class StatusBar(BaseModule):
         # Hole Module
         self.gui = app_context.module_manager.get_module('gui_manager')
         self.plc = app_context.module_manager.get_module('plc_communication')
+        self.mqtt = app_context.module_manager.get_module('mqtt_integration')
         
         print(f"  ⚡ {self.NAME} v{self.VERSION} initialisiert")
     
@@ -69,177 +82,260 @@ class StatusBar(BaseModule):
             bg=self.gui.colors['primary'],
             relief=tk.FLAT
         )
+        self.status_frame.pack(side=tk.BOTTOM, fill=tk.X)
         
-        # Links - PLC-Status
+        # ⭐ Links: PLC & MQTT Status
         left_frame = tk.Frame(self.status_frame, bg=self.gui.colors['primary'])
-        left_frame.pack(side=tk.LEFT, padx=15, pady=8)
+        left_frame.pack(side=tk.LEFT, padx=10, pady=5)
+        
+        # PLC-Status
+        self.labels['plc_indicator'] = tk.Label(
+            left_frame,
+            text="●",
+            font=('Segoe UI', 14),
+            bg=self.gui.colors['primary'],
+            fg='red'
+        )
+        self.labels['plc_indicator'].pack(side=tk.LEFT, padx=(0, 5))
         
         self.labels['plc_status'] = tk.Label(
             left_frame,
-            text="●",
-            font=('Segoe UI', 14, 'bold'),
-            bg=self.gui.colors['primary'],
-            fg='lime'
-        )
-        self.labels['plc_status'].pack(side=tk.LEFT)
-        
-        self.labels['plc_text'] = tk.Label(
-            left_frame,
-            text="Verbunden: 192.168.2.162.1.1",
-            font=('Segoe UI', 9),
+            text="PLC: Getrennt",
+            font=('Segoe UI', 10),
             bg=self.gui.colors['primary'],
             fg='white'
         )
-        self.labels['plc_text'].pack(side=tk.LEFT, padx=5)
+        self.labels['plc_status'].pack(side=tk.LEFT, padx=5)
         
-        # Mitte - Datum & Uhrzeit
-        middle_frame = tk.Frame(self.status_frame, bg=self.gui.colors['primary'])
-        middle_frame.pack(side=tk.LEFT, expand=True)
-        
-        self.labels['date'] = tk.Label(
-            middle_frame,
+        # ⭐ Error-Warning (nur bei Problemen)
+        self.labels['error_warning'] = tk.Label(
+            left_frame,
             text="",
             font=('Segoe UI', 10, 'bold'),
             bg=self.gui.colors['primary'],
+            fg='#FF5722'
+        )
+        self.labels['error_warning'].pack(side=tk.LEFT, padx=10)
+        
+        # Separator
+        tk.Label(
+            left_frame,
+            text="|",
+            font=('Segoe UI', 10),
+            bg=self.gui.colors['primary'],
+            fg='white'
+        ).pack(side=tk.LEFT, padx=5)
+        
+        # MQTT-Status
+        self.labels['mqtt_indicator'] = tk.Label(
+            left_frame,
+            text="●",
+            font=('Segoe UI', 14),
+            bg=self.gui.colors['primary'],
+            fg='gray'
+        )
+        self.labels['mqtt_indicator'].pack(side=tk.LEFT, padx=(5, 5))
+        
+        self.labels['mqtt_status'] = tk.Label(
+            left_frame,
+            text="MQTT: --",
+            font=('Segoe UI', 10),
+            bg=self.gui.colors['primary'],
             fg='white'
         )
-        self.labels['date'].pack(side=tk.LEFT, padx=5)
+        self.labels['mqtt_status'].pack(side=tk.LEFT, padx=5)
         
-        self.labels['time'] = tk.Label(
-            middle_frame,
+        # ⭐ Mitte: Datum & Uhrzeit (GRÖẞER!)
+        center_frame = tk.Frame(self.status_frame, bg=self.gui.colors['primary'])
+        center_frame.pack(side=tk.LEFT, expand=True)
+        
+        self.labels['datetime'] = tk.Label(
+            center_frame,
             text="",
             font=('Segoe UI', 12, 'bold'),
             bg=self.gui.colors['primary'],
             fg='white'
         )
-        self.labels['time'].pack(side=tk.LEFT, padx=10)
+        self.labels['datetime'].pack()
         
-        # Rechts - Sonne & Mond
+        # ⭐ Rechts: Sonnen- & Mond-Info
         right_frame = tk.Frame(self.status_frame, bg=self.gui.colors['primary'])
-        right_frame.pack(side=tk.RIGHT, padx=15, pady=8)
+        right_frame.pack(side=tk.RIGHT, padx=10, pady=5)
         
+        # Sonnenzeiten
         self.labels['sun'] = tk.Label(
             right_frame,
             text="☀️ --:-- / --:--",
-            font=('Segoe UI', 9),
+            font=('Segoe UI', 10),
             bg=self.gui.colors['primary'],
             fg='white'
         )
         self.labels['sun'].pack(side=tk.LEFT, padx=10)
         
+        # Mondphase
         self.labels['moon'] = tk.Label(
             right_frame,
-            text="🌙",
+            text="🌑",
             font=('Segoe UI', 14),
             bg=self.gui.colors['primary']
         )
-        self.labels['moon'].pack(side=tk.LEFT)
-        
-        # Start Updates
-        self.start_updates()
+        self.labels['moon'].pack(side=tk.LEFT, padx=5)
         
         return self.status_frame
     
     def start_updates(self):
-        """Startet regelmäßige Updates"""
-        self.update_datetime()
-        self.update_sun_moon()
-        self.update_plc_status()
-        
-        # Update jede Sekunde
-        if self.status_frame:
-            self.update_job = self.status_frame.after(1000, self.start_updates)
+        """Startet Auto-Updates (jede Sekunde)"""
+        self.update_status()
     
-    def update_datetime(self):
-        """Aktualisiert Datum & Uhrzeit"""
-        now = datetime.now()
+    def update_status(self):
+        """Aktualisiert alle Status-Anzeigen"""
+        if not self.status_frame:
+            return
         
-        # Datum
-        weekdays = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
-        weekday = weekdays[now.weekday()]
-        date_str = f"{weekday}, {now.strftime('%d.%m.%Y')}"
+        try:
+            # ⭐ PLC-Status mit Error-Details
+            self._update_plc_status()
+            
+            # ⭐ MQTT-Status
+            self._update_mqtt_status()
+            
+            # Datum & Uhrzeit
+            self._update_datetime()
+            
+            # Sonnenzeiten (alle 10 Minuten)
+            if datetime.now().minute % 10 == 0:
+                self._update_sun_times()
+            
+            # Mondphase (täglich)
+            if datetime.now().hour == 0 and datetime.now().minute == 0:
+                self._update_moon_phase()
         
-        if 'date' in self.labels:
-            self.labels['date'].config(text=date_str)
+        except Exception as e:
+            print(f"  ⚠️  Status-Bar Update-Fehler: {e}")
         
-        # Uhrzeit
-        time_str = now.strftime('%H:%M:%S')
-        if 'time' in self.labels:
-            self.labels['time'].config(text=time_str)
+        # Nächster Update in 1 Sekunde
+        self.update_job = self.status_frame.after(1000, self.update_status)
     
-    def update_plc_status(self):
-        """Aktualisiert PLC-Status"""
+    def _update_plc_status(self):
+        """⭐ v2.1.0: PLC-Status mit Error-Details"""
         if not self.plc:
             return
         
         status = self.plc.get_connection_status()
+        connected = status.get('connected', False)
+        ams_net_id = status.get('ams_net_id', 'N/A')
+        errors = status.get('consecutive_errors', 0)
+        max_errors = status.get('max_errors', 20)
         
-        if status['connected']:
-            color = 'lime'
-            text = f"Verbunden: {status['ams_net_id']}"
+        if connected:
+            # Verbunden
+            self.labels['plc_indicator'].config(fg='#4CAF50')  # Grün
+            
+            # ⭐ Zeige Fehler-Count wenn vorhanden
+            if errors > 0:
+                # Warning
+                self.labels['plc_status'].config(
+                    text=f"PLC: {ams_net_id}",
+                    fg='#FF9800'  # Orange
+                )
+                self.labels['error_warning'].config(
+                    text=f"⚠️ {errors}/{max_errors} Fehler"
+                )
+            else:
+                # Alles OK
+                self.labels['plc_status'].config(
+                    text=f"PLC: {ams_net_id}",
+                    fg='white'
+                )
+                self.labels['error_warning'].config(text="")
         else:
-            color = 'red'
-            text = f"Getrennt: {status['ams_net_id']}"
-        
-        if 'plc_status' in self.labels:
-            self.labels['plc_status'].config(fg=color)
-        
-        if 'plc_text' in self.labels:
-            self.labels['plc_text'].config(text=text)
+            # Getrennt
+            self.labels['plc_indicator'].config(fg='#FF5722')  # Rot
+            self.labels['plc_status'].config(
+                text="PLC: Getrennt",
+                fg='#FF5722'
+            )
+            self.labels['error_warning'].config(
+                text="❌ Keine Verbindung!"
+            )
     
-    def update_sun_moon(self):
-        """Aktualisiert Sonnen- und Mondinfo"""
+    def _update_mqtt_status(self):
+        """⭐ v2.1.0: MQTT-Status"""
+        if not self.mqtt:
+            self.labels['mqtt_indicator'].config(fg='gray')
+            self.labels['mqtt_status'].config(text="MQTT: N/A")
+            return
+        
+        if self.mqtt.connected:
+            broker = self.mqtt.config.get('broker', 'N/A')
+            self.labels['mqtt_indicator'].config(fg='#4CAF50')  # Grün
+            self.labels['mqtt_status'].config(
+                text=f"MQTT: {broker}",
+                fg='white'
+            )
+        else:
+            self.labels['mqtt_indicator'].config(fg='#FF5722')  # Rot
+            self.labels['mqtt_status'].config(
+                text="MQTT: Getrennt",
+                fg='#FF5722'
+            )
+    
+    def _update_datetime(self):
+        """Aktualisiert Datum & Uhrzeit"""
         now = datetime.now()
         
-        # Nur alle 10 Minuten neu berechnen
-        if not hasattr(self, '_last_sun_update') or \
-           (now - self._last_sun_update).seconds > 600:
-            
-            # Sonnenzeiten berechnen
-            sunrise, sunset = self.calculate_sun_times(now)
-            
-            sun_text = f"☀️ {sunrise} / {sunset}"
-            if 'sun' in self.labels:
-                self.labels['sun'].config(text=sun_text)
-            
-            # Mondphase
-            moon_phase = self.get_moon_phase(now)
-            if 'moon' in self.labels:
-                self.labels['moon'].config(text=moon_phase)
-            
-            self._last_sun_update = now
+        # Wochentag auf Deutsch
+        weekdays = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
+        weekday = weekdays[now.weekday()]
+        
+        # Format: Mo, 15.12.2025  20:30:45
+        datetime_str = f"{weekday}, {now.strftime('%d.%m.%Y')}  {now.strftime('%H:%M:%S')}"
+        
+        self.labels['datetime'].config(text=datetime_str)
+    
+    def _update_sun_times(self):
+        """Aktualisiert Sonnenzeiten"""
+        sunrise, sunset = self.calculate_sun_times(datetime.now())
+        self.labels['sun'].config(text=f"☀️ {sunrise} / {sunset}")
+    
+    def _update_moon_phase(self):
+        """Aktualisiert Mondphase"""
+        moon_emoji = self.get_moon_phase(datetime.now())
+        self.labels['moon'].config(text=moon_emoji)
     
     def calculate_sun_times(self, date: datetime) -> tuple:
         """
-        Berechnet Sonnenauf- und -untergang (vereinfacht)
-        Basiert auf astronomischen Formeln
+        Berechnet Sonnenauf- und -untergang
+        
+        Vereinfachte Berechnung für Mitteleuropa
         """
-        # Tag des Jahres
+        # Tag im Jahr
         day_of_year = date.timetuple().tm_yday
         
-        # Deklination der Sonne
-        declination = -23.45 * math.cos(math.radians(360/365 * (day_of_year + 10)))
+        # Sonnendeklination (approximiert)
+        declination = 23.45 * math.sin(math.radians((360/365) * (day_of_year - 81)))
         
-        # Stundenwinkel
+        # Stundenwinkel für Sonnenauf-/untergang
         lat_rad = math.radians(self.latitude)
         dec_rad = math.radians(declination)
         
-        try:
-            cos_hour_angle = (-math.tan(lat_rad) * math.tan(dec_rad))
-            cos_hour_angle = max(-1, min(1, cos_hour_angle))  # Clamp
-            hour_angle = math.degrees(math.acos(cos_hour_angle))
-        except:
-            hour_angle = 90
+        cos_hour_angle = (-math.tan(lat_rad) * math.tan(dec_rad))
         
-        # Sonnenaufgang und -untergang in Dezimalstunden
-        sunrise_decimal = 12 - hour_angle / 15 - self.longitude / 15
-        sunset_decimal = 12 + hour_angle / 15 - self.longitude / 15
+        # Prüfe ob Sonne auf-/untergeht
+        if cos_hour_angle < -1:
+            # Polartag
+            return "Polartag", "Polartag"
+        elif cos_hour_angle > 1:
+            # Polarnacht
+            return "Polarnacht", "Polarnacht"
         
-        # Zeitzone +1 (MEZ)
-        sunrise_decimal += 1
-        sunset_decimal += 1
+        hour_angle = math.degrees(math.acos(cos_hour_angle))
         
-        # Sommerzeit berücksichtigen (März-Oktober)
+        # Sonnenaufgang/-untergang (in Dezimalstunden)
+        sunrise_decimal = 12 - (hour_angle / 15) - (self.longitude / 15)
+        sunset_decimal = 12 + (hour_angle / 15) - (self.longitude / 15)
+        
+        # Sommerzeit-Korrektur (März-Oktober)
         if 3 <= date.month <= 10:
             sunrise_decimal += 1
             sunset_decimal += 1
@@ -259,11 +355,6 @@ class StatusBar(BaseModule):
     def get_moon_phase(self, date: datetime) -> str:
         """Berechnet Mondphase"""
         # Vereinfachte Berechnung
-        year = date.year
-        month = date.month
-        day = date.day
-        
-        # Mondzyklus: ~29.53 Tage
         known_new_moon = datetime(2000, 1, 6, 18, 14)
         days_since = (date - known_new_moon).days
         moon_age = days_since % 29.53

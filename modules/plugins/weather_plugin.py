@@ -1,171 +1,121 @@
 """
-Weather Plugin
-Version: 1.0.0
-Wetter-Anzeige mit mehreren Werten
+Weather Plugin v2.0.0
+Mit JSON-Schema für dynamische Eingabemaske
 """
 
-from typing import Dict, Any
+from module_manager import BaseModule
+from typing import Any, Dict
 import tkinter as tk
 
 
-class WeatherPlugin:
-    """Weather Card Plugin"""
+class Weather(BaseModule):
+    """Weather Plugin mit Schema"""
     
     NAME = "weather"
-    VERSION = "1.0.0"
-    DESCRIPTION = "Wetter-Anzeige (Temp, Feuchte, Wind)"
-    ICON = "🌤️"
+    VERSION = "2.0.0"
+    DESCRIPTION = "Wetter-Anzeige mit Schema"
+    AUTHOR = "TwinCAT Team"
+    
+    # ⭐ SCHEMA für Card-Editor
+    SCHEMA = {
+        "location": {
+            "type": "string",
+            "label": "Standort",
+            "description": "Standort für Wetterdaten",
+            "placeholder": "z.B. Haltern am See",
+            "default": "Haltern am See"
+        },
+        "temp_variable": {
+            "type": "plc_variable",
+            "label": "Temperatur-Variable (optional)",
+            "description": "PLC-Variable für Temperatur",
+            "required": False,
+            "plc_type": "REAL",
+            "placeholder": "z.B. MAIN.fAussenTemp"
+        },
+        "humidity_variable": {
+            "type": "plc_variable",
+            "label": "Luftfeuchte-Variable (optional)",
+            "description": "PLC-Variable für Luftfeuchtigkeit",
+            "required": False,
+            "plc_type": "REAL",
+            "placeholder": "z.B. MAIN.fAussenFeuchte"
+        },
+        "wind_variable": {
+            "type": "plc_variable",
+            "label": "Wind-Variable (optional)",
+            "description": "PLC-Variable für Windgeschwindigkeit",
+            "required": False,
+            "plc_type": "REAL",
+            "placeholder": "z.B. MAIN.fWindSpeed"
+        },
+        "api_key": {
+            "type": "password",
+            "label": "API-Key (optional)",
+            "description": "OpenWeatherMap API-Key für Live-Daten",
+            "required": False,
+            "placeholder": "Leer lassen für PLC-Daten"
+        },
+        "update_interval": {
+            "type": "integer",
+            "label": "Update-Intervall (Minuten)",
+            "description": "Wie oft Live-Daten aktualisiert werden",
+            "min": 5,
+            "max": 60,
+            "default": 15,
+            "step": 5
+        }
+    }
     
     def __init__(self):
+        super().__init__()
         self.plc = None
     
-    def initialize(self, plc_module):
+    def initialize(self, app_context: Any):
         """Initialisiert Plugin"""
-        self.plc = plc_module
+        super().initialize(app_context)
+        print(f"  ⚡ {self.NAME} v{self.VERSION} initialisiert")
     
-    def create_card(self, parent: tk.Widget, card_id: str, config: Dict, colors: Dict) -> Dict:
-        """Erstellt Weather-Card"""
-        # Card Frame
-        card = tk.Frame(parent, bg=colors['card_bg'], relief=tk.RAISED, borderwidth=1)
+    def create_card_content(self, parent: tk.Widget, card_data: dict):
+        """Erstellt Card-Inhalt"""
+        icon = card_data.get('icon', '🌤️')
+        name = card_data.get('name', 'Wetter')
+        location = card_data.get('location', 'N/A')
         
-        # Content
-        content = tk.Frame(card, bg=colors['card_bg'])
-        content.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        tk.Label(
+            parent,
+            text=f"{icon} {name}",
+            font=('Segoe UI', 14, 'bold'),
+            bg='#f0f0f0'
+        ).pack(pady=10)
         
-        # Header
-        header = tk.Frame(content, bg=colors['card_bg'])
-        header.pack(fill=tk.X)
+        tk.Label(
+            parent,
+            text=location,
+            font=('Segoe UI', 10),
+            bg='#f0f0f0',
+            fg='gray'
+        ).pack()
         
-        # Icon
-        icon = tk.Label(header, text=config.get('icon', self.ICON),
-                       font=('Segoe UI', 32), bg=colors['card_bg'])
-        icon.pack(side=tk.LEFT)
-        
-        # Name/Location
-        location = config.get('location', 'Wetter')
-        name = tk.Label(header, text=location,
-                       font=('Segoe UI', 14, 'bold'),
-                       bg=colors['card_bg'], fg=colors['text_dark'])
-        name.pack(side=tk.LEFT, padx=15)
-        
-        # Wetter-Daten Container
-        data_frame = tk.Frame(content, bg=colors['card_bg'])
-        data_frame.pack(pady=20)
-        
-        # Temperatur
-        temp_frame = tk.Frame(data_frame, bg=colors['card_bg'])
-        temp_frame.pack(pady=5)
-        
-        tk.Label(temp_frame, text="🌡️",
-                font=('Segoe UI', 20), bg=colors['card_bg']).pack(side=tk.LEFT)
-        
-        temp_label = tk.Label(temp_frame, text="--.-°C",
-                             font=('Segoe UI', 24, 'bold'),
-                             bg=colors['card_bg'], fg=colors['primary'])
-        temp_label.pack(side=tk.LEFT, padx=10)
-        
-        # Luftfeuchtigkeit
-        humidity_frame = tk.Frame(data_frame, bg=colors['card_bg'])
-        humidity_frame.pack(pady=5)
-        
-        tk.Label(humidity_frame, text="💧",
-                font=('Segoe UI', 20), bg=colors['card_bg']).pack(side=tk.LEFT)
-        
-        humidity_label = tk.Label(humidity_frame, text="--%",
-                                  font=('Segoe UI', 18),
-                                  bg=colors['card_bg'], fg=colors['text_dark'])
-        humidity_label.pack(side=tk.LEFT, padx=10)
-        
-        # Wind (optional)
-        wind_frame = tk.Frame(data_frame, bg=colors['card_bg'])
-        wind_frame.pack(pady=5)
-        
-        tk.Label(wind_frame, text="💨",
-                font=('Segoe UI', 20), bg=colors['card_bg']).pack(side=tk.LEFT)
-        
-        wind_label = tk.Label(wind_frame, text="-- km/h",
-                             font=('Segoe UI', 18),
-                             bg=colors['card_bg'], fg=colors['text_dark'])
-        wind_label.pack(side=tk.LEFT, padx=10)
-        
-        return {
-            'frame': card,
-            'temp_label': temp_label,
-            'humidity_label': humidity_label,
-            'wind_label': wind_label
-        }
+        # Wetter-Info
+        tk.Label(
+            parent,
+            text="--.- °C | --% | -- km/h",
+            font=('Segoe UI', 12),
+            bg='#f0f0f0'
+        ).pack(pady=10)
     
-    def update_display(self, widgets: Dict, values: Dict, colors: Dict):
-        """
-        Aktualisiert Anzeige
-        
-        Args:
-            values: Dict mit 'temp', 'humidity', 'wind'
-        """
-        if not isinstance(values, dict):
-            return
-        
-        # Temperatur
-        temp = values.get('temp')
-        if temp is not None:
-            widgets['temp_label'].config(text=f"{temp:.1f}°C")
-        
-        # Luftfeuchtigkeit
-        humidity = values.get('humidity')
-        if humidity is not None:
-            widgets['humidity_label'].config(text=f"{humidity:.0f}%")
-        
-        # Wind
-        wind = values.get('wind')
-        if wind is not None:
-            widgets['wind_label'].config(text=f"{wind:.1f} km/h")
-    
-    def read_values(self, config: Dict) -> Dict:
-        """Liest Wetter-Werte vom PLC"""
-        import pyads
-        
-        values = {}
-        
-        if self.plc:
-            # Temperatur
-            temp_var = config.get('temp_var')
-            if temp_var:
-                temp = self.plc.read_by_name(temp_var, pyads.PLCTYPE_REAL)
-                if temp is not None:
-                    values['temp'] = temp
-            
-            # Luftfeuchtigkeit
-            humidity_var = config.get('humidity_var')
-            if humidity_var:
-                humidity = self.plc.read_by_name(humidity_var, pyads.PLCTYPE_REAL)
-                if humidity is not None:
-                    values['humidity'] = humidity
-            
-            # Wind (optional)
-            wind_var = config.get('wind_var')
-            if wind_var:
-                wind = self.plc.read_by_name(wind_var, pyads.PLCTYPE_REAL)
-                if wind is not None:
-                    values['wind'] = wind
-        
-        return values
-    
-    def get_config_fields(self) -> list:
-        """Gibt Konfigurations-Felder zurück"""
-        return [
-            {'name': 'location', 'type': 'text', 'label': 'Standort'},
-            {'name': 'temp_var', 'type': 'variable', 'label': 'Temperatur Variable'},
-            {'name': 'humidity_var', 'type': 'variable', 'label': 'Luftfeuchte Variable'},
-            {'name': 'wind_var', 'type': 'variable', 'label': 'Wind Variable (optional)'},
-            {'name': 'api_key', 'type': 'password', 'label': 'API Key (optional)'}
-        ]
+    def get_schema(self) -> Dict:
+        """Gibt Schema zurück"""
+        return self.SCHEMA
 
 
 def register(module_manager):
-    """Registriert Plugin"""
+    """Registriert Modul"""
     module_manager.register_module(
-        WeatherPlugin.NAME,
-        WeatherPlugin.VERSION,
-        WeatherPlugin.DESCRIPTION,
-        WeatherPlugin
+        Weather.NAME,
+        Weather.VERSION,
+        Weather.DESCRIPTION,
+        Weather,
+        author=Weather.AUTHOR
     )

@@ -1,113 +1,144 @@
 """
-Temperature Plugin
-Version: 1.0.0
-Temperatur-Anzeige Plugin
+Temperature Plugin v2.1.0
+Mit Live-Update vom PLC
 """
 
-from typing import Dict, Any
+from module_manager import BaseModule
+from typing import Any, Dict
 import tkinter as tk
 
 
-class TemperaturePlugin:
-    """Temperature Card Plugin"""
+class Temperature(BaseModule):
+    """Temperature Plugin mit Live-Update"""
     
     NAME = "temperature"
-    VERSION = "1.0.0"
-    DESCRIPTION = "Temperatur-Anzeige"
-    ICON = "🌡️"
+    VERSION = "2.1.0"
+    DESCRIPTION = "Temperatur-Anzeige mit Live-Update"
+    AUTHOR = "TwinCAT Team"
+    
+    # Schema (unverändert)
+    SCHEMA = {
+        "variable": {
+            "type": "plc_variable",
+            "label": "Temperatur-Variable",
+            "description": "PLC-Variable mit Temperaturwert",
+            "required": True,
+            "plc_type": "REAL",
+            "placeholder": "z.B. MAIN.fTemperatur"
+        },
+        "unit": {
+            "type": "choice",
+            "label": "Einheit",
+            "description": "Temperatur-Einheit",
+            "choices": [
+                {"value": "°C", "label": "Celsius (°C)"},
+                {"value": "°F", "label": "Fahrenheit (°F)"},
+                {"value": "K", "label": "Kelvin (K)"}
+            ],
+            "default": "°C"
+        },
+        "decimals": {
+            "type": "integer",
+            "label": "Nachkommastellen",
+            "description": "Anzahl Nachkommastellen",
+            "min": 0,
+            "max": 3,
+            "default": 1,
+            "step": 1
+        }
+    }
     
     def __init__(self):
+        super().__init__()
         self.plc = None
+        self.card_widgets = {}
     
-    def initialize(self, plc_module):
+    def initialize(self, app_context: Any):
         """Initialisiert Plugin"""
-        self.plc = plc_module
+        super().initialize(app_context)
+        print(f"  ⚡ {self.NAME} v{self.VERSION} initialisiert")
     
-    def create_card(self, parent: tk.Widget, card_id: str, config: Dict, colors: Dict) -> Dict:
-        """Erstellt Temperature-Card"""
-        # Card Frame
-        card = tk.Frame(parent, bg=colors['card_bg'], relief=tk.RAISED, borderwidth=1)
+    def create_card_content(self, parent: tk.Widget, card_data: dict):
+        """Erstellt Card-Inhalt"""
+        card_id = card_data.get('_card_id', 'unknown')
         
-        # Content
-        content = tk.Frame(card, bg=colors['card_bg'])
-        content.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        icon = card_data.get('icon', '🌡️')
+        name = card_data.get('name', 'Temperatur')
+        unit = card_data.get('unit', '°C')
         
-        # Header
-        header = tk.Frame(content, bg=colors['card_bg'])
-        header.pack(fill=tk.X)
+        tk.Label(
+            parent,
+            text=f"{icon} {name}",
+            font=('Segoe UI', 14, 'bold'),
+            bg='#f0f0f0'
+        ).pack(pady=10)
         
-        # Icon
-        icon = tk.Label(header, text=config.get('icon', self.ICON),
-                       font=('Segoe UI', 32), bg=colors['card_bg'])
-        icon.pack(side=tk.LEFT)
+        # ⭐ Temperatur-Anzeige mit Live-Update
+        temp_label = tk.Label(
+            parent,
+            text=f"--.- {unit}",
+            font=('Segoe UI', 24, 'bold'),
+            bg='#f0f0f0',
+            fg='#2196F3'
+        )
+        temp_label.pack(pady=10)
         
-        # Name
-        name = tk.Label(header, text=config.get('name', 'Temperature'),
-                       font=('Segoe UI', 14, 'bold'),
-                       bg=colors['card_bg'], fg=colors['text_dark'])
-        name.pack(side=tk.LEFT, padx=15)
-        
-        # Temperatur-Anzeige
-        temp_label = tk.Label(content, text="--.-°C",
-                             font=('Segoe UI', 48, 'bold'),
-                             bg=colors['card_bg'], fg=colors['primary'])
-        temp_label.pack(pady=30)
-        
-        # Einheit
-        unit = config.get('unit', 'celsius')
-        unit_symbol = "°C" if unit == 'celsius' else "°F"
-        
-        unit_label = tk.Label(content, text=f"Einheit: {unit_symbol}",
-                             font=('Segoe UI', 10),
-                             bg=colors['card_bg'], fg=colors['text_light'])
-        unit_label.pack()
-        
-        return {
-            'frame': card,
-            'temp_label': temp_label,
-            'unit': unit
+        # Speichere für Update
+        self.card_widgets[card_id] = {
+            'label': temp_label,
+            'variable': card_data.get('variable'),
+            'unit': unit,
+            'decimals': card_data.get('decimals', 1)
         }
     
-    def update_display(self, widgets: Dict, value: Any, colors: Dict):
-        """Aktualisiert Anzeige"""
-        if value is None:
-            widgets['temp_label'].config(text="--.-°C")
+    def update_card(self, card_id: str, card_data: dict):
+        """Aktualisiert Temperatur-Anzeige"""
+        if card_id not in self.card_widgets:
             return
         
-        # Einheit
-        unit = widgets.get('unit', 'celsius')
+        widgets = self.card_widgets[card_id]
+        variable = widgets['variable']
+        label = widgets['label']
+        unit = widgets['unit']
+        decimals = widgets['decimals']
         
-        # Konvertiere wenn nötig
-        if unit == 'fahrenheit':
-            value = value * 9/5 + 32
-            symbol = "°F"
-        else:
-            symbol = "°C"
+        if not variable or not self.plc or not self.plc.connected:
+            label.config(text=f"--.- {unit}", fg='gray')
+            return
         
-        # Farbe basierend auf Temperatur
-        if value < 15:
-            color = '#2196F3'  # Blau
-        elif value < 25:
-            color = '#4CAF50'  # Grün
-        else:
-            color = '#FF9800'  # Orange
+        try:
+            import pyads
+            value = self.plc.read_by_name(variable, pyads.PLCTYPE_REAL)
+            formatted = f"{value:.{decimals}f} {unit}"
+            
+            # Farbe basierend auf Temperatur
+            if value < 15:
+                color = '#2196F3'  # Blau (kalt)
+            elif value < 25:
+                color = '#4CAF50'  # Grün (angenehm)
+            else:
+                color = '#FF5722'  # Rot (warm)
+            
+            label.config(text=formatted, fg=color)
         
-        widgets['temp_label'].config(text=f"{value:.1f}{symbol}", fg=color)
+        except Exception as e:
+            label.config(text=f"Fehler", fg='#FF5722')
     
-    def get_config_fields(self) -> list:
-        """Gibt Konfigurations-Felder zurück"""
-        return [
-            {'name': 'variable', 'type': 'variable', 'label': 'Temperatur Variable'},
-            {'name': 'unit', 'type': 'choice', 'label': 'Einheit',
-             'choices': ['celsius', 'fahrenheit']}
-        ]
+    def get_schema(self) -> Dict:
+        """Gibt Schema zurück"""
+        return self.SCHEMA
+    
+    def shutdown(self):
+        """Cleanup"""
+        self.card_widgets.clear()
 
 
 def register(module_manager):
-    """Registriert Plugin"""
+    """Registriert Modul"""
     module_manager.register_module(
-        TemperaturePlugin.NAME,
-        TemperaturePlugin.VERSION,
-        TemperaturePlugin.DESCRIPTION,
-        TemperaturePlugin
+        Temperature.NAME,
+        Temperature.VERSION,
+        Temperature.DESCRIPTION,
+        Temperature,
+        author=Temperature.AUTHOR
     )
