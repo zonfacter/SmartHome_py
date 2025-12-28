@@ -190,6 +190,26 @@ class ModuleManager:
         
         print(f"✓ Auto-Discovery: {loaded_count} Module gefunden")
     
+    def get_all_modules(self) -> Dict[str, Any]:
+        """
+        Gibt alle Module zurück
+        
+        Returns:
+            Dict mit module_name -> ModuleInfo (mit module_object Attribut)
+        """
+        result = {}
+        for name, info in self.modules.items():
+            # Erstelle ein Objekt das module_object enthält
+            class ModuleWrapper:
+                def __init__(self, module_info):
+                    self.module_object = module_info.instance
+                    self.name = module_info.name
+                    self.version = module_info.version
+                    self.status = module_info.status
+            
+            result[name] = ModuleWrapper(info)
+        return result
+    
     def get_module(self, name: str) -> Optional[Any]:
         """Holt Modul-Instanz"""
         if name not in self.modules:
