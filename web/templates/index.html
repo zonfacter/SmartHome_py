@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>SmartHome OS v4.5</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🏠</text></svg>">
+
+    <!-- Tailwind CSS (Dev Mode - für Production siehe Dokumentation) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Unterdrücke Tailwind CDN Warnung (nur für Dev-Modus)
+        tailwind.config = {
+            darkMode: 'class'
+        };
+    </script>
+
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+    <!-- Icons (Lucide) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/css/main.css">
+
+    <style>
+        .page { display: none; }
+        .page.active { display: block; }
+    </style>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
+
+    <!-- ================================================================
+         SIDEBAR (Desktop/Tablet)
+         ================================================================ -->
+    <aside id="sidebar" class="fixed left-0 top-0 bottom-0 w-64 bg-white dark:bg-gray-800 shadow-lg z-50 transform transition-transform duration-300 md:translate-x-0 -translate-x-full">
+        <!-- Logo -->
+        <div class="p-6 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                    <i data-lucide="home" class="w-6 h-6 text-white"></i>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold text-gray-900 dark:text-white">SmartHome</h1>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">OS v4.5</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Navigation -->
+        <nav class="p-4 space-y-1">
+            <a href="#" data-page="dashboard" class="nav-link active flex items-center space-x-3 px-4 py-3 rounded-lg">
+                <i data-lucide="layout-dashboard" class="w-5 h-5"></i>
+                <span>Dashboard</span>
+            </a>
+            <a href="#" data-page="lighting" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg">
+                <i data-lucide="lightbulb" class="w-5 h-5"></i>
+                <span>Beleuchtung</span>
+            </a>
+            <a href="#" data-page="climate" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg">
+                <i data-lucide="thermometer" class="w-5 h-5"></i>
+                <span>Klima</span>
+            </a>
+            <a href="#" data-page="energy" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg">
+                <i data-lucide="zap" class="w-5 h-5"></i>
+                <span>Energie</span>
+            </a>
+            <a href="#" data-page="cameras" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg">
+                <i data-lucide="video" class="w-5 h-5"></i>
+                <span>Kameras</span>
+            </a>
+            <a href="#" data-page="setup" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg">
+                <i data-lucide="settings" class="w-5 h-5"></i>
+                <span>Setup</span>
+            </a>
+            <a href="#" data-page="widgets" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg">
+                <i data-lucide="layout" class="w-5 h-5"></i>
+                <span>Widgets</span>
+            </a>
+            <a href="#" data-page="monitor" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg">
+                <i data-lucide="activity" class="w-5 h-5"></i>
+                <span>Monitor</span>
+            </a>
+            <a href="#" data-page="admin" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg">
+                <i data-lucide="shield" class="w-5 h-5"></i>
+                <span>Admin</span>
+            </a>
+        </nav>
+
+        <!-- Footer -->
+        <div class="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200 dark:border-gray-700">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                    <div id="sidebar-status" class="w-2 h-2 rounded-full bg-gray-400"></div>
+                    <span class="text-xs text-gray-600 dark:text-gray-400">Getrennt</span>
+                </div>
+                <button id="theme-toggle-sidebar" class="theme-toggle p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                    <i data-lucide="sun" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Overlay für Mobile -->
+    <div id="sidebar-overlay" class="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden hidden"></div>
+
+    <!-- ================================================================
+         MAIN CONTENT
+         ================================================================ -->
+    <main class="md:ml-64 min-h-screen pb-16 md:pb-0">
+
+        <!-- Header (Mobile) -->
+        <header class="sticky top-0 bg-white dark:bg-gray-800 shadow-sm z-30 md:hidden">
+            <div class="flex items-center justify-between p-4">
+                <button id="hamburger-btn" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                    <i data-lucide="menu" class="w-6 h-6"></i>
+                </button>
+                <h2 id="page-title-mobile" class="font-semibold text-gray-900 dark:text-white">Dashboard</h2>
+                <button id="theme-toggle-mobile" class="theme-toggle p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                    <i data-lucide="sun" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Dashboard Page -->
+        <div id="dashboard-page" class="page page-container active p-6">
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 hidden md:block">Dashboard</h1>
+
+            <!-- Stats Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-sm font-medium text-gray-600 dark:text-gray-400">Temperatur Innen</h3>
+                        <i data-lucide="thermometer" class="w-5 h-5 text-red-500"></i>
+                    </div>
+                    <p id="temp-value" class="text-3xl font-bold text-gray-900 dark:text-white">--°C</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Wohnzimmer</p>
+                </div>
+
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-sm font-medium text-gray-600 dark:text-gray-400">PV-Leistung</h3>
+                        <i data-lucide="sun" class="w-5 h-5 text-yellow-500"></i>
+                    </div>
+                    <p id="pv-value" class="text-3xl font-bold text-gray-900 dark:text-white">--kW</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Aktuell</p>
+                </div>
+
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-sm font-medium text-gray-600 dark:text-gray-400">Batterie</h3>
+                        <i data-lucide="battery" class="w-5 h-5 text-green-500"></i>
+                    </div>
+                    <p id="battery-value" class="text-3xl font-bold text-gray-900 dark:text-white">--%</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Ladestand</p>
+                </div>
+
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-sm font-medium text-gray-600 dark:text-gray-400">Aktive Lichter</h3>
+                        <i data-lucide="lightbulb" class="w-5 h-5 text-blue-500"></i>
+                    </div>
+                    <p id="active-lights" class="text-3xl font-bold text-gray-900 dark:text-white">--</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">von gesamt</p>
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Schnellzugriff</h2>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <button class="flex flex-col items-center justify-center p-4 rounded-lg border-2 border-gray-200 dark:border-gray-700 hover:border-blue-500 transition">
+                        <i data-lucide="lightbulb" class="w-8 h-8 mb-2"></i>
+                        <span class="text-sm">Alle Lichter</span>
+                    </button>
+                    <button class="flex flex-col items-center justify-center p-4 rounded-lg border-2 border-gray-200 dark:border-gray-700 hover:border-blue-500 transition">
+                        <i data-lucide="thermometer" class="w-8 h-8 mb-2"></i>
+                        <span class="text-sm">Heizung</span>
+                    </button>
+                    <button class="flex flex-col items-center justify-center p-4 rounded-lg border-2 border-gray-200 dark:border-gray-700 hover:border-blue-500 transition">
+                        <i data-lucide="shield" class="w-8 h-8 mb-2"></i>
+                        <span class="text-sm">Alarm</span>
+                    </button>
+                    <button class="flex flex-col items-center justify-center p-4 rounded-lg border-2 border-gray-200 dark:border-gray-700 hover:border-blue-500 transition">
+                        <i data-lucide="video" class="w-8 h-8 mb-2"></i>
+                        <span class="text-sm">Kameras</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Lighting Page -->
+        <div id="lighting-page" class="page page-container p-6">
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 hidden md:block">Beleuchtung</h1>
+            <div id="lighting-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <p class="text-gray-500">Lade Lichter...</p>
+            </div>
+        </div>
+
+        <!-- Climate Page -->
+        <div id="climate-page" class="page page-container p-6">
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 hidden md:block">Klima</h1>
+            <div id="climate-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <p class="text-gray-500">Lade Klimadaten...</p>
+            </div>
+        </div>
+
+        <!-- Energy Page -->
+        <div id="energy-page" class="page page-container p-6">
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 hidden md:block">Energie</h1>
+            <div id="energy-grid" class="space-y-4">
+                <p class="text-gray-500">Lade Energiedaten...</p>
+            </div>
+        </div>
+
+        <!-- Cameras Page -->
+        <div id="cameras-page" class="page page-container p-6">
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 hidden md:block">Kameras</h1>
+
+            <!-- RTSP Stream Konfiguration -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">RTSP-Stream Konfiguration</h2>
+
+                <div class="space-y-4">
+                    <!-- Stream hinzufügen -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <input type="text" id="camera-name" placeholder="Kamera-Name (z.B. Eingang)"
+                            class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        <input type="text" id="camera-rtsp-url" placeholder="rtsp://... oder https://...video.mjpg"
+                            class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        <button id="add-camera-btn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                            <i data-lucide="plus" class="w-4 h-4 inline mr-1"></i> Hinzufügen
+                        </button>
+                    </div>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Unterstützt RTSP und MJPEG/HTTP Streams</p>
+
+                    <!-- Gespeicherte Streams -->
+                    <div id="camera-list" class="space-y-2">
+                        <p class="text-sm text-gray-500">Keine Kameras konfiguriert</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live-Streams -->
+            <div id="cameras-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <p class="text-gray-500">Kameras werden nach Konfiguration hier angezeigt...</p>
+            </div>
+        </div>
+
+        <!-- Setup Page -->
+        <div id="setup-page" class="page page-container p-6">
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 hidden md:block">Setup</h1>
+
+            <!-- PLC Setup -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">PLC-Konfiguration</h2>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">AMS Net ID</label>
+                        <input type="text" id="plc-ams-id" placeholder="192.168.1.100.1.1" value="192.168.1.100.1.1"
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            AMS Port
+                            <span class="text-xs text-gray-500">(TC3: 851, TC2: 801)</span>
+                        </label>
+                        <input type="number" id="plc-ams-port" value="851"
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">IP-Adresse</label>
+                        <input type="text" id="plc-ip-address" placeholder="192.168.1.100" value="192.168.1.100"
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                </div>
+
+                <div class="flex items-center space-x-3">
+                    <button id="plc-connect-btn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                        <i data-lucide="plug" class="w-4 h-4 inline mr-1"></i> Verbinden
+                    </button>
+                    <button id="plc-disconnect-btn" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600" disabled>
+                        <i data-lucide="plug-zap" class="w-4 h-4 inline mr-1"></i> Trennen
+                    </button>
+                    <div id="plc-status-badge" class="flex items-center space-x-2">
+                        <div class="w-2 h-2 rounded-full bg-gray-400"></div>
+                        <span class="text-sm">Nicht verbunden</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PLC Symbol Browser -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">PLC-Symbole Browser</h2>
+
+                <!-- Symbol-Laden Optionen -->
+                <div class="mb-4 p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                        Symbole laden
+                    </label>
+                    <div class="space-y-2">
+                        <!-- Live-Abruf von PLC -->
+                        <div class="flex items-center space-x-3">
+                            <button id="load-live-symbols-btn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center">
+                                <i data-lucide="download-cloud" class="w-4 h-4 inline mr-2"></i>
+                                Von PLC laden (Live)
+                            </button>
+                            <span class="text-xs text-gray-500 dark:text-gray-400">
+                                Lädt alle Symbole direkt von der verbundenen PLC
+                            </span>
+                        </div>
+
+                        <!-- TPY Upload -->
+                        <div class="flex items-center space-x-3">
+                            <input type="file" id="tpy-upload" accept=".tpy" class="hidden">
+                            <button id="tpy-upload-btn" class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 flex items-center">
+                                <i data-lucide="upload" class="w-4 h-4 inline mr-2"></i>
+                                .tpy Datei hochladen
+                            </button>
+                            <span class="text-xs text-gray-500 dark:text-gray-400">
+                                Für Offline-Nutzung
+                            </span>
+                        </div>
+
+                        <!-- Status -->
+                        <div id="symbol-load-status" class="text-sm text-gray-600 dark:text-gray-400 mt-2"></div>
+                    </div>
+                </div>
+
+                <!-- Suche & Filter -->
+                <div class="mb-4 space-y-3">
+                    <div class="flex space-x-3">
+                        <input type="text" id="symbol-search" placeholder="Suche Symbole (Regex möglich)..."
+                            class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        <select id="symbol-type-filter"
+                            class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                            <option value="">Alle Typen</option>
+                            <option value="BOOL">BOOL</option>
+                            <option value="INT">INT/DINT/UINT</option>
+                            <option value="REAL">REAL/LREAL</option>
+                            <option value="STRING">STRING</option>
+                            <option value="TIME">TIME/DATE</option>
+                        </select>
+                        <button id="symbol-search-btn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                            <i data-lucide="search" class="w-4 h-4 inline"></i> Suchen
+                        </button>
+                    </div>
+
+                    <!-- View-Optionen -->
+                    <div class="flex items-center space-x-4 text-sm">
+                        <label class="flex items-center space-x-2 text-gray-700 dark:text-gray-300 cursor-pointer">
+                            <input type="radio" name="symbol-view" value="tree" checked class="form-radio">
+                            <span><i data-lucide="folder-tree" class="w-4 h-4 inline"></i> TreeView</span>
+                        </label>
+                        <label class="flex items-center space-x-2 text-gray-700 dark:text-gray-300 cursor-pointer">
+                            <input type="radio" name="symbol-view" value="list" class="form-radio">
+                            <span><i data-lucide="list" class="w-4 h-4 inline"></i> Flache Liste</span>
+                        </label>
+                        <button id="expand-all-btn" class="ml-auto text-xs px-2 py-1 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded">
+                            <i data-lucide="chevrons-down" class="w-3 h-3 inline"></i> Alle ausklappen
+                        </button>
+                        <button id="collapse-all-btn" class="text-xs px-2 py-1 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded">
+                            <i data-lucide="chevrons-up" class="w-3 h-3 inline"></i> Alle einklappen
+                        </button>
+                    </div>
+
+                    <!-- Symbol-Counter -->
+                    <div class="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
+                        <span id="symbol-counter">0 Symbole geladen</span>
+                        <span id="symbol-filter-info"></span>
+                    </div>
+                </div>
+
+                <!-- Symbol-Liste (TreeView) -->
+                <div id="symbol-tree" class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 max-h-96 overflow-y-auto">
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                        <i data-lucide="info" class="w-4 h-4 inline"></i>
+                        Lade eine .tpy Datei hoch oder klicke auf "Suchen" um alle Symbole zu laden
+                    </p>
+                </div>
+            </div>
+
+            <!-- MQTT Setup -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">MQTT-Konfiguration</h2>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Broker-Adresse</label>
+                        <input type="text" id="mqtt-broker" placeholder="localhost" value="localhost"
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Port</label>
+                        <input type="number" id="mqtt-port" value="1883"
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Username <span class="text-xs text-gray-500">(optional)</span>
+                        </label>
+                        <input type="text" id="mqtt-username" placeholder="username"
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Password <span class="text-xs text-gray-500">(optional)</span>
+                        </label>
+                        <input type="password" id="mqtt-password" placeholder="password"
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                </div>
+
+                <div class="flex items-center space-x-3 mb-4">
+                    <button id="mqtt-connect-btn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                        <i data-lucide="wifi" class="w-4 h-4 inline mr-1"></i> Verbinden
+                    </button>
+                    <button id="mqtt-disconnect-btn" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600" disabled>
+                        <i data-lucide="wifi-off" class="w-4 h-4 inline mr-1"></i> Trennen
+                    </button>
+                    <div id="mqtt-status-badge" class="flex items-center space-x-2">
+                        <div class="w-2 h-2 rounded-full bg-gray-400"></div>
+                        <span class="text-sm">Nicht verbunden</span>
+                    </div>
+                </div>
+
+                <!-- Topic Subscribe -->
+                <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg mb-4">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Topic abonnieren</label>
+                    <div class="flex space-x-3">
+                        <input type="text" id="mqtt-topic" placeholder="home/sensors/#"
+                            class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        <button id="mqtt-subscribe-btn" class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600" disabled>
+                            <i data-lucide="rss" class="w-4 h-4 inline mr-1"></i> Subscribe
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Subscribed Topics & Values -->
+                <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                    <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Empfangene Werte</h3>
+                    <div id="mqtt-values" class="space-y-1 max-h-48 overflow-y-auto">
+                        <p class="text-xs text-gray-500">Keine Werte empfangen</p>
+                    </div>
+                </div>
+
+                <!-- Installation Hinweis -->
+                <div id="mqtt-install-hint" class="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 rounded-lg hidden">
+                    <p class="text-sm text-yellow-800 dark:text-yellow-200">
+                        <i data-lucide="alert-triangle" class="w-4 h-4 inline mr-1"></i>
+                        <strong>paho-mqtt</strong> ist nicht installiert.
+                        <br>
+                        <code class="text-xs bg-yellow-100 dark:bg-yellow-800 px-1 rounded">pip install paho-mqtt</code>
+                    </p>
+                </div>
+            </div>
+
+            <!-- System Info -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">System-Information</h2>
+                <div class="space-y-3 text-sm">
+                    <div class="flex justify-between">
+                        <span class="text-gray-600 dark:text-gray-400">Plattform:</span>
+                        <span id="sys-platform" class="font-medium">-</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600 dark:text-gray-400">Modus:</span>
+                        <span id="deployment-mode" class="font-medium">-</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-600 dark:text-gray-400">GPU:</span>
+                        <div id="gpu-info" class="font-medium mt-1">-</div>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600 dark:text-gray-400">Cache:</span>
+                        <span id="sys-cache" class="font-medium">-</span>
+                    </div>
+
+                    <!-- Abhängigkeiten -->
+                    <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                        <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-2">Abhängigkeiten</h3>
+                        <div class="space-y-2">
+                            <div id="dep-pyads" class="flex items-center justify-between">
+                                <span class="text-gray-600 dark:text-gray-400">pyads (PLC)</span>
+                                <span class="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-gray-700">Prüfe...</span>
+                            </div>
+                            <div id="dep-paho-mqtt" class="flex items-center justify-between">
+                                <span class="text-gray-600 dark:text-gray-400">paho-mqtt</span>
+                                <span class="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-gray-700">Prüfe...</span>
+                            </div>
+                            <div id="dep-ffmpeg" class="flex items-center justify-between">
+                                <span class="text-gray-600 dark:text-gray-400">FFmpeg (Streams)</span>
+                                <span class="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-gray-700">Prüfe...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Page -->
+        <div id="admin-page" class="page page-container p-6">
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 hidden md:block">Admin-Bereich</h1>
+
+            <!-- PLC-Verwaltung -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">PLC-Verwaltung</h2>
+                    <button id="add-plc-btn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                        <i data-lucide="plus" class="w-4 h-4 inline mr-1"></i> Neue PLC
+                    </button>
+                </div>
+
+                <!-- Statistiken -->
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div class="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                        <div class="text-sm text-gray-600 dark:text-gray-400">Gesamt PLCs</div>
+                        <div id="stat-total-plcs" class="text-2xl font-bold text-gray-900 dark:text-white">0</div>
+                    </div>
+                    <div class="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                        <div class="text-sm text-gray-600 dark:text-gray-400">Aktive PLCs</div>
+                        <div id="stat-active-plcs" class="text-2xl font-bold text-gray-900 dark:text-white">0</div>
+                    </div>
+                    <div class="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                        <div class="text-sm text-gray-600 dark:text-gray-400">Mit TPY</div>
+                        <div id="stat-plcs-with-tpy" class="text-2xl font-bold text-gray-900 dark:text-white">0</div>
+                    </div>
+                    <div class="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                        <div class="text-sm text-gray-600 dark:text-gray-400">TPY-Größe</div>
+                        <div id="stat-tpy-size" class="text-2xl font-bold text-gray-900 dark:text-white">0 MB</div>
+                    </div>
+                </div>
+
+                <!-- PLC-Liste -->
+                <div id="plc-list" class="space-y-3">
+                    <!-- Wird dynamisch gefüllt -->
+                </div>
+            </div>
+
+            <!-- System-Logs (NEU) -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">System-Logs</h2>
+                    <div class="flex space-x-2">
+                        <button id="refresh-logs-btn" class="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                            <i data-lucide="refresh-cw" class="w-4 h-4 inline mr-1"></i> Aktualisieren
+                        </button>
+                        <button id="clear-logs-btn" class="px-3 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
+                            <i data-lucide="trash-2" class="w-4 h-4 inline mr-1"></i> Löschen
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Log-Tabelle -->
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="text-xs text-gray-700 dark:text-gray-300 uppercase bg-gray-50 dark:bg-gray-900">
+                            <tr>
+                                <th class="px-3 py-2 text-left">Timestamp</th>
+                                <th class="px-3 py-2 text-left">Modul</th>
+                                <th class="px-3 py-2 text-left">Level</th>
+                                <th class="px-3 py-2 text-left">Nachricht</th>
+                            </tr>
+                        </thead>
+                        <tbody id="log-table-body" class="divide-y divide-gray-200 dark:divide-gray-700">
+                            <tr>
+                                <td colspan="4" class="px-3 py-4 text-center text-gray-500 dark:text-gray-400">
+                                    Lade Logs...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Service-Management (NEU) -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Service-Management</h2>
+
+                <div class="space-y-4">
+                    <!-- Service-Info -->
+                    <div class="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <span class="text-gray-600 dark:text-gray-400">Platform:</span>
+                                <span id="service-platform" class="font-mono ml-2">-</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600 dark:text-gray-400">PID:</span>
+                                <span id="service-pid" class="font-mono ml-2">-</span>
+                            </div>
+                            <div class="col-span-2">
+                                <span class="text-gray-600 dark:text-gray-400">Python:</span>
+                                <span id="service-python" class="font-mono ml-2 text-xs">-</span>
+                            </div>
+                            <div class="col-span-2">
+                                <span class="text-gray-600 dark:text-gray-400">Neustart:</span>
+                                <span id="service-restarted" class="ml-2">-</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Restart-Button -->
+                    <button id="restart-service-btn" class="w-full px-4 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 font-semibold">
+                        <i data-lucide="rotate-cw" class="w-5 h-5 inline mr-2"></i> Service neu starten
+                    </button>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 text-center">
+                        ⚠️ Der Service wird in 2 Sekunden neu gestartet. Die Seite lädt automatisch neu.
+                    </p>
+                </div>
+
+                <!-- Cleanup-Button -->
+                <div class="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                    <button id="cleanup-tpy-btn" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
+                        <i data-lucide="trash-2" class="w-4 h-4 inline mr-1"></i> Ungenutzte TPY-Dateien löschen
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Widget Configuration Page -->
+        <div id="widgets-page" class="page page-container p-6">
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 hidden md:block">Widget-Konfiguration</h1>
+
+            <!-- Widget Verwaltung -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Widgets</h2>
+                    <button id="add-widget-btn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                        <i data-lucide="plus" class="w-4 h-4 inline mr-1"></i> Neues Widget
+                    </button>
+                </div>
+
+                <!-- Widget-Liste -->
+                <div id="widget-list" class="space-y-3">
+                    <!-- Wird dynamisch gefüllt -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Widget Editor Modal (versteckt) -->
+        <div id="widget-editor-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+                <div class="p-6">
+                    <div class="flex items-center justify-between mb-6">
+                        <h2 class="text-xl font-bold text-gray-900 dark:text-white">Widget konfigurieren</h2>
+                        <button id="close-widget-editor" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+                            <i data-lucide="x" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+
+                    <form id="widget-form" class="space-y-4">
+                        <input type="hidden" id="widget-edit-id">
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Titel</label>
+                            <input type="text" id="widget-title" required
+                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Widget-Typ</label>
+                            <select id="widget-type" required
+                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                                <option value="switch">Schalter (Boolean)</option>
+                                <option value="slider">Slider (Numeric)</option>
+                                <option value="gauge">Anzeige (Numeric)</option>
+                                <option value="text">Text-Anzeige</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Seite</label>
+                            <select id="widget-page" required
+                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                                <option value="dashboard">Dashboard</option>
+                                <option value="lighting">Beleuchtung</option>
+                                <option value="climate">Klima</option>
+                                <option value="energy">Energie</option>
+                            </select>
+                        </div>
+
+                        <!-- Variable Bindings Section -->
+                        <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
+                            <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Gateway-Variablen Verknüpfung</h3>
+
+                            <div id="variable-bindings-container" class="space-y-3">
+                                <!-- Steuer-Variable (Control) -->
+                                <div class="binding-item">
+                                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Steuer-Variable (Control)</label>
+                                    <div class="flex space-x-2">
+                                        <input type="text" id="binding-value-var" placeholder="z.B. MAIN.VbAusgang6"
+                                            class="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                                        <select id="binding-value-type"
+                                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                                            <option value="BOOL">BOOL</option>
+                                            <option value="INT">INT</option>
+                                            <option value="DINT">DINT</option>
+                                            <option value="REAL">REAL</option>
+                                            <option value="LREAL">LREAL</option>
+                                            <option value="STRING">STRING</option>
+                                        </select>
+                                        <button type="button" id="browse-symbols-btn" class="px-3 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
+                                            <i data-lucide="search" class="w-4 h-4"></i>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- ⭐ v5.1.2: Feedback-Variable (Optional) -->
+                                <div class="binding-item">
+                                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Feedback-Variable (Optional)</label>
+                                    <div class="flex space-x-2">
+                                        <input type="text" id="binding-feedback-var" placeholder="z.B. Light.Light_EG_WZ.bFeedback"
+                                            class="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                                        <select id="binding-feedback-type"
+                                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                                            <option value="BOOL">BOOL</option>
+                                            <option value="INT">INT</option>
+                                            <option value="DINT">DINT</option>
+                                        </select>
+                                    </div>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Für echte Rückmeldung vom PLC (z.B. Schalter-Status)</p>
+                                </div>
+                            </div>
+
+                            <button type="button" id="test-binding-btn" class="mt-3 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 text-sm">
+                                <i data-lucide="activity" class="w-4 h-4 inline mr-1"></i> Test-Verbindung
+                            </button>
+                        </div>
+
+                        <!-- ⭐ v5.1.2: Schalt-Modus Config (nur für Switch-Widgets) -->
+                        <div id="switch-config-section" class="pt-4 border-t border-gray-200 dark:border-gray-700">
+                            <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Schalt-Modus</h3>
+
+                            <div class="space-y-3">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Modus</label>
+                                    <select id="switch-mode"
+                                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                                        <option value="toggle">Toggle (Dauersignal)</option>
+                                        <option value="pulse">Pulse (Impulse)</option>
+                                    </select>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        <strong>Toggle:</strong> Ein/Aus-Schalter (bleibt im Zustand)<br>
+                                        <strong>Pulse:</strong> Sendet kurzen Impulse (für Taster/Relais)
+                                    </p>
+                                </div>
+
+                                <div id="pulse-duration-container" style="display:none;">
+                                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Impulse-Dauer (ms)</label>
+                                    <input type="number" id="pulse-duration" value="500" min="100" max="5000" step="100"
+                                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Wie lange der Impulse aktiv sein soll (Standard: 500ms)</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flex space-x-3 pt-4">
+                            <button type="submit" class="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                                Speichern
+                            </button>
+                            <button type="button" id="cancel-widget-edit" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
+                                Abbrechen
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Monitor Dashboard Page -->
+        <div id="monitor-page" class="page page-container p-6">
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 hidden md:block">Gateway Monitor & Analytics</h1>
+
+            <!-- Echtzeit-Statistiken -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm text-gray-600 dark:text-gray-400">Aktive Verbindungen</span>
+                        <i data-lucide="link" class="w-5 h-5 text-blue-500"></i>
+                    </div>
+                    <div id="monitor-connections" class="text-3xl font-bold text-gray-900 dark:text-white">0</div>
+                </div>
+
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm text-gray-600 dark:text-gray-400">PLC Reads</span>
+                        <i data-lucide="database" class="w-5 h-5 text-green-500"></i>
+                    </div>
+                    <div id="monitor-plc-reads" class="text-3xl font-bold text-gray-900 dark:text-white">0</div>
+                </div>
+
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm text-gray-600 dark:text-gray-400">WebSocket Clients</span>
+                        <i data-lucide="users" class="w-5 h-5 text-purple-500"></i>
+                    </div>
+                    <div id="monitor-ws-clients" class="text-3xl font-bold text-gray-900 dark:text-white">0</div>
+                </div>
+
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm text-gray-600 dark:text-gray-400">Error Rate</span>
+                        <i data-lucide="alert-triangle" class="w-5 h-5 text-red-500"></i>
+                    </div>
+                    <div id="monitor-error-rate" class="text-3xl font-bold text-gray-900 dark:text-white">0%</div>
+                </div>
+            </div>
+
+            <!-- Datenfluss-Visualisierung -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Datenfluss: Quelle → Gateway → Client</h2>
+
+                <div class="flex items-center justify-between py-8">
+                    <!-- PLC/MQTT Sources -->
+                    <div class="flex-1">
+                        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Quellen</h3>
+                        <div id="monitor-sources" class="space-y-3">
+                            <!-- Dynamisch gefüllt -->
+                        </div>
+                    </div>
+
+                    <!-- Flow Arrow -->
+                    <div class="px-8">
+                        <i data-lucide="arrow-right" class="w-12 h-12 text-gray-400"></i>
+                    </div>
+
+                    <!-- Gateway Processing -->
+                    <div class="flex-1">
+                        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Gateway</h3>
+                        <div class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                            <div class="text-sm space-y-1">
+                                <div>Platform: <span id="monitor-platform" class="font-medium">-</span></div>
+                                <div>Cache: <span id="monitor-cache" class="font-medium">-</span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Flow Arrow -->
+                    <div class="px-8">
+                        <i data-lucide="arrow-right" class="w-12 h-12 text-gray-400"></i>
+                    </div>
+
+                    <!-- Destinations -->
+                    <div class="flex-1">
+                        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Ziele</h3>
+                        <div id="monitor-destinations" class="space-y-3">
+                            <!-- Dynamisch gefüllt -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Latenz-Messung -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Latenz-Messung</h2>
+                    <button id="measure-latency-btn" class="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600">
+                        <i data-lucide="zap" class="w-4 h-4 inline mr-1"></i> Latenz messen
+                    </button>
+                </div>
+
+                <div id="latency-results" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- Wird dynamisch gefüllt -->
+                </div>
+            </div>
+
+            <!-- Export & Tools -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Export & Analyse-Tools</h2>
+
+                <div class="flex items-center space-x-3">
+                    <button id="export-json-btn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                        <i data-lucide="download" class="w-4 h-4 inline mr-1"></i> JSON Export
+                    </button>
+                    <button id="export-csv-btn" class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600">
+                        <i data-lucide="file-text" class="w-4 h-4 inline mr-1"></i> CSV Export
+                    </button>
+                    <button id="auto-refresh-toggle" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
+                        <i data-lucide="refresh-cw" class="w-4 h-4 inline mr-1"></i> Auto-Refresh: AUS
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- ================================================================
+         BOTTOM NAVIGATION (Mobile)
+         ================================================================ -->
+    <nav class="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 md:hidden z-30">
+        <div class="flex justify-around py-2">
+            <a href="#" data-page="dashboard" class="bottom-nav-link active flex flex-col items-center px-3 py-2">
+                <i data-lucide="layout-dashboard" class="w-6 h-6"></i>
+                <span class="text-xs mt-1">Home</span>
+            </a>
+            <a href="#" data-page="lighting" class="bottom-nav-link flex flex-col items-center px-3 py-2">
+                <i data-lucide="lightbulb" class="w-6 h-6"></i>
+                <span class="text-xs mt-1">Licht</span>
+            </a>
+            <a href="#" data-page="energy" class="bottom-nav-link flex flex-col items-center px-3 py-2">
+                <i data-lucide="zap" class="w-6 h-6"></i>
+                <span class="text-xs mt-1">Energie</span>
+            </a>
+            <a href="#" data-page="setup" class="bottom-nav-link flex flex-col items-center px-3 py-2">
+                <i data-lucide="settings" class="w-6 h-6"></i>
+                <span class="text-xs mt-1">Setup</span>
+            </a>
+            <a href="#" data-page="admin" class="bottom-nav-link flex flex-col items-center px-3 py-2">
+                <i data-lucide="shield" class="w-6 h-6"></i>
+                <span class="text-xs mt-1">Admin</span>
+            </a>
+        </div>
+    </nav>
+
+    <!-- ================================================================
+         JAVASCRIPT
+         ================================================================ -->
+    <script src="/static/js/socket_handler.js"></script>
+    <script src="/static/js/variable-manager.js"></script> <!-- ⭐ v5.1.0 -->
+    <script src="/static/js/app.js"></script>
+
+    <!-- Test-Suite (nur im Development-Modus) -->
+    <script src="/static/js/test_scenarios.js"></script>
+
+    <!-- Lucide Icons initialisieren -->
+    <script>
+        // Warte auf vollständiges Laden inkl. Lucide-Library
+        window.addEventListener('load', () => {
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+                console.log('✅ Lucide Icons initialisiert');
+            } else {
+                console.error('❌ Lucide Library nicht geladen!');
+            }
+        });
+    </script>
+</body>
+</html>

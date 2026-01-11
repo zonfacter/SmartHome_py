@@ -31,6 +31,7 @@ class ModbusIntegration(BaseModule):
         super().__init__()
         self.clients = {}  # Device-Name -> Client
         self.registers = {}  # Device-Name -> {address: value}
+        self.polling_config = {}  # Device-Name -> Liste von (address, count) Tupeln
         self.polling_thread = None
         self.running = False
     
@@ -121,6 +122,23 @@ class ModbusIntegration(BaseModule):
             print(f"  ✗ Fehler beim Schreiben zu {device} @ {address}: {e}")
             return False
     
+    def configure_polling(self, device: str, registers: list):
+        """
+        Konfiguriert Register für automatisches Polling
+
+        Args:
+            device: Geräte-Name
+            registers: Liste von (address, count) Tupeln
+                      Beispiel: [(672, 1), (686, 2), (690, 1)]
+        """
+        if device not in self.clients:
+            print(f"  ⚠️  Gerät '{device}' nicht gefunden!")
+            return False
+
+        self.polling_config[device] = registers
+        print(f"  ✓ Polling für '{device}' konfiguriert: {len(registers)} Register")
+        return True
+
     def get_deye_pv_power(self, device: str = 'deye_inverter') -> Optional[float]:
         """Liest PV-Leistung vom Deye Wechselrichter (Beispiel)"""
         # Deye Register: 672 = AC Output Power (W)
@@ -144,12 +162,39 @@ class ModbusIntegration(BaseModule):
         """Polling-Loop (Background-Thread)"""
         while self.running:
             for device_name in self.clients.keys():
-                # Beispiel: Lese häufig verwendete Register
-                # TODO: Konfigurierbar machen
-                pass
-            
+                # Lese konfigurierte Register für dieses Gerät
+                if device_name not in self.polling_config:
+                    continue
+
+                # Initialisiere Register-Dict falls nötig
+                if device_name not in self.registers:
+                    self.registers[device_name] = {}
+
+                # Lese alle konfigurierten Register
+                for address, count in self.polling_config[device_name]:
+                    result = self.read_holding_register(device_name, address, count)
+                    if result is not None:
+                        # Speichere Werte
+                        for i, value in enumerate(result):
+                            self.registers[device_name][address + i] = value
+
             time.sleep(interval)
     
+    def get_register_value(self, device: str, address: int) -> Optional[int]:
+        """
+        Holt gecachten Register-Wert aus Polling-Daten
+
+        Args:
+            device: Geräte-Name
+            address: Register-Adresse
+
+        Returns:
+            Register-Wert oder None falls nicht vorhanden
+        """
+        if device not in self.registers:
+            return None
+        return self.registers[device].get(address)
+
     def stop_polling(self):
         """Stoppt Polling"""
         self.running = False

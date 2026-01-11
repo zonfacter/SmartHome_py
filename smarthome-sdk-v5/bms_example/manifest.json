@@ -1,0 +1,60 @@
+{
+  "plugin": {
+    "id": "bms_example",
+    "name": "BMS Monitor Example Plugin",
+    "version": "1.0.0",
+    "description": "Demonstriert BMS-Integration über Bluetooth (JBD/Xiaoxiang BMS)",
+    "author": "TwinCAT Team",
+    "license": "MIT",
+    "min_os_version": "5.0.0"
+  },
+  "requirements": {
+    "modules": [
+      "connection_manager",
+      "data_gateway"
+    ],
+    "python_packages": [
+      "bleak>=0.20.0"
+    ]
+  },
+  "connections": {
+    "bms_main": {
+      "type": "bluetooth",
+      "required": true,
+      "description": "Hauptbatterie BMS"
+    },
+    "bms_backup": {
+      "type": "bluetooth",
+      "required": false,
+      "description": "Backup-Batterie BMS (optional)"
+    }
+  },
+  "settings": {
+    "poll_interval": {
+      "type": "float",
+      "default": 5.0,
+      "description": "BMS-Abfrage Interval in Sekunden"
+    },
+    "bms_protocol": {
+      "type": "string",
+      "default": "JBD",
+      "enum": ["JBD", "Daly", "JK", "ANT"],
+      "description": "BMS-Protokoll"
+    },
+    "alarm_voltage_min": {
+      "type": "float",
+      "default": 3.0,
+      "description": "Minimum Cell-Voltage für Alarm (V)"
+    },
+    "alarm_voltage_max": {
+      "type": "float",
+      "default": 3.65,
+      "description": "Maximum Cell-Voltage für Alarm (V)"
+    },
+    "alarm_temp_max": {
+      "type": "float",
+      "default": 45.0,
+      "description": "Maximum Temperatur für Alarm (°C)"
+    }
+  }
+}

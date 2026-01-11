@@ -1,0 +1,298 @@
+/**
+ * SmartHome OS v4.5 - Main Stylesheet
+ * Ergänzende Styles zum Tailwind CSS
+ */
+
+/* =========================================================================
+   CSS CUSTOM PROPERTIES (Themes)
+   ========================================================================= */
+:root {
+    /* Light Theme (Default) */
+    --color-primary: #3b82f6;
+    --color-secondary: #8b5cf6;
+    --color-success: #10b981;
+    --color-warning: #f59e0b;
+    --color-error: #ef4444;
+
+    --color-bg-base: #f9fafb;
+    --color-bg-elevated: #ffffff;
+    --color-text-primary: #111827;
+    --color-text-secondary: #6b7280;
+    --color-border: #e5e7eb;
+}
+
+.dark {
+    /* Dark Theme */
+    --color-bg-base: #111827;
+    --color-bg-elevated: #1f2937;
+    --color-text-primary: #f9fafb;
+    --color-text-secondary: #9ca3af;
+    --color-border: #374151;
+}
+
+/* =========================================================================
+   GLOBAL STYLES
+   ========================================================================= */
+* {
+    -webkit-tap-highlight-color: transparent;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* =========================================================================
+   ANIMATIONS
+   ========================================================================= */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes pulse-slow {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+}
+
+.animate-pulse-slow {
+    animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* =========================================================================
+   NAVIGATION
+   ========================================================================= */
+.nav-item {
+    transition: all 0.2s ease;
+}
+
+.nav-item:active {
+    transform: scale(0.95);
+}
+
+/* =========================================================================
+   CARDS
+   ========================================================================= */
+.card {
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    transition: all 0.2s ease;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+
+.dark .card:hover {
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+}
+
+/* =========================================================================
+   BUTTONS
+   ========================================================================= */
+button {
+    transition: all 0.2s ease;
+}
+
+button:active {
+    transform: scale(0.98);
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* =========================================================================
+   INPUTS
+   ========================================================================= */
+input:focus,
+textarea:focus,
+select:focus {
+    outline: none;
+    ring: 2px;
+    ring-color: var(--color-primary);
+}
+
+/* =========================================================================
+   SCROLLBAR (Webkit)
+   ========================================================================= */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* =========================================================================
+   STATUS INDICATORS
+   ========================================================================= */
+.status-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 0.5rem;
+}
+
+.status-indicator.connected {
+    background: var(--color-success);
+    box-shadow: 0 0 8px var(--color-success);
+}
+
+.status-indicator.disconnected {
+    background: var(--color-error);
+}
+
+.status-indicator.connecting {
+    background: var(--color-warning);
+    animation: pulse-slow 1.5s infinite;
+}
+
+/* =========================================================================
+   MOBILE OPTIMIZATIONS
+   ========================================================================= */
+@media (max-width: 768px) {
+    /* Prevent zoom on input focus (iOS) */
+    input[type="text"],
+    input[type="number"],
+    input[type="email"],
+    input[type="tel"],
+    select,
+    textarea {
+        font-size: 16px;
+    }
+
+    /* Safe area padding (iPhone X+) */
+    body {
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+
+    /* Bottom nav safe area */
+    nav {
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+}
+
+/* =========================================================================
+   UTILITIES
+   ========================================================================= */
+
+/* Glass Effect */
+.glass {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.dark .glass {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Gradient Text */
+.gradient-text {
+    background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* Loading Spinner */
+.spinner {
+    border: 3px solid rgba(0, 0, 0, 0.1);
+    border-top-color: var(--color-primary);
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    animation: spin 0.8s linear infinite;
+}
+
+.dark .spinner {
+    border-color: rgba(255, 255, 255, 0.1);
+    border-top-color: var(--color-primary);
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* =========================================================================
+   RESPONSIVE GRID
+   ========================================================================= */
+.grid-responsive {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+@media (min-width: 640px) {
+    .grid-responsive {
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    }
+}
+
+@media (min-width: 1024px) {
+    .grid-responsive {
+        grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    }
+}
+
+/* =========================================================================
+   PRINT STYLES
+   ========================================================================= */
+@media print {
+    header,
+    nav,
+    .no-print {
+        display: none !important;
+    }
+
+    body {
+        padding: 0;
+    }
+
+    .card {
+        break-inside: avoid;
+    }
+}

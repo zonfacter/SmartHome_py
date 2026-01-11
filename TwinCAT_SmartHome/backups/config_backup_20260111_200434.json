@@ -1,0 +1,36 @@
+{
+  "plc_ams_net_id": "192.168.2.162.1.1",
+  "plc_ams_port": 801,
+  "plc_ip_address": "192.168.2.162",
+  "widgets": {},
+  "version": "1.0",
+  "theme": "blue",
+  "custom_lights": {},
+  "last_modified": "2026-01-11T20:04:33.998142",
+  "tabs": {
+    "TabID_7e649a": {
+      "id": "TabID_7e649a",
+      "name": "Erdgeschoss",
+      "icon": "🏡",
+      "order": 0,
+      "is_system": true,
+      "created_at": "2026-01-11 19:42:26"
+    },
+    "TabID_ded97e": {
+      "id": "TabID_ded97e",
+      "name": "Obergeschoss",
+      "icon": "🏠",
+      "order": 1,
+      "is_system": true,
+      "created_at": "2026-01-11 19:42:26"
+    },
+    "TabID_1451ac": {
+      "id": "TabID_1451ac",
+      "name": "Dachboden",
+      "icon": "🏚️",
+      "order": 2,
+      "is_system": true,
+      "created_at": "2026-01-11 19:42:26"
+    }
+  }
+}

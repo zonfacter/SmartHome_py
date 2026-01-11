@@ -155,11 +155,10 @@ class UpdateLoop(BaseModule):
         
         # Update jede Card
         for card_id, widgets in all_cards.items():
-            # Smart-Update: Nur sichtbare Cards (zukünftig)
-            # TODO: Implementiere Sichtbarkeits-Tracking
-            # if self.visible_cards and card_id not in self.visible_cards:
-            #     continue
-            
+            # Smart-Update: Nur sichtbare Cards aktualisieren (Performance-Optimierung)
+            if self.visible_cards and card_id not in self.visible_cards:
+                continue
+
             # Update diese Card
             self._update_single_card(card_id, widgets)
     

@@ -1,0 +1,16 @@
+{
+  "id": "connection_example",
+  "name": "Custom Connection Example",
+  "version": "1.0.0",
+  "author": "TwinCAT Team",
+  "description": "Zeigt wie man eigene Verbindungstypen (Hardware) erstellt und in den Connection Manager integriert.",
+  "category": "Examples",
+  "icon": "wifi",
+  "min_os_version": "5.0.0",
+  "dependencies": [],
+  "config_schema": {
+    "host": "string",
+    "port": "number",
+    "timeout": "number"
+  }
+}

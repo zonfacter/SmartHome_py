@@ -1,0 +1,49 @@
+{
+  "plugin": {
+    "id": "multi_plc_example",
+    "name": "Multi-PLC Example Plugin",
+    "version": "1.0.0",
+    "description": "Demonstriert Verwendung von mehreren PLCs parallel über Connection Manager",
+    "author": "TwinCAT Team",
+    "license": "MIT",
+    "min_os_version": "5.0.0"
+  },
+  "requirements": {
+    "modules": [
+      "connection_manager",
+      "data_gateway"
+    ],
+    "python_packages": [
+      "pyads>=3.3.0"
+    ]
+  },
+  "connections": {
+    "plc_main": {
+      "type": "plc",
+      "required": true,
+      "description": "Haupt-PLC (Gebäudesteuerung)"
+    },
+    "plc_garage": {
+      "type": "plc",
+      "required": false,
+      "description": "Garagen-PLC (optional)"
+    },
+    "plc_energy": {
+      "type": "plc",
+      "required": false,
+      "description": "Energiemanagement-PLC (optional)"
+    }
+  },
+  "settings": {
+    "monitor_interval": {
+      "type": "float",
+      "default": 1.0,
+      "description": "Überwachungsinterval in Sekunden"
+    },
+    "log_data_changes": {
+      "type": "bool",
+      "default": true,
+      "description": "Datenänderungen loggen"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+# SmartHome OS v4.5 Web-HMI Dependencies
+# Install with: pip install -r requirements_web.txt
+
+# Web Framework
+flask>=2.3.0
+flask-socketio>=5.3.0
+
+# SocketIO Backend (eventlet - besser für Python 3.13)
+eventlet>=0.33.0
+
+# Alternative: gevent (nur für Python < 3.13)
+# gevent>=23.0.0
+# gevent-websocket>=0.10.1
+
+# Optional: pyADS für TwinCAT PLC
+# pyads>=3.3.0
+
+# Optional: MQTT
+# paho-mqtt>=1.6.0
+
+# Optional: Modbus
+# pymodbus>=3.5.0

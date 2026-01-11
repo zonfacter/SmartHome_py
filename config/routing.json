@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "description": "Routing-Konfiguration für SmartHome Edge OS v5.0",
+  "routes": [
+    {
+      "id": "example_passthrough",
+      "description": "Beispiel: Alle Daten durchleiten",
+      "from": "*",
+      "to": [
+        "unified_data_space"
+      ],
+      "enabled": true
+    }
+  ],
+  "settings": {
+    "max_pps_per_source": 500,
+    "enable_spam_protection": true,
+    "log_all_routes": false
+  }
+}

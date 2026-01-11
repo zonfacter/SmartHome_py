@@ -1,0 +1,7 @@
+{
+  "plc_001": {
+    "Licht_WZ": "MAIN.fbLichter.bLichtWohnzimmer",
+    "bAusgang6": "MAIN.VbAusgang6",
+    "Wohnzimmer_Licht": "MAIN.fbLichter.bLichtWohnzimmer"
+  }
+}

@@ -43,7 +43,7 @@ class PLCCommunication(BaseModule):
         self.plc = None
         self.connected = False
         self.config = {
-            'ams_net_id': '192.168.2.162.1.1',
+            'ams_net_id': None,  # KEIN DEFAULT! Muss explizit konfiguriert werden
             'port': pyads.PORT_TC2PLC1,
             'timeout': 5000,
             'auto_reconnect': True
@@ -67,6 +67,22 @@ class PLCCommunication(BaseModule):
         super().initialize(app_context)
         print(f"  ⚡ {self.NAME} v{self.VERSION} initialisiert")
         print(f"     Max Errors: {self.max_errors}, Reconnect-Cooldown: {self.reconnect_cooldown}s")
+
+        # AUTO-CONNECT: Verbinde automatisch wenn AMS NetID konfiguriert ist
+        config_mgr = app_context.module_manager.get_module('config_manager')
+        if config_mgr:
+            saved_ams_id = config_mgr.get_config_value('plc_ams_net_id')
+            saved_port = config_mgr.get_config_value('plc_ams_port', 851)
+            saved_ip = config_mgr.get_config_value('plc_ip_address')
+
+            if saved_ams_id:
+                print(f"  🔄 Auto-Connect: Konfigurierte PLC gefunden")
+                print(f"     AMS NetID: {saved_ams_id}")
+                self.configure(saved_ams_id, port=saved_port)
+                if self.connect():
+                    print(f"  ✅ Auto-Connect erfolgreich!")
+                else:
+                    print(f"  ⚠️  Auto-Connect fehlgeschlagen (wird später retry)")
     
     def configure(self, ams_net_id: str, port: int = None, timeout: int = 5000):
         """Konfiguriert PLC-Verbindung"""
@@ -77,24 +93,32 @@ class PLCCommunication(BaseModule):
     
     def connect(self) -> bool:
         """Stellt Verbindung zum PLC her"""
+        # ⭐ Validate AMS NetID ist konfiguriert
+        if not self.config['ams_net_id']:
+            print(f"  ✗ PLC-Verbindung fehlgeschlagen: Keine AMS NetID konfiguriert!")
+            print(f"     Bitte zuerst configure() aufrufen oder über Web-UI konfigurieren")
+            self.connected = False
+            return False
+
         try:
             if self.plc:
                 self.plc.close()
-            
+
             self.plc = pyads.Connection(
                 self.config['ams_net_id'],
                 self.config['port']
             )
-            
+
             self.plc.open()
             self.connected = True
             self.consecutive_errors = 0
-            
+
             print(f"  ✓ PLC verbunden: {self.config['ams_net_id']}")
             return True
-            
+
         except Exception as e:
             print(f"  ✗ PLC-Verbindung fehlgeschlagen: {e}")
+            print(f"     AMS NetID: {self.config['ams_net_id']}, Port: {self.config['port']}")
             self.connected = False
             return False
     

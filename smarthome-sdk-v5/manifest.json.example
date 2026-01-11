@@ -1,0 +1,28 @@
+{
+  "id": "mein_beispiel_plugin",
+  "name": "Beispiel Sensor Plugin",
+  "version": "1.0.0",
+  "author": "Dein Name / Firma",
+  "description": "Ein Demo-Plugin zur Demonstration des v5.1 SDKs.",
+  "category": "Sensoren",
+  "icon": "activity",
+  "min_os_version": "5.1.0",
+  "config_schema": {
+    "poll_interval": "number",
+    "api_key": "string"
+  }
+}{
+  "id": "bms_victron_bt",
+  "name": "Victron BLE BMS",
+  "version": "1.0.0",
+  "author": "Dein Name / GitHub-User",
+  "description": "Liest Victron SmartShunt Daten via Bluetooth Low Energy aus und spiegelt sie ins Gateway.",
+  "category": "Energy",
+  "icon": "battery-charging",
+  "min_os_version": "5.1.0",
+  "dependencies": ["bleak"],
+  "config_schema": {
+    "mac_address": "string",
+    "poll_interval": "number"
+  }
+}

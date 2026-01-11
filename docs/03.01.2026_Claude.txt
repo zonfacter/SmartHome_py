@@ -1,0 +1,231 @@
+Zusammenfassung der Session - TwinCAT SmartHome Web-HMI
+Ausgangssituation
+Der User meldete mehrere kritische Probleme mit dem neu entwickelten Web-HMI System:
+
+PLC-Symbol Browser findet keine Symbole (0 Symbole geladen)
+Fehlende TPY-Upload-Funktion - .tpy Datei ist vorhanden, aber keine Möglichkeit zum Hochladen
+Dark-Theme funktioniert nicht korrekt auf mehreren Seiten (Klima, Energie)
+MJPEG-Stream Support fehlt - nur RTSP war implementiert
+Theme-Umschaltung funktioniert nicht
+PLC-Write schlägt fehl mit unklaren Fehlermeldungen
+Durchgeführte Fixes
+1. ✅ Theme-Toggle Funktion repariert
+Problem: Tailwind CSS erwartet nur dark Klasse, nicht light UND dark
+
+Lösung:
+
+// Vorher:
+html.classList.add('light'); // FALSCH
+
+// Nachher:
+html.classList.remove('dark'); // Für Light-Mode
+html.classList.add('dark');    // Für Dark-Mode
+
+Geänderte Dateien:
+
+web/static/js/app.js:175-184
+2. ✅ PLC-Symbol Parser komplett überarbeitet
+Problem: Parser suchte nach <Variable> XML-Elementen, aber TwinCAT .tpy verwendet <Symbol><Name> Struktur
+
+Lösung:
+
+XML-Struktur analysiert (Datei hat 28.986 Zeilen)
+Parser umgeschrieben auf .//Symbol/Name XPath
+Nur MAIN.* Symbole werden geladen
+Typ-Erkennung aus <Type> Element
+Kategorie-Ermittlung (FunctionBlock, Array, Variable)
+Geänderte Dateien:
+
+modules/gateway/plc_symbol_parser.py:47-100
+Vorher:
+
+variables = root.findall('.//Variable', namespace)  # Fand nichts
+
+Nachher:
+
+symbols_found = root.findall('.//Symbol/Name')  # Findet alle MAIN.* Symbole
+
+3. ✅ TPY-Upload-Funktion implementiert
+Features:
+
+Backend-Endpoint: POST /api/plc/symbols/upload
+File-Upload mit Validierung (nur .tpy erlaubt)
+Automatisches Parsen nach Upload
+Status-Anzeige im Frontend
+Auto-Suche nach erfolgreichem Upload
+Geänderte Dateien:
+
+Backend: modules/gateway/web_manager.py:235-281
+Frontend HTML: web/templates/index.html:280-292
+Frontend JS: web/static/js/app.js:661-841
+Backend:
+
+@self.app.route('/api/plc/symbols/upload', methods=['POST'])
+def upload_tpy():
+    file = request.files['file']
+    # Speichere in plc_data/TwinCAT_Project.tpy
+    # Parse automatisch
+    return jsonify({'symbols_count': len(symbols)})
+
+Frontend:
+
+async uploadTPY(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch('/api/plc/symbols/upload', {
+        method: 'POST',
+        body: formData
+    });
+    // Auto-Suche nach Upload
+    this.searchPLCSymbols();
+}
+
+4. ✅ Dark-Theme für alle Seiten korrigiert
+Problem: Climate/Energy Pages hatten fest bg-gray-800 ohne dark: Präfix
+
+Lösung:
+
+Lighting-Widgets: bg-white dark:bg-gray-800
+Climate-Widgets: bg-white dark:bg-gray-800 + Lucide Icons
+Alle Text-Farben responsive: text-gray-900 dark:text-white
+Icons werden nach Rendering aktualisiert
+Geänderte Dateien:
+
+web/static/js/app.js:489-516 (Lighting)
+web/static/js/app.js:544-567 (Climate)
+Vorher:
+
+card.className = 'bg-gray-800 rounded-lg p-6'; // IMMER dunkel
+
+Nachher:
+
+card.className = 'bg-white dark:bg-gray-800 rounded-lg shadow p-6'; // Responsive
+
+5. ✅ MJPEG-Stream Support hinzugefügt
+Features:
+
+Auto-Erkennung von Stream-Typ (RTSP vs. MJPEG)
+MJPEG-Streams werden direkt als <img> angezeigt (LIVE!)
+RTSP zeigt Transkodierungs-Platzhalter
+Stream-Typ Badge (grün=MJPEG, blau=RTSP)
+Error-Handling wenn Stream nicht erreichbar
+Backward-Kompatibilität mit alten Einträgen
+Geänderte Dateien:
+
+web/static/js/app.js:592-761
+web/templates/index.html:210-219
+MJPEG Live-Stream:
+
+if (streamType === 'MJPEG') {
+    // Direkt als <img> einbinden - LIVE!
+    <img src="${streamUrl}" class="w-full h-full object-cover">
+} else {
+    // RTSP benötigt Transkodierung
+    <p>Stream wird transkodiert... RTSP → HLS</p>
+}
+
+Validierung:
+
+const isRTSP = streamUrl.startsWith('rtsp://');
+const isMJPEG = streamUrl.startsWith('http://') || streamUrl.startsWith('https://');
+
+6. ✅ PLC-Write Error-Handling verbessert
+Problem: Fehlermeldungen waren undefined, PLC-Status wurde nicht geprüft
+
+Lösung:
+
+Prüfung ob PLC-Modul verfügbar
+Prüfung ob PLC verbunden (is_connected())
+Klare Fehlermeldungen:
+"PLC nicht verbunden"
+"Gateway nicht verfügbar"
+"PLC-Schreibfehler"
+Geänderte Dateien:
+
+REST API: modules/gateway/web_manager.py:180-206
+SocketIO: modules/gateway/web_manager.py:218-242
+Vorher:
+
+success = self.data_gateway.write_plc(symbol, value)
+if success:
+    return jsonify({'success': True})
+else:
+    return jsonify({'error': 'Schreiben fehlgeschlagen'}), 500
+
+Nachher:
+
+# Prüfe PLC-Status
+plc = self.app_context.module_manager.get_module('plc_communication')
+if not plc:
+    return jsonify({'error': 'PLC-Modul nicht verfügbar'}), 503
+if not plc.is_connected():
+    return jsonify({'error': 'PLC nicht verbunden'}), 503
+
+success = self.data_gateway.write_plc(symbol, value)
+# ... mit detailliertem Error
+
+Neue Features
+PLC-Symbol Browser (komplett neu)
+Suche: Regex-basiert, case-insensitive
+Filter: Nach Datentyp (BOOL, INT, REAL, STRING)
+Icons: Typ-basiert (toggle-left für BOOL, hash für INT/REAL, etc.)
+TreeView-Struktur: Hierarchische Darstellung vorbereitet
+Auswahl-Button: Symbole können für Widget-Konfiguration ausgewählt werden
+TPY-Upload System
+Drag & Drop Ready: File-Input mit verstecktem Input-Feld
+Status-Feedback: Lade-Anzeige, Erfolg/Fehler-Meldung
+Auto-Parse: Symbole werden automatisch nach Upload geladen
+Cache-Invalidierung: Alter Parser wird verworfen
+MJPEG Live-Streaming
+Zero Latency: MJPEG-Streams werden direkt gerendert
+Fallback: Error-Anzeige wenn Stream nicht erreichbar
+Mixed Streams: RTSP und MJPEG können parallel konfiguriert werden
+Statistik
+Geänderte Dateien (7)
+modules/gateway/plc_symbol_parser.py - 275 Zeilen (NEU)
+modules/gateway/web_manager.py - +147 Zeilen (Upload-Endpoint)
+web/static/js/app.js - +250 Zeilen (Upload, MJPEG, Symbol-Browser)
+web/templates/index.html - +39 Zeilen (Upload-UI, MJPEG-Hinweis)
+modules/gateway/data_gateway.py - Keine Änderung (bereits korrekt)
+web/static/js/socket_handler.js - Keine Änderung
+requirements_web.txt - Keine Änderung
+Code-Zeilen
+Hinzugefügt: ~700 Zeilen
+Geändert: ~150 Zeilen
+Gelöscht: ~50 Zeilen (fehlerhafte Implementierungen)
+Backend API-Endpoints (neu)
+GET /api/plc/symbols?search=...&type=... - Symbol-Suche
+GET /api/plc/symbols/tree - TreeView-Struktur
+POST /api/plc/symbols/upload - TPY-Upload
+Test-Ergebnisse
+Erfolgreich getestet vom User:
+✅ Theme-Toggle funktioniert (Light ↔ Dark)
+✅ PLC-Verbindung klappt
+✅ Navigation funktioniert
+✅ Lucide Icons werden geladen
+
+Noch zu testen:
+⏳ PLC-Symbol Browser (mit .tpy Upload)
+⏳ MJPEG-Stream (https://195.196.36.242/mjpg/video.mjpg)
+⏳ Climate-Page Dark-Theme
+⏳ PLC-Write mit korrekten Fehlermeldungen
+
+Offene TODOs (für zukünftige Sessions)
+Widget-Konfiguration: Ausgewählte Symbole in Widgets einbinden
+MQTT-Konfiguration: Seite ist noch leer
+RTSP-Transkodierung: StreamManager-Modul aktivieren
+Energie-Charts: Graphen/Visualisierungen hinzufügen
+Mobile-Optimierung: Responsive Design testen
+Quick Actions: Dashboard-Buttons funktionsfähig machen
+PLC-Status: Sidebar-Status-Anzeige dynamisch machen
+Wichtige Erkenntnisse
+TwinCAT .tpy Format: Verwendet <Symbol><Name> nicht <Variable>
+Tailwind Dark Mode: Nur dark Klasse verwenden, nicht light
+MJPEG vs RTSP: MJPEG kann direkt ohne Transkodierung gestreamt werden
+Error-Handling: Immer PLC-Status prüfen vor Write-Operationen
+Lucide Icons: Müssen nach dynamischem HTML-Rendering neu initialisiert werden
+Lessons Learned
+Parser-Debugging: Immer erst die tatsächliche Datei-Struktur analysieren
+Theme-Implementierung: Tailwind-Dokumentation genau beachten
+Stream-Typen: MJPEG ist ideal für Web-HMI (keine Transkodierung nötig)
+User-Feedback: Detaillierte Fehlermeldungen sparen Debug-Zeit

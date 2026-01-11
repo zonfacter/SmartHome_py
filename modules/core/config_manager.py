@@ -30,11 +30,28 @@ class ConfigManager(BaseModule):
     
     def __init__(self):
         super().__init__()
-        self.config_dir = None
-        self.config_file = None
-        self.layout_file = None
-        self.backup_dir = None
-        
+
+        # WICHTIG: Pfade SOFORT initialisieren (Race-Condition-Fix)
+        # Setze Basis-Pfade bereits hier, NICHT erst in initialize()
+        # Windows: Nutzt den Ordner, in dem das Projekt liegt
+        # Linux: ~/.config/twincat_smarthome
+        if os.name == 'nt':  # Windows
+            # Nutzt den Ordner, in dem das Projekt liegt
+            docs = os.getcwd()
+            base_config_dir = os.path.join(docs, "TwinCAT_SmartHome")
+        else:  # Linux/Mac
+            base_config_dir = os.path.join(os.path.expanduser("~"), ".config", "twincat_smarthome")
+
+        # Garantiere absoluten Pfad (NIEMALS None!)
+        self.config_dir = os.path.abspath(base_config_dir)
+        self.config_file = os.path.join(self.config_dir, "twincat_config.json")
+        self.layout_file = os.path.join(self.config_dir, "twincat_layout.json")
+        self.backup_dir = os.path.join(self.config_dir, "backups")
+
+        # Erstelle Verzeichnisse sofort (falls noch nicht vorhanden)
+        os.makedirs(self.config_dir, exist_ok=True)
+        os.makedirs(self.backup_dir, exist_ok=True)
+
         self.config = {}
         self.layout = {}
         self.custom_lights = {}
@@ -43,24 +60,15 @@ class ConfigManager(BaseModule):
     def initialize(self, app_context: Any):
         """Initialisiert Config-Manager"""
         super().initialize(app_context)
-        
-        # Setze Pfade
-        self.config_dir = self.get_config_directory()
-        self.config_file = os.path.join(self.config_dir, "twincat_config.json")
-        self.layout_file = os.path.join(self.config_dir, "twincat_layout.json")
-        self.backup_dir = os.path.join(self.config_dir, "backups")
-        
-        # Erstelle Verzeichnisse
-        os.makedirs(self.config_dir, exist_ok=True)
-        os.makedirs(self.backup_dir, exist_ok=True)
-        
-        # Lade Config
+
+        # Pfade sind bereits in __init__() gesetzt (Race-Condition-Fix)
+        # Hier nur noch Config laden
         self.load_config()
         self.load_layout()
-        
-        print(f"  ⚡ {self.NAME} v{self.VERSION} initialisiert")
-        print(f"  ✓ Config-Verzeichnis: {self.config_dir}")
-        print(f"  ✓ Custom Lights: {len(self.custom_lights)}")
+
+        print(f"  [OK] {self.NAME} v{self.VERSION} initialisiert")
+        print(f"  [OK] Config-Verzeichnis: {self.config_dir}")
+        print(f"  [OK] Custom Lights: {len(self.custom_lights)}")
     
     def get_config_directory(self) -> str:
         """Bestimmt Config-Verzeichnis"""
@@ -68,7 +76,8 @@ class ConfigManager(BaseModule):
         # Linux: ~/.config/twincat_smarthome
         
         if os.name == 'nt':  # Windows
-            docs = os.path.join(os.path.expanduser("~"), "Documents")
+            # Nutzt den Ordner, in dem das Projekt liegt
+            docs = os.getcwd()
             return os.path.join(docs, "TwinCAT_SmartHome")
         else:  # Linux/Mac
             return os.path.join(os.path.expanduser("~"), ".config", "twincat_smarthome")
@@ -76,26 +85,26 @@ class ConfigManager(BaseModule):
     def load_config(self) -> bool:
         """Lädt Konfiguration"""
         if not os.path.exists(self.config_file):
-            print(f"  ℹ️  Keine Config gefunden, erstelle Default...")
+            print(f"  [INFO] Keine Config gefunden, erstelle Default...")
             self.create_default_config()
             return False
-        
+
         try:
             with open(self.config_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
+
             # Extrahiere Daten
             self.config = data
             self.custom_lights = data.get('custom_lights', {})
             self.current_theme = data.get('theme', 'blue')
-            
+
             version = data.get('version', '1.0')
-            
-            print(f"  ✓ Config geladen: v{version}, Theme={self.current_theme}")
+
+            print(f"  [OK] Config geladen: v{version}, Theme={self.current_theme}")
             return True
-            
+
         except Exception as e:
-            print(f"  ✗ Fehler beim Laden der Config: {e}")
+            print(f"  [ERROR] Fehler beim Laden der Config: {e}")
             return False
     
     def save_config(self) -> bool:
@@ -121,43 +130,43 @@ class ConfigManager(BaseModule):
             # Speichern
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(config_data, f, indent=2, ensure_ascii=False)
-            
-            print(f"  ✓ Config gespeichert")
+
+            print(f"  [OK] Config gespeichert")
             return True
-            
+
         except Exception as e:
-            print(f"  ✗ Fehler beim Speichern: {e}")
+            print(f"  [ERROR] Fehler beim Speichern: {e}")
             return False
     
     def load_layout(self) -> bool:
         """Lädt Layout"""
         if not os.path.exists(self.layout_file):
-            print(f"  ℹ️  Kein Layout gefunden, verwende Default")
+            print(f"  [INFO] Kein Layout gefunden, verwende Default")
             return False
-        
+
         try:
             with open(self.layout_file, 'r', encoding='utf-8') as f:
                 self.layout = json.load(f)
-            
-            print(f"  ✓ Layout geladen: {len(self.layout)} Cards")
+
+            print(f"  [OK] Layout geladen: {len(self.layout)} Cards")
             return True
-            
+
         except Exception as e:
-            print(f"  ✗ Fehler beim Laden des Layouts: {e}")
+            print(f"  [ERROR] Fehler beim Laden des Layouts: {e}")
             return False
     
     def save_layout(self, layout: Dict) -> bool:
         """Speichert Layout"""
         try:
             self.layout = layout
-            
+
             with open(self.layout_file, 'w', encoding='utf-8') as f:
                 json.dump(layout, f, indent=2)
-            
+
             return True
-            
+
         except Exception as e:
-            print(f"  ✗ Fehler beim Speichern des Layouts: {e}")
+            print(f"  [ERROR] Fehler beim Speichern des Layouts: {e}")
             return False
     
     def create_default_config(self):
@@ -170,12 +179,13 @@ class ConfigManager(BaseModule):
                 'port': 801  # TwinCAT 2 (TC2PLC1 = 801, TC3PLC1 = 851)
             },
             'custom_lights': {},
+            'widgets': {},  # ⭐ v5.1.2: Widget-Section hinzugefügt
             'created': datetime.now().isoformat()
         }
-        
+
         self.custom_lights = {}
         self.current_theme = 'blue'
-        
+
         self.save_config()
     
     def create_backup(self) -> bool:
@@ -193,11 +203,11 @@ class ConfigManager(BaseModule):
             
             # Lösche alte Backups (behalte nur 10)
             self.cleanup_old_backups(max_backups=10)
-            
+
             return True
-            
+
         except Exception as e:
-            print(f"  ✗ Backup-Fehler: {e}")
+            print(f"  [ERROR] Backup-Fehler: {e}")
             return False
     
     def cleanup_old_backups(self, max_backups: int = 10):
@@ -216,9 +226,9 @@ class ConfigManager(BaseModule):
             # Lösche alte
             for filepath, _ in backups[max_backups:]:
                 os.remove(filepath)
-                
+
         except Exception as e:
-            print(f"  ⚠️  Cleanup-Fehler: {e}")
+            print(f"  [WARNING] Cleanup-Fehler: {e}")
     
     def add_custom_light(self, light_id: str, light_data: Dict) -> bool:
         """Fügt Custom Light hinzu"""
@@ -260,7 +270,77 @@ class ConfigManager(BaseModule):
         """Setzt Config-Wert"""
         self.config[key] = value
         return self.save_config()
-    
+
+    def get_widgets(self) -> Dict:
+        """
+        Holt Widget-Konfiguration
+
+        Returns:
+            Dictionary mit Widget-Konfigurationen (leer wenn keine vorhanden)
+        """
+        return self.config.get('widgets', {})
+
+    def set_widgets(self, widgets: Dict) -> bool:
+        """
+        Speichert Widget-Konfiguration
+
+        Args:
+            widgets: Dictionary mit Widget-Konfigurationen
+
+        Returns:
+            True bei Erfolg
+        """
+        self.config['widgets'] = widgets
+        return self.save_config()
+
+    def add_widget(self, widget_id: str, widget_config: Dict) -> bool:
+        """
+        Fügt einzelnes Widget hinzu
+
+        Args:
+            widget_id: Eindeutige Widget-ID
+            widget_config: Widget-Konfiguration
+
+        Returns:
+            True bei Erfolg
+        """
+        widgets = self.get_widgets()
+        widgets[widget_id] = widget_config
+        return self.set_widgets(widgets)
+
+    def remove_widget(self, widget_id: str) -> bool:
+        """
+        Entfernt Widget
+
+        Args:
+            widget_id: Widget-ID
+
+        Returns:
+            True bei Erfolg
+        """
+        widgets = self.get_widgets()
+        if widget_id in widgets:
+            del widgets[widget_id]
+            return self.set_widgets(widgets)
+        return False
+
+    def update_widget(self, widget_id: str, updates: Dict) -> bool:
+        """
+        Aktualisiert Widget-Konfiguration
+
+        Args:
+            widget_id: Widget-ID
+            updates: Dictionary mit Updates
+
+        Returns:
+            True bei Erfolg
+        """
+        widgets = self.get_widgets()
+        if widget_id in widgets:
+            widgets[widget_id].update(updates)
+            return self.set_widgets(widgets)
+        return False
+
     def export_config(self, filepath: str) -> bool:
         """Exportiert Config in Datei"""
         try:
@@ -274,12 +354,12 @@ class ConfigManager(BaseModule):
             
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(export_data, f, indent=2, ensure_ascii=False)
-            
-            print(f"  ✓ Config exportiert: {filepath}")
+
+            print(f"  [OK] Config exportiert: {filepath}")
             return True
-            
+
         except Exception as e:
-            print(f"  ✗ Export-Fehler: {e}")
+            print(f"  [ERROR] Export-Fehler: {e}")
             return False
     
     def import_config(self, filepath: str) -> bool:
@@ -299,18 +379,18 @@ class ConfigManager(BaseModule):
             # Speichere
             self.save_config()
             self.save_layout(self.layout)
-            
-            print(f"  ✓ Config importiert: {len(self.custom_lights)} Lights")
+
+            print(f"  [OK] Config importiert: {len(self.custom_lights)} Lights")
             return True
-            
+
         except Exception as e:
-            print(f"  ✗ Import-Fehler: {e}")
+            print(f"  [ERROR] Import-Fehler: {e}")
             return False
     
     def shutdown(self):
         """Speichert beim Beenden"""
         self.save_config()
-        print("  ✓ Config gespeichert")
+        print("  [OK] Config gespeichert")
 
 
 def register(module_manager):

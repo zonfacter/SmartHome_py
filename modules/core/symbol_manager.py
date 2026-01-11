@@ -54,6 +54,11 @@ class SymbolManager(BaseModule):
     
     def load_cache(self) -> bool:
         """Lädt Symbol-Cache"""
+        # FIX: Prüfe ob cache_file gesetzt ist
+        if not self.cache_file:
+            print(f"  ⚠️  Konnte symbol_cache.json nicht laden: cache_file nicht initialisiert")
+            return False
+
         if not os.path.exists(self.cache_file):
             print(f"  ℹ️  Kein Symbol-Cache gefunden")
             return False

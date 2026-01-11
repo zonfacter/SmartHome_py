@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(chcp 65001)",
+      "Bash(dir:*)",
+      "Bash(set:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(tree:*)",
+      "Bash(ls:*)",
+      "Bash(copy:*)"
+    ]
+  }
+}

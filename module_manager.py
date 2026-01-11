@@ -24,6 +24,14 @@ from enum import Enum
 from typing import Dict, Any, Optional, List
 import json
 
+# Sentry Integration (optional)
+try:
+    import sentry_sdk
+    SENTRY_AVAILABLE = True
+except ImportError:
+    SENTRY_AVAILABLE = False
+    print("  ℹ️  sentry-sdk nicht installiert - Error-Tracking deaktiviert")
+
 
 class ModuleStatus(Enum):
     """Module Status"""
@@ -68,9 +76,37 @@ class ModuleManager:
         self.modules: Dict[str, ModuleInfo] = {}
         self.config_file = config_file or 'module_config.json'
         self.disabled_modules = []
-        
+
+        # Resource Limiter (Phase 10)
+        self.resource_limiter = None
+        self._init_resource_limiter()
+
         # Lade disabled Module aus Config
         self._load_config()
+
+    def _init_resource_limiter(self):
+        """Initialisiert Resource Limiter (falls psutil verfügbar)"""
+        try:
+            from modules.core.resource_limiter import ResourceLimiter
+
+            # CPU-Limit aus Environment oder Default 50%
+            cpu_limit = int(os.getenv('CPU_LIMIT_PERCENT', '50'))
+            check_interval = int(os.getenv('RESOURCE_CHECK_INTERVAL', '5'))
+
+            self.resource_limiter = ResourceLimiter(
+                cpu_limit_percent=cpu_limit,
+                check_interval=check_interval
+            )
+
+            self.resource_limiter.start_monitoring()
+            print(f"  ⚡ Resource Limiter aktiviert (CPU-Limit: {cpu_limit}%)")
+
+        except ImportError:
+            print("  ℹ️  psutil nicht verfügbar - Resource Limiter deaktiviert")
+            self.resource_limiter = None
+        except Exception as e:
+            print(f"  ⚠️  Resource Limiter Fehler: {e}")
+            self.resource_limiter = None
     
     def _load_config(self):
         """Lädt Module-Config (welche disabled sind)"""
@@ -136,33 +172,37 @@ class ModuleManager:
         print(f"  ✓ Modul geladen: {name} v{version}")
         if module_info.has_tab:
             print(f"    └─ Tab: {module_info.tab_icon} {module_info.tab_name}")
-    
+
     def load_module_from_file(self, filepath: str) -> Optional[str]:
-        """Lädt Modul aus Datei"""
+        """Lädt Modul aus Datei und unterscheidet zwischen Plugin und Utility."""
         if not os.path.exists(filepath):
-            print(f"  ✗ Datei nicht gefunden: {filepath}")
             return None
-        
+
         try:
-            # Module-Namen aus Pfad
             module_name = os.path.splitext(os.path.basename(filepath))[0]
-            
-            # Lade Modul
             spec = importlib.util.spec_from_file_location(module_name, filepath)
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
             spec.loader.exec_module(module)
-            
-            # Registriere via register() Funktion
+
+            # Prüfe ob es ein registrierbares Plugin ist
             if hasattr(module, 'register'):
                 module.register(self)
                 return module_name
             else:
-                print(f"  ⚠️  Keine register() Funktion: {filepath}")
+                # ⭐ VERBESSERUNG: Keine Warnung mehr, sondern Info-Meldung
+                # Wir kennzeichnen es als 'Helper' oder 'System-Core'
+                if "core" in filepath or "gateway" in filepath:
+                    print(f"  ⚙️  System-Komponente geladen: {module_name}")
+                else:
+                    print(f"  ℹ️  Utility-Modul (kein Plugin): {module_name}")
                 return None
-                
+
         except Exception as e:
-            print(f"  ✗ Fehler beim Laden von {filepath}: {e}")
+            # Nur hier zeigen wir einen echten Fehler (✗)
+            print(f"  ✗ KRITISCHER FEHLER beim Laden von {filepath}: {e}")
+            if SENTRY_AVAILABLE:
+                sentry_sdk.capture_exception(e)
             return None
     
     def auto_discover_modules(self, base_dir: str = 'modules'):
@@ -173,7 +213,7 @@ class ModuleManager:
         print(f"\n🔍 Auto-Discovery: Scanne {base_dir}/...")
         
         # Durchsuche alle Unterordner
-        subdirs = ['core', 'ui', 'integrations', 'plugins']
+        subdirs = ['core', 'gateway', 'ui', 'integrations', 'plugins']
         
         loaded_count = 0
         for subdir in subdirs:
@@ -368,11 +408,113 @@ class BaseModule:
     
     def __init__(self):
         self.initialized = False
-    
+        self._app_context = None
+        self.sentry_enabled = False
+        self._init_sentry()
+
+    def _init_sentry(self):
+        """Initialisiert Sentry Error-Tracking (falls konfiguriert)"""
+        if not SENTRY_AVAILABLE:
+            return
+
+        sentry_dsn = os.getenv('SENTRY_DSN')
+        if sentry_dsn:
+            try:
+                sentry_sdk.init(
+                    dsn=sentry_dsn,
+                    traces_sample_rate=1.0,
+                    environment=os.getenv('ENVIRONMENT', 'production'),
+                    release=f"{self.NAME}@{self.VERSION}",
+                    # Performance Monitoring
+                    profiles_sample_rate=0.1,
+                    # Error Sampling
+                    sample_rate=1.0
+                )
+                self.sentry_enabled = True
+                print(f"  🔍 Sentry aktiviert für {self.NAME} v{self.VERSION}")
+            except Exception as e:
+                print(f"  ⚠️  Sentry-Initialisierung fehlgeschlagen: {e}")
+                self.sentry_enabled = False
+
+    def log_error(self, error: Exception, context: dict = None, level: str = 'error'):
+        """
+        Loggt Error zu Sentry mit optionalem Context
+
+        Args:
+            error: Exception-Objekt
+            context: Zusätzlicher Context (dict)
+            level: Sentry-Level ('error', 'warning', 'info', 'fatal')
+        """
+        # Sentry Logging
+        if self.sentry_enabled:
+            try:
+                with sentry_sdk.push_scope() as scope:
+                    # Module Context
+                    scope.set_context("module", {
+                        "name": self.NAME,
+                        "version": self.VERSION,
+                        "description": self.DESCRIPTION,
+                        "author": self.AUTHOR
+                    })
+
+                    # Custom Context
+                    if context:
+                        scope.set_context("additional", context)
+
+                    # Level setzen
+                    scope.level = level
+
+                    # Tags
+                    scope.set_tag("module", self.NAME)
+                    scope.set_tag("environment", os.getenv('ENVIRONMENT', 'production'))
+
+                    # Exception erfassen
+                    sentry_sdk.capture_exception(error)
+
+            except Exception as e:
+                print(f"  ⚠️  Sentry-Logging fehlgeschlagen: {e}")
+
+        # Lokales Logging
+        print(f"  ✗ [{self.NAME}] {level.upper()}: {error}")
+        if context:
+            print(f"     Context: {context}")
+
+    def log_message(self, message: str, level: str = 'info', context: dict = None):
+        """
+        Loggt Nachricht zu Sentry
+
+        Args:
+            message: Nachricht
+            level: Sentry-Level ('error', 'warning', 'info')
+            context: Zusätzlicher Context (dict)
+        """
+        if self.sentry_enabled:
+            try:
+                with sentry_sdk.push_scope() as scope:
+                    scope.set_context("module", {
+                        "name": self.NAME,
+                        "version": self.VERSION
+                    })
+
+                    if context:
+                        scope.set_context("additional", context)
+
+                    scope.level = level
+                    scope.set_tag("module", self.NAME)
+
+                    sentry_sdk.capture_message(message, level)
+
+            except Exception as e:
+                print(f"  ⚠️  Sentry-Message fehlgeschlagen: {e}")
+
+        # Lokales Logging
+        print(f"  [{self.NAME}] {message}")
+
     def initialize(self, app_context: Any):
         """Initialisiert Modul"""
+        self._app_context = app_context
         self.initialized = True
-    
+
     def shutdown(self):
         """Shutdown-Hook"""
         pass

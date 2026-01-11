@@ -1,0 +1,22 @@
+# SmartHome Edge OS v5.0 Dependencies
+
+# Core
+Flask==3.0.0
+Flask-SocketIO==5.3.5
+python-socketio==5.10.0
+
+# PLC/Industrial
+pyads==3.5.0
+
+# Bluetooth (BLE)
+bleak==0.22.3
+
+# Database
+influxdb==5.3.1
+
+# Monitoring & Error Tracking
+psutil==7.2.1
+sentry-sdk==2.49.0
+
+# Optional
+requests==2.31.0

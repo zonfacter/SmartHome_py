@@ -1,0 +1,16 @@
+{
+  "plc_configs": {
+    "plc_001": {
+      "name": "Keller",
+      "ams_net_id": "192.168.2.162.1.1",
+      "ams_port": 801,
+      "ip_address": "192.168.2.162",
+      "tpy_file": null,
+      "description": "",
+      "created": "2026-01-04T10:04:38.952646",
+      "last_modified": "2026-01-04T10:04:38.952646",
+      "active": true
+    }
+  },
+  "active_plc": "plc_001"
+}
