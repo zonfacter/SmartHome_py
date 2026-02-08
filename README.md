@@ -841,11 +841,109 @@ Alte Module löschen!
 Python 3.8+
 ```
 
-**Abhängigkeiten:**
+**Abhängigkeiten (Windows):**
 ```bash
 pip install pyads --break-system-packages
 pip install paho-mqtt --break-system-packages  # Für MQTT
 pip install pymodbus --break-system-packages   # Für Modbus (optional)
+```
+
+**Abhängigkeiten (Linux / Debian):**
+```bash
+# Virtual Environment erstellen (empfohlen)
+python3 -m venv venv
+source venv/bin/activate
+
+# Pakete installieren
+pip install -r requirements.txt
+```
+
+### **1b. Linux-Setup (ADS-Route zu Beckhoff PLC)**
+
+Auf Linux-Systemen gibt es keinen TwinCAT ADS Router. pyads nutzt eine eingebaute
+Standalone-Bibliothek, die direkte TCP-Verbindungen zur PLC aufbaut.
+
+**ADS-Route automatisch einrichten:**
+```bash
+source venv/bin/activate
+python3 scripts/setup_ads_route.py
+```
+
+**ADS-Route manuell einrichten (Python):**
+```python
+import pyads
+
+# 1. Lokale AMS Net ID setzen
+pyads.open_port()
+pyads.set_local_address('192.168.2.123.1.1')  # AMS dieses Rechners
+
+# 2. Route zur PLC anlegen (lokal)
+pyads.add_route('192.168.2.162.1.1', '192.168.2.162')
+
+# 3. Route auf der PLC anlegen (bidirektional)
+pyads.add_route_to_plc(
+    sending_net_id='192.168.2.123.1.1',
+    adding_host_name='192.168.2.123',   # IP dieses Rechners
+    ip_address='192.168.2.162',          # IP der PLC
+    username='Administrator',
+    password='1',
+    route_name='SmartHomeVM'
+)
+pyads.close_port()
+
+# 4. Verbindung mit expliziter IP (Pflicht auf Linux!)
+plc = pyads.Connection('192.168.2.162.1.1', pyads.PORT_TC2PLC1, '192.168.2.162')
+plc.open()
+```
+
+> **Wichtig:** Auf Linux muss `pyads.Connection()` immer mit dem **3. Parameter (IP-Adresse)**
+> aufgerufen werden, da kein lokaler ADS Router Daemon läuft.
+
+**Route auf der PLC-Seite (falls add_route_to_plc fehlschlägt):**
+
+Auf der PLC muss eine statische Route existieren:
+- **Name:** SmartHomeVM (o.ä.)
+- **AMS Net Id:** 192.168.2.123.1.1 (AMS des Linux-Rechners)
+- **Address:** 192.168.2.123 (IP des Linux-Rechners)
+- **Transport:** TCP/IP
+
+Bei TwinCAT 2 (CX-Serie): Route über TwinCAT System Manager oder CERHost anlegen.
+Bei TwinCAT 3: Route über TwinCAT XAE unter SYSTEM → Routes anlegen.
+
+> **Hinweis:** ADS-Routen werden sofort wirksam — ein TwinCAT-Neustart ist NICHT nötig.
+
+### **1c. Beckhoff CX8090 Besonderheiten**
+
+Die CX8090 (TwinCAT 2, Windows CE) hat spezifische Eigenschaften bei der
+ADS-Kommunikation über TCP:
+
+| Eigenschaft | Wert |
+|---|---|
+| ADS Port (PLC Runtime 1) | 801 (`pyads.PORT_TC2PLC1`) |
+| TCP Connection Cooldown | ~5 Sekunden nach Disconnect |
+| Erstkontakt nach open() | `read_device_info()` statt `read_state()` verwenden |
+| InvokeId Mismatch | Erster `read_state()` nach `open()` kann fehlschlagen |
+| Symbole | 14.264 (vollständiges Lesen via `get_all_symbols()`) |
+
+**Connection Cooldown:**
+Die CX8090 benötigt ca. 5 Sekunden nach dem Schließen einer TCP-Verbindung,
+bevor sie auf einer neuen Verbindung wieder ADS-Requests beantwortet.
+Dies muss beim Auto-Reconnect berücksichtigt werden:
+
+```python
+plc.close()
+time.sleep(5)  # CX8090 Connection Cooldown
+plc.open()
+```
+
+**Zuverlässiger Verbindungstest:**
+```python
+# read_state() hat InvokeId-Probleme auf CX8090 direkt nach open()
+# Stattdessen read_device_info() verwenden:
+plc.open()
+time.sleep(2)
+name, version = plc.read_device_info()  # Zuverlässiger als read_state()
+print(f"PLC: {name} v{version.version}.{version.revision}.{version.build}")
 ```
 
 ### **2. Datei-Struktur erstellen**
@@ -1267,6 +1365,29 @@ Lösung: Alte *_module.py löschen
 **2. "PLC verbindet nicht"**
 ```
 Prüfe: Port 801 (TC2) oder 851 (TC3)?
+```
+
+**5. "ADSError: timeout elapsed (1861)" auf Linux**
+```
+Mögliche Ursachen:
+- Route auf PLC-Seite fehlt → Statische Route auf PLC anlegen
+- Keine IP beim Connection()-Aufruf → 3. Parameter (IP) angeben!
+- CX8090 Connection Cooldown → 5s warten nach Disconnect
+- Netzwerk-Problem → ping zur PLC prüfen
+- Firewall → TCP Port 48898 muss offen sein
+```
+
+**6. "InvokeId mismatch" bei CX8090**
+```
+Normal bei CX8090 nach open(). read_device_info() statt read_state()
+als ersten Befehl verwenden. Siehe Abschnitt "CX8090 Besonderheiten".
+```
+
+**7. "ADSError: Ads operation failed with error code 6" (adstool)**
+```
+Error 6 = Lokaler ADS-Router kann Route nicht finden.
+Bei adstool den --gw Parameter verwenden:
+  adstool 192.168.2.162:801 --gw=192.168.2.162 --localams=192.168.2.123.1.1 state
 ```
 
 **3. "MQTT nicht verfügbar"**
