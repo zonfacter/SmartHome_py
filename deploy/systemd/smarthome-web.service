@@ -1,0 +1,25 @@
+[Unit]
+Description=SmartHome Web HMI
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=hytale
+Group=hytale
+WorkingDirectory=/opt/Smarthome-Web
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/opt/Smarthome-Web/.env
+ExecStartPre=/bin/bash -lc 'pids=$(/usr/bin/pgrep -u hytale -f "[s]tart_web_hmi.py --host 0.0.0.0 --port 5000" || true); [ -n "$pids" ] && /bin/kill $pids || true'
+ExecStart=/opt/Smarthome-Web/venv/bin/python /opt/Smarthome-Web/start_web_hmi.py --host 0.0.0.0 --port 5000
+Restart=always
+RestartSec=1
+KillSignal=SIGTERM
+TimeoutStopSec=20
+StandardOutput=append:/var/log/smarthome-web.log
+StandardError=append:/var/log/smarthome-web.log
+
+[Install]
+WantedBy=multi-user.target
