@@ -13,6 +13,7 @@ import re
 import threading
 import time
 from concurrent.futures import TimeoutError as FuturesTimeoutError
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 try:
@@ -376,6 +377,59 @@ def get_ring_snapshot(device_id: str, retries: int = 3, delay: int = 1) -> Dict[
             if not data:
                 return {"success": False, "error": "Kein Snapshot von Ring erhalten"}
             return {"success": True, "content": data}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+
+async def _async_get_latest_ding(device_id: str) -> Dict[str, Any]:
+    auth, ring, http_session = await _async_with_ring()
+    try:
+        target_id = str(device_id)
+        camera = next((c for c in ring.video_devices() if str(c.device_api_id) == target_id), None)
+        if not camera:
+            raise RuntimeError(f"Ring-Kamera mit device_id '{device_id}' nicht gefunden")
+
+        events = await camera.async_history(
+            limit=1,
+            kind="ding",
+            enforce_limit=True,
+            retry=1,
+            convert_timezone=False,
+        )
+        if not events:
+            return {"success": True, "event": None}
+
+        event = events[0] or {}
+        created_at = event.get("created_at")
+        ding_ts = None
+        if isinstance(created_at, datetime):
+            ding_ts = int(created_at.timestamp())
+        elif isinstance(created_at, str):
+            # Fallback: keep raw string when datetime conversion is unavailable.
+            ding_ts = created_at
+
+        return {
+            "success": True,
+            "event": {
+                "id": str(event.get("id")) if event.get("id") is not None else None,
+                "kind": event.get("kind"),
+                "ding_ts": ding_ts,
+                "created_at": str(created_at) if created_at is not None else None,
+            },
+        }
+    finally:
+        await auth.async_close()
+        await _close_http_session(http_session)
+
+
+def get_ring_latest_ding(device_id: str) -> Dict[str, Any]:
+    """Liefert das letzte Ring-Klingel-Event (kind=ding) fuer ein Device."""
+    if not RING_AVAILABLE:
+        return {"success": False, "error": "ring_doorbell nicht installiert"}
+
+    with _LOCK:
+        try:
+            return _RUNTIME.run(_async_get_latest_ding(device_id), timeout=60)
         except Exception as e:
             return {"success": False, "error": str(e)}
 

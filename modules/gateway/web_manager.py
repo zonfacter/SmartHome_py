@@ -6,7 +6,7 @@ FINAL FIX: Beseitigt NoneType-Pfadfehler durch synchrone Initialisierung.
 """
 
 from module_manager import BaseModule
-from typing import Any, Dict
+from typing import Any, Dict, List
 import threading
 import time
 import os
@@ -76,6 +76,11 @@ class WebManager(BaseModule):
 
         # ONVIF PTZ Controllers (lazy, gecacht)
         self._onvif_controllers = {}
+        self._ring_event_thread = None
+        self._ring_event_active = False
+        self._ring_last_event_ids = {}
+        self._ring_doorbell_until = {}
+        self._ring_doorbell_pulse_seconds = 10.0
 
     def initialize(self, app_context: Any):
         """Initialisiert das Modul und erzwingt absolute Pfade für alle Manager."""
@@ -448,17 +453,18 @@ class WebManager(BaseModule):
         @self.app.route('/api/plc/symbols', methods=['GET'])
         def get_plc_symbols():
             """Liefert Symbole für den Browser (pyads 3.5.0)."""
-            if not self.symbol_browser:
-                logger.warning("Symbol-Browser nicht verfuegbar")
-                return jsonify({'symbols': [], 'count': 0})
-
             conn_id = request.args.get('connection_id', 'plc_001')
             force = request.args.get('refresh', 'false').lower() == 'true'
 
             try:
-                symbols = self.symbol_browser.get_symbols(conn_id, force_refresh=force)
-                if not symbols:
-                    symbols = []
+                symbols = []
+                if self.symbol_browser:
+                    symbols = self.symbol_browser.get_symbols(conn_id, force_refresh=force) or []
+                else:
+                    logger.warning("Symbol-Browser nicht verfuegbar - liefere nur Gateway-Variablen")
+
+                # Gateway-Variablen (z. B. Ring-Klingel) in die Auswahlliste aufnehmen
+                symbols.extend(self._get_gateway_virtual_symbols())
 
                 logger.info(f"Symbol-Abruf: {len(symbols)} Symbole geladen")
 
@@ -1591,6 +1597,18 @@ class WebManager(BaseModule):
                 if not variable:
                     return jsonify({'status': 'error', 'message': 'Variable fehlt'}), 400
 
+                # Gateway-interne Variablen (nicht-PLC) direkt in Telemetrie schreiben
+                if variable.startswith('GATEWAY.') and self.data_gateway:
+                    self.data_gateway.update_telemetry(variable, value)
+                    logger.info(f"✍️  Gateway-Variable geschrieben: {variable} = {value}")
+                    return jsonify({
+                        'status': 'success',
+                        'message': 'Gateway-Variable geschrieben',
+                        'variable': variable,
+                        'value': value,
+                        'plc_id': plc_id
+                    })
+
                 # Schreibe über Data Gateway
                 success = self.data_gateway.write_variable(variable, value, plc_id)
 
@@ -1633,6 +1651,22 @@ class WebManager(BaseModule):
 
                 if not variable:
                     return jsonify({'status': 'error', 'message': 'Variable fehlt'}), 400
+
+                # Gateway-interne Variablen (nicht-PLC) direkt aus Telemetrie lesen
+                if variable.startswith('GATEWAY.') and self.data_gateway:
+                    value = self.data_gateway.get_telemetry(variable)
+                    if value is None:
+                        return jsonify({'status': 'error', 'message': 'Gateway-Variable nicht gefunden'}), 404
+                    timestamp = time.time()
+                    self.variable_manager.update_value(variable, value, plc_id)
+                    return jsonify({
+                        'status': 'success',
+                        'variable': variable,
+                        'value': value,
+                        'timestamp': timestamp,
+                        'plc_id': plc_id,
+                        'source': 'gateway'
+                    })
 
                 # Versuche aus Cache
                 if use_cache:
@@ -1812,6 +1846,152 @@ class WebManager(BaseModule):
                 logger.error(f"Fehler bei unsubscribe_variable: {e}", exc_info=True)
                 emit('error', {'message': str(e)})
 
+    def _load_cameras_config_for_monitor(self) -> Dict[str, Any]:
+        path = os.path.join(os.path.abspath(os.getcwd()), 'config', 'cameras.json')
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                return {"cameras": {}}
+        return {"cameras": {}}
+
+    def _get_ring_camera_configs(self) -> List[Dict[str, str]]:
+        config = self._load_cameras_config_for_monitor()
+        cameras = config.get('cameras', {}) or {}
+        ring_cams = []
+        for cam_id, cam_cfg in cameras.items():
+            if (cam_cfg.get('type') or '').lower() != 'ring':
+                continue
+            device_id = str((cam_cfg.get('ring') or {}).get('device_id') or '').strip()
+            if not device_id:
+                continue
+            ring_cams.append({
+                'cam_id': str(cam_id),
+                'device_id': device_id,
+                'name': cam_cfg.get('name') or str(cam_id)
+            })
+        return ring_cams
+
+    def _get_gateway_virtual_symbols(self) -> List[Dict[str, Any]]:
+        """Gateway-eigene Variablen für die Symbolauswahl (z. B. Ring)."""
+        symbols = []
+        for cam in self._get_ring_camera_configs():
+            base = f"GATEWAY.RING.{cam['cam_id']}"
+            symbols.extend([
+                {
+                    'name': f"{base}.doorbell",
+                    'type': 'BOOL',
+                    'index_group': 0,
+                    'index_offset': 0,
+                    'size': 1,
+                    'comment': f"Ring Klingel-Trigger ({cam['name']})"
+                },
+                {
+                    'name': f"{base}.last_ding_ts",
+                    'type': 'DINT',
+                    'index_group': 0,
+                    'index_offset': 0,
+                    'size': 4,
+                    'comment': f"Unix-Zeitstempel letztes Klingeln ({cam['name']})"
+                },
+                {
+                    'name': f"{base}.last_event_id",
+                    'type': 'STRING',
+                    'index_group': 0,
+                    'index_offset': 0,
+                    'size': 80,
+                    'comment': f"Letzte Ring Event-ID ({cam['name']})"
+                },
+            ])
+        return symbols
+
+    def _set_ring_doorbell_state(self, cam_id: str, cam_name: str, event_id: str, ding_ts: Any, active: bool):
+        if not self.data_gateway:
+            return
+
+        base = f"GATEWAY.RING.{cam_id}"
+        self.data_gateway.update_telemetry(f"{base}.doorbell", bool(active))
+        if event_id:
+            self.data_gateway.update_telemetry(f"{base}.last_event_id", str(event_id))
+        if ding_ts is not None:
+            self.data_gateway.update_telemetry(f"{base}.last_ding_ts", ding_ts)
+
+        if active:
+            self.broadcast_event('camera_alert', {
+                'cam_id': cam_id,
+                'name': cam_name,
+                'type': 'ring',
+                'source': 'ring_doorbell',
+                'event_id': event_id,
+                'timestamp': int(time.time())
+            })
+
+    def _ring_event_loop(self):
+        while self._ring_event_active:
+            try:
+                ring_cams = self._get_ring_camera_configs()
+                if not ring_cams:
+                    time.sleep(3.0)
+                    continue
+
+                for cam in ring_cams:
+                    cam_id = cam['cam_id']
+                    device_id = cam['device_id']
+                    cam_name = cam['name']
+
+                    # Auto-reset des Doorbell-Pulses
+                    until = self._ring_doorbell_until.get(cam_id)
+                    if until and time.time() >= until:
+                        self._ring_doorbell_until.pop(cam_id, None)
+                        self._set_ring_doorbell_state(cam_id, cam_name, self._ring_last_event_ids.get(cam_id), None, False)
+
+                    try:
+                        from modules.integrations.ring_module import get_ring_latest_ding
+                        result = get_ring_latest_ding(device_id)
+                    except Exception:
+                        continue
+
+                    if not result.get('success'):
+                        continue
+                    event = result.get('event')
+                    if not event:
+                        continue
+
+                    event_id = str(event.get('id') or '')
+                    if not event_id:
+                        continue
+
+                    if self._ring_last_event_ids.get(cam_id) != event_id:
+                        self._ring_last_event_ids[cam_id] = event_id
+                        ding_ts = event.get('ding_ts')
+                        self._ring_doorbell_until[cam_id] = time.time() + self._ring_doorbell_pulse_seconds
+                        self._set_ring_doorbell_state(cam_id, cam_name, event_id, ding_ts, True)
+
+                time.sleep(2.0)
+            except Exception as e:
+                logger.warning(f"Ring-Event-Monitor Fehler: {e}")
+                time.sleep(3.0)
+
+    def _start_ring_event_monitor(self):
+        if self._ring_event_active:
+            return
+        # Initialisiere bekannte Ring-Variablen mit Defaultwerten,
+        # damit sie sofort im Gateway lesbar sind.
+        if self.data_gateway:
+            for cam in self._get_ring_camera_configs():
+                self._set_ring_doorbell_state(cam['cam_id'], cam['name'], '', None, False)
+        self._ring_event_active = True
+        self._ring_event_thread = threading.Thread(target=self._ring_event_loop, daemon=True)
+        self._ring_event_thread.start()
+        logger.info("Ring Event Monitor gestartet")
+
+    def _stop_ring_event_monitor(self):
+        self._ring_event_active = False
+        if self._ring_event_thread and self._ring_event_thread.is_alive():
+            self._ring_event_thread.join(timeout=2.0)
+        self._ring_event_thread = None
+
     def broadcast_telemetry(self, key: str, value: Any):
         """
         Sendet Telemetrie-Update an alle Clients
@@ -1852,6 +2032,7 @@ class WebManager(BaseModule):
         # Setup SocketIO Events
         if self.socketio:
             self._setup_socketio()
+        self._start_ring_event_monitor()
 
         try:
             self.socketio.run(
@@ -1867,9 +2048,11 @@ class WebManager(BaseModule):
             print(f"  ✗ Server-Fehler: {e}")
         finally:
             self.running = False
+            self._stop_ring_event_monitor()
 
     def shutdown(self):
         self.running = False
+        self._stop_ring_event_monitor()
 
         # ⭐ v5.1.0: Stop Variable Polling
         if self.data_gateway:
