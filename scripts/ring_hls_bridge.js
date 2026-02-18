@@ -70,15 +70,23 @@ process.on('unhandledRejection', (e) => {
   }
 
   liveCall = await cam.streamVideo({
-    input: ['-fflags', 'nobuffer', '-flags', 'low_delay'],
+    input: [
+      '-fflags', 'nobuffer',
+      '-flags', 'low_delay',
+      '-probesize', '32768',
+      '-analyzeduration', '0',
+      '-reorder_queue_size', '0',
+    ],
     audio: ['-an'],
     video: ['-vcodec', 'copy'],
     output: [
       '-f', 'hls',
-      '-hls_time', '1',
-      '-hls_list_size', '4',
-      '-hls_delete_threshold', '8',
-      '-hls_flags', 'delete_segments+append_list+omit_endlist+independent_segments',
+      '-hls_time', '0.6',
+      '-hls_list_size', '6',
+      '-hls_delete_threshold', '10',
+      '-hls_flags', 'delete_segments+append_list+omit_endlist+independent_segments+split_by_time',
+      '-muxdelay', '0',
+      '-muxpreload', '0',
       '-hls_segment_filename', segmentPattern,
       playlist,
     ],

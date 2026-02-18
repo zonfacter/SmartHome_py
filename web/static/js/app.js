@@ -2380,12 +2380,12 @@ class SmartHomeApp {
     // FULLSCREEN OVERLAY
     // ========================================================================
 
-    _loadFullscreenHls(videoEl, camId, attempt = 0, customHlsUrl = null) {
+    _loadFullscreenHls(videoEl, camId, attempt = 0, customHlsUrl = null, fastStart = false) {
         const maxAttempts = 5;
         const hlsUrl = customHlsUrl || `/static/hls/${camId}.m3u8`;
 
-        // Erste Wartezeit: 3s, danach 2s bei Retries
-        const delay = attempt === 0 ? 3000 : 2000;
+        // RTSP benötigt oft Startpuffer; Ring-Bridge kann schneller starten.
+        const delay = attempt === 0 ? (fastStart ? 300 : 3000) : (fastStart ? 1000 : 2000);
 
         setTimeout(() => {
             // Abbruch wenn Fullscreen schon geschlossen wurde
@@ -2413,7 +2413,7 @@ class SmartHomeApp {
                         console.warn(`Fullscreen HLS Fehler (Versuch ${attempt + 1}/${maxAttempts}), retry...`);
                         hls.destroy();
                         this._fullscreenHls = null;
-                        this._loadFullscreenHls(videoEl, camId, attempt + 1, customHlsUrl);
+                        this._loadFullscreenHls(videoEl, camId, attempt + 1, customHlsUrl, fastStart);
                     }
                 });
                 this._fullscreenHls = hls;
@@ -2487,7 +2487,7 @@ class SmartHomeApp {
                 if (bridgeResp.ok && bridgeData.success && bridgeData.hls_url) {
                     imageEl.style.display = 'none';
                     videoEl.style.display = '';
-                    this._loadFullscreenHls(videoEl, camId, 0, bridgeData.hls_url);
+                    this._loadFullscreenHls(videoEl, camId, 0, bridgeData.hls_url, true);
                     return;
                 }
             } catch (e) {

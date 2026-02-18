@@ -56,6 +56,7 @@ class StreamManager(BaseModule):
 
         # Streams
         self.streams = {}  # camera_id -> {process, rtsp_url, hls_path, etc.}
+        self._delayed_stop_timers = {}  # camera_id -> Timer
 
         # HLS Output-Verzeichnis
         self.hls_dir = 'web/static/hls'
@@ -140,6 +141,7 @@ class StreamManager(BaseModule):
             return False
 
         with self.lock:
+            self._cancel_delayed_stop(camera_id)
             # Prüfe ob bereits läuft
             if camera_id in self.streams:
                 current = self.streams[camera_id]
@@ -247,6 +249,7 @@ class StreamManager(BaseModule):
             True wenn erfolgreich gestoppt
         """
         with self.lock:
+            self._cancel_delayed_stop(camera_id)
             if camera_id not in self.streams:
                 return False
 
@@ -270,6 +273,34 @@ class StreamManager(BaseModule):
             print(f"  ⏸️  Stream '{camera_id}' gestoppt")
             return True
 
+    def _cancel_delayed_stop(self, camera_id: str):
+        timer = self._delayed_stop_timers.pop(camera_id, None)
+        if timer:
+            try:
+                timer.cancel()
+            except Exception:
+                pass
+
+    def schedule_stop_stream(self, camera_id: str, delay_seconds: float = 45.0, cleanup: bool = True) -> bool:
+        """Plant ein verzögertes Stoppen (Warm-Stream für schnelleren Re-Start)."""
+        with self.lock:
+            if camera_id not in self.streams:
+                return False
+
+            self._cancel_delayed_stop(camera_id)
+
+            def _delayed():
+                try:
+                    self.stop_stream(camera_id, cleanup=cleanup)
+                except Exception:
+                    pass
+
+            timer = threading.Timer(max(1.0, float(delay_seconds)), _delayed)
+            timer.daemon = True
+            self._delayed_stop_timers[camera_id] = timer
+            timer.start()
+            return True
+
     def stop_all_streams(self):
         """Stoppt alle laufenden Streams"""
         with self.lock:
@@ -290,6 +321,7 @@ class StreamManager(BaseModule):
             return False
 
         with self.lock:
+            self._cancel_delayed_stop(camera_id)
             if camera_id in self.streams:
                 current = self.streams[camera_id]
                 process = current.get('process')

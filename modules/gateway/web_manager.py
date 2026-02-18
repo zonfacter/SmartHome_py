@@ -1393,7 +1393,15 @@ class WebManager(BaseModule):
                 if not stream_mgr:
                     return jsonify({'error': 'Stream Manager nicht verfuegbar'}), 503
 
-                success = stream_mgr.stop_stream(cam_id)
+                config = _load_cameras_config()
+                cam_cfg = config.get('cameras', {}).get(cam_id) or {}
+                cam_type = (cam_cfg.get('type') or 'rtsp').lower()
+                data = request.get_json(silent=True) or {}
+                immediate = bool(data.get('immediate', False))
+                if cam_type == 'ring' and not immediate:
+                    success = stream_mgr.schedule_stop_stream(cam_id, delay_seconds=45.0, cleanup=True)
+                else:
+                    success = stream_mgr.stop_stream(cam_id)
                 return jsonify({'success': success})
             except Exception as e:
                 logger.error(f"Fehler bei POST /api/cameras/{cam_id}/stop: {e}", exc_info=True)
@@ -2026,6 +2034,19 @@ class WebManager(BaseModule):
             self.data_gateway.update_telemetry(f"{base}.last_ding_ts", ding_ts)
 
         if active:
+            # Ring-Bridge beim Klingeln vorwärmen: reduziert Zeit bis Live-Bild sichtbar.
+            try:
+                stream_mgr = self.app_context.module_manager.get_module('stream_manager') if self.app_context else None
+                if stream_mgr:
+                    from modules.integrations.ring_module import get_ring_refresh_token
+                    refresh_token = get_ring_refresh_token()
+                    ring_cams = {c['cam_id']: c for c in self._get_ring_camera_configs()}
+                    ring_cfg = ring_cams.get(cam_id)
+                    if ring_cfg and refresh_token:
+                        stream_mgr.start_ring_stream(cam_id, ring_cfg['device_id'], refresh_token)
+            except Exception:
+                pass
+
             self.broadcast_event('camera_alert', {
                 'cam_id': cam_id,
                 'name': cam_name,
