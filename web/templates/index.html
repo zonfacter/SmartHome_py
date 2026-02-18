@@ -439,6 +439,61 @@
                 </div>
             </div>
 
+            <!-- ADS Route Setup -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">ADS TwinCAT Routen</h2>
+                    <button id="ads-route-status-btn" class="px-3 py-1.5 text-xs bg-gray-600 text-white rounded hover:bg-gray-500">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5 inline mr-1"></i> Status
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                    <div>
+                        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Lokale AMS Net ID</label>
+                        <input id="ads-local-ams-net-id" type="text" placeholder="192.168.2.123.1.1"
+                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Lokale IP</label>
+                        <input id="ads-local-ip" type="text" placeholder="192.168.2.123"
+                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">PLC AMS Net ID</label>
+                        <input id="ads-plc-ams-net-id" type="text" placeholder="192.168.2.162.1.1"
+                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">PLC IP</label>
+                        <input id="ads-plc-ip" type="text" placeholder="192.168.2.162"
+                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">PLC User</label>
+                        <input id="ads-plc-user" type="text" placeholder="Administrator"
+                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">PLC Passwort</label>
+                        <input id="ads-plc-password" type="password" placeholder="Passwort"
+                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Route Name</label>
+                        <input id="ads-route-name" type="text" value="SmartHomeWeb"
+                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2 mb-3">
+                    <button id="ads-route-add-btn" class="px-3 py-2 text-xs bg-blue-600 text-white rounded hover:bg-blue-500">Route anlegen</button>
+                    <button id="ads-route-test-btn" class="px-3 py-2 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-500">Route testen</button>
+                </div>
+
+                <div id="ads-route-status" class="text-xs text-gray-500 dark:text-gray-400">Status nicht geladen</div>
+            </div>
+
             <!-- Routing Setup -->
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
                 <div class="flex items-center justify-between mb-4">

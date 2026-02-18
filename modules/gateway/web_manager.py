@@ -774,6 +774,172 @@ class WebManager(BaseModule):
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
 
+        @self.app.route('/api/plc/ads/route/status', methods=['GET'])
+        def plc_ads_route_status():
+            """Liefert pyads/AMS-Routing Status (lokale AMS-Adresse, Verfügbarkeit)."""
+            try:
+                try:
+                    import pyads
+                except Exception as import_err:
+                    return jsonify({
+                        'success': True,
+                        'available': False,
+                        'error': f'pyads nicht verfügbar: {import_err}'
+                    })
+
+                local_ams_net_id = ''
+                try:
+                    pyads.open_port()
+                    local_addr = pyads.get_local_address()
+                    local_ams_net_id = str(getattr(local_addr, 'netid', local_addr) or '')
+                finally:
+                    try:
+                        pyads.close_port()
+                    except Exception:
+                        pass
+
+                return jsonify({
+                    'success': True,
+                    'available': True,
+                    'local_ams_net_id': local_ams_net_id,
+                    'runtime_defaults': {
+                        'TC2': 801,
+                        'TC3': 851
+                    }
+                })
+            except Exception as e:
+                logger.error(f"Fehler bei GET /api/plc/ads/route/status: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/plc/ads/route/add', methods=['POST'])
+        def plc_ads_route_add():
+            """
+            Erstellt ADS-Route lokal und auf der PLC.
+            Erwartet: local_ams_net_id, local_ip, plc_ams_net_id, plc_ip, username, password, route_name
+            """
+            data = request.get_json(silent=True) or {}
+            local_ams_net_id = str(data.get('local_ams_net_id') or '').strip()
+            local_ip = str(data.get('local_ip') or '').strip()
+            plc_ams_net_id = str(data.get('plc_ams_net_id') or '').strip()
+            plc_ip = str(data.get('plc_ip') or '').strip()
+            username = str(data.get('username') or '').strip()
+            password = str(data.get('password') or '')
+            route_name = str(data.get('route_name') or 'SmartHomeWeb').strip() or 'SmartHomeWeb'
+
+            if not local_ams_net_id:
+                return jsonify({'success': False, 'error': 'local_ams_net_id fehlt'}), 400
+            if not plc_ams_net_id:
+                return jsonify({'success': False, 'error': 'plc_ams_net_id fehlt'}), 400
+            if not plc_ip:
+                return jsonify({'success': False, 'error': 'plc_ip fehlt'}), 400
+            if not username:
+                return jsonify({'success': False, 'error': 'username fehlt'}), 400
+            if password == '':
+                return jsonify({'success': False, 'error': 'password fehlt'}), 400
+
+            if not local_ip:
+                parts = local_ams_net_id.split('.')
+                if len(parts) >= 4:
+                    local_ip = '.'.join(parts[:4])
+
+            warnings = []
+
+            try:
+                import pyads
+            except Exception as import_err:
+                return jsonify({'success': False, 'error': f'pyads nicht verfügbar: {import_err}'}), 500
+
+            try:
+                pyads.open_port()
+                pyads.set_local_address(local_ams_net_id)
+
+                try:
+                    pyads.add_route(plc_ams_net_id, plc_ip)
+                except Exception as add_route_err:
+                    if 'exists' not in str(add_route_err).lower():
+                        warnings.append(f"Lokale Route: {add_route_err}")
+
+                try:
+                    pyads.add_route_to_plc(
+                        sending_net_id=local_ams_net_id,
+                        adding_host_name=local_ip,
+                        ip_address=plc_ip,
+                        username=username,
+                        password=password,
+                        route_name=route_name
+                    )
+                except Exception as add_plc_err:
+                    err_txt = str(add_plc_err)
+                    if 'exists' in err_txt.lower():
+                        warnings.append('Route existiert bereits auf der PLC')
+                    else:
+                        return jsonify({'success': False, 'error': f'PLC-Route fehlgeschlagen: {err_txt}', 'warnings': warnings}), 500
+
+                return jsonify({
+                    'success': True,
+                    'message': 'ADS-Route angelegt',
+                    'warnings': warnings,
+                    'local_ams_net_id': local_ams_net_id,
+                    'plc_ams_net_id': plc_ams_net_id,
+                    'plc_ip': plc_ip,
+                    'route_name': route_name
+                })
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/plc/ads/route/add: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e), 'warnings': warnings}), 500
+            finally:
+                try:
+                    pyads.close_port()
+                except Exception:
+                    pass
+
+        @self.app.route('/api/plc/ads/route/test', methods=['POST'])
+        def plc_ads_route_test():
+            """Testet ADS-Verbindung via pyads.Connection(..., ip) nach Route-Setup."""
+            data = request.get_json(silent=True) or {}
+            plc_ams_net_id = str(data.get('plc_ams_net_id') or '').strip()
+            plc_ip = str(data.get('plc_ip') or '').strip()
+            ams_port_raw = data.get('ams_port', 801)
+            try:
+                ams_port = int(ams_port_raw)
+            except Exception:
+                ams_port = 801
+
+            if not plc_ams_net_id:
+                return jsonify({'success': False, 'error': 'plc_ams_net_id fehlt'}), 400
+            if not plc_ip:
+                return jsonify({'success': False, 'error': 'plc_ip fehlt'}), 400
+
+            try:
+                import pyads
+            except Exception as import_err:
+                return jsonify({'success': False, 'error': f'pyads nicht verfügbar: {import_err}'}), 500
+
+            plc = None
+            try:
+                plc = pyads.Connection(plc_ams_net_id, ams_port, plc_ip)
+                plc.set_timeout(6000)
+                plc.open()
+                name, version = plc.read_device_info()
+                return jsonify({
+                    'success': True,
+                    'device_name': str(name),
+                    'version': {
+                        'version': int(getattr(version, 'version', 0)),
+                        'revision': int(getattr(version, 'revision', 0)),
+                        'build': int(getattr(version, 'build', 0))
+                    }
+                })
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/plc/ads/route/test: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+            finally:
+                try:
+                    if plc:
+                        plc.close()
+                except Exception:
+                    pass
+
         @self.app.route('/api/mqtt/status')
         def mqtt_status():
             """MQTT Status"""

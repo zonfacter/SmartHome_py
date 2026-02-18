@@ -3161,6 +3161,149 @@ class SmartHomeApp {
         setTimeout(() => {
             this._initRoutingEditor();
         }, 180);
+
+        // ADS-Routen Setup laden
+        setTimeout(() => {
+            this._initAdsRouteTools();
+        }, 220);
+    }
+
+    async _initAdsRouteTools() {
+        const statusEl = document.getElementById('ads-route-status');
+        if (!statusEl) return;
+        this._bindAdsRouteEvents();
+        this._prefillAdsRouteInputs();
+        await this._loadAdsRouteStatus();
+    }
+
+    _bindAdsRouteEvents() {
+        const bindOnce = (id, fn, eventName = 'click') => {
+            const el = document.getElementById(id);
+            if (!el || el.hasAttribute('data-listener-attached')) return;
+            el.addEventListener(eventName, fn);
+            el.setAttribute('data-listener-attached', 'true');
+        };
+        bindOnce('ads-route-status-btn', () => this._loadAdsRouteStatus());
+        bindOnce('ads-route-add-btn', () => this._addAdsRoute());
+        bindOnce('ads-route-test-btn', () => this._testAdsRoute());
+    }
+
+    _prefillAdsRouteInputs() {
+        const setVal = (id, value) => {
+            const el = document.getElementById(id);
+            if (el && value) el.value = value;
+        };
+
+        const plcAms = localStorage.getItem('plc_ams_id') || '';
+        const plcIp = localStorage.getItem('plc_ip_address') || '';
+
+        setVal('ads-plc-ams-net-id', plcAms);
+        setVal('ads-plc-ip', plcIp);
+        setVal('ads-plc-user', localStorage.getItem('ads_plc_user') || 'Administrator');
+        setVal('ads-route-name', localStorage.getItem('ads_route_name') || 'SmartHomeWeb');
+        setVal('ads-local-ams-net-id', localStorage.getItem('ads_local_ams_net_id') || '');
+        setVal('ads-local-ip', localStorage.getItem('ads_local_ip') || '');
+    }
+
+    async _loadAdsRouteStatus() {
+        const statusEl = document.getElementById('ads-route-status');
+        if (!statusEl) return;
+        statusEl.textContent = 'Lade ADS-Status...';
+        try {
+            const resp = await fetch('/api/plc/ads/route/status');
+            const data = await resp.json();
+            if (!resp.ok || data.success === false) {
+                throw new Error(data.error || 'Status fehlgeschlagen');
+            }
+            if (!data.available) {
+                statusEl.innerHTML = `<span class="text-red-500">pyads nicht verfügbar</span>${data.error ? `: ${data.error}` : ''}`;
+                return;
+            }
+            if (data.local_ams_net_id) {
+                const localAmsInput = document.getElementById('ads-local-ams-net-id');
+                if (localAmsInput && !localAmsInput.value.trim()) {
+                    localAmsInput.value = data.local_ams_net_id;
+                }
+            }
+            statusEl.innerHTML = `<span class="text-green-600 dark:text-green-400">pyads verfügbar</span> | Lokale AMS: ${data.local_ams_net_id || 'nicht gesetzt'} | Defaults: TC2=801, TC3=851`;
+        } catch (e) {
+            statusEl.innerHTML = `<span class="text-red-500">ADS-Status Fehler:</span> ${e.message}`;
+        }
+    }
+
+    _collectAdsRouteForm() {
+        const getVal = (id) => (document.getElementById(id)?.value || '').trim();
+        return {
+            local_ams_net_id: getVal('ads-local-ams-net-id'),
+            local_ip: getVal('ads-local-ip'),
+            plc_ams_net_id: getVal('ads-plc-ams-net-id'),
+            plc_ip: getVal('ads-plc-ip'),
+            username: getVal('ads-plc-user'),
+            password: document.getElementById('ads-plc-password')?.value || '',
+            route_name: getVal('ads-route-name') || 'SmartHomeWeb'
+        };
+    }
+
+    async _addAdsRoute() {
+        const statusEl = document.getElementById('ads-route-status');
+        const payload = this._collectAdsRouteForm();
+        if (!payload.local_ams_net_id || !payload.plc_ams_net_id || !payload.plc_ip || !payload.username || !payload.password) {
+            alert('Bitte lokale AMS, PLC AMS/IP, Benutzer und Passwort ausfüllen');
+            return;
+        }
+
+        localStorage.setItem('ads_local_ams_net_id', payload.local_ams_net_id);
+        localStorage.setItem('ads_local_ip', payload.local_ip || '');
+        localStorage.setItem('ads_plc_user', payload.username);
+        localStorage.setItem('ads_route_name', payload.route_name);
+
+        if (statusEl) statusEl.textContent = 'Lege ADS-Route an...';
+
+        try {
+            const resp = await fetch('/api/plc/ads/route/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                throw new Error(data.error || 'Route anlegen fehlgeschlagen');
+            }
+            const warnTxt = Array.isArray(data.warnings) && data.warnings.length ? ` | Hinweise: ${data.warnings.join(' | ')}` : '';
+            if (statusEl) statusEl.innerHTML = `<span class="text-green-600 dark:text-green-400">ADS-Route erfolgreich angelegt</span>${warnTxt}`;
+        } catch (e) {
+            if (statusEl) statusEl.innerHTML = `<span class="text-red-500">ADS-Route Fehler:</span> ${e.message}`;
+        }
+    }
+
+    async _testAdsRoute() {
+        const statusEl = document.getElementById('ads-route-status');
+        const getVal = (id) => (document.getElementById(id)?.value || '').trim();
+        const payload = {
+            plc_ams_net_id: getVal('ads-plc-ams-net-id'),
+            plc_ip: getVal('ads-plc-ip'),
+            ams_port: parseInt(document.getElementById('plc-ams-port')?.value || '801', 10)
+        };
+        if (!payload.plc_ams_net_id || !payload.plc_ip) {
+            alert('Bitte PLC AMS Net ID und PLC IP ausfüllen');
+            return;
+        }
+        if (statusEl) statusEl.textContent = 'Teste ADS-Verbindung...';
+        try {
+            const resp = await fetch('/api/plc/ads/route/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                throw new Error(data.error || 'ADS-Test fehlgeschlagen');
+            }
+            const v = data.version || {};
+            if (statusEl) statusEl.innerHTML = `<span class="text-green-600 dark:text-green-400">ADS-Test erfolgreich</span> | ${data.device_name || 'PLC'} v${v.version || 0}.${v.revision || 0}.${v.build || 0}`;
+        } catch (e) {
+            if (statusEl) statusEl.innerHTML = `<span class="text-red-500">ADS-Test Fehler:</span> ${e.message}`;
+        }
     }
 
     async _initRoutingEditor() {

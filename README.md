@@ -22,6 +22,19 @@
 
 ---
 
+## 📌 **Aktuelle Betriebsdoku (Web-HMI)**
+
+Für den aktuellen produktiven Ablauf (Web-Setup) bitte diese Anleitung verwenden:
+
+- `docs/WEB_SETUP_ROUTING_ADS_GUIDE.md`
+
+Inhalt:
+- PLC Runtime (TC2/TC3) korrekt konfigurieren
+- ADS TwinCAT Routen im Web-Setup verwalten (Status/Anlegen/Test)
+- Routing-Regeln über Setup-UI bearbeiten (`config/routing.json`)
+
+---
+
 ## 📖 **PROJEKT-ÜBERSICHT**
 
 ### **Zweck**
