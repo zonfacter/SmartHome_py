@@ -715,9 +715,19 @@ class WebManager(BaseModule):
         @self.app.route('/api/plc/connect', methods=['POST'])
         def connect_plc():
             """PLC-Verbindung herstellen"""
-            data = request.get_json()
+            data = request.get_json() or {}
             ams_id = data.get('ams_id')
-            ams_port = data.get('ams_port', 851)
+            runtime_type = str(data.get('runtime_type') or '').strip().upper()
+            if runtime_type not in ('TC2', 'TC3'):
+                runtime_type = 'TC3'
+            raw_ams_port = data.get('ams_port', None)
+            if raw_ams_port in (None, ''):
+                ams_port = 801 if runtime_type == 'TC2' else 851
+            else:
+                try:
+                    ams_port = int(raw_ams_port)
+                except Exception:
+                    ams_port = 801 if runtime_type == 'TC2' else 851
             ip_address = data.get('ip_address')
 
             if not ams_id:
@@ -733,8 +743,9 @@ class WebManager(BaseModule):
                 config_mgr.set_config_value('plc_ams_net_id', ams_id)
                 config_mgr.set_config_value('plc_ams_port', ams_port)
                 config_mgr.set_config_value('plc_ip_address', ip_address or '')
+                config_mgr.set_config_value('plc_runtime_type', runtime_type)
                 config_mgr.save_config()
-                logger.info(f"PLC-Config gespeichert: {ams_id}:{ams_port}")
+                logger.info(f"PLC-Config gespeichert: {ams_id}:{ams_port} ({runtime_type})")
 
             try:
                 plc.configure(ams_net_id=ams_id, port=ams_port)
@@ -743,7 +754,7 @@ class WebManager(BaseModule):
                 if success:
                     if self.data_gateway:
                         self.data_gateway.sync_widget_subscriptions()
-                    return jsonify({'success': True, 'message': 'PLC verbunden'})
+                    return jsonify({'success': True, 'message': 'PLC verbunden', 'runtime_type': runtime_type, 'ams_port': ams_port})
                 else:
                     return jsonify({'error': 'Verbindung fehlgeschlagen'}), 500
             except Exception as e:
@@ -1042,6 +1053,61 @@ class WebManager(BaseModule):
             path = _cameras_config_path()
             with open(path, 'w') as f:
                 json.dump(config, f, indent=2)
+
+        @self.app.route('/api/routing/config', methods=['GET', 'POST'])
+        def routing_config():
+            """Liest/aktualisiert Routing-Regeln (versioniert, legacy-kompatibel)."""
+            try:
+                if request.method == 'GET':
+                    return jsonify(self._load_routing_config_json())
+
+                data = request.get_json(silent=True) or {}
+                payload = data.get('payload') if isinstance(data.get('payload'), dict) else data
+                if not isinstance(payload, dict):
+                    return jsonify({'success': False, 'error': 'Ungültiges JSON-Payload'}), 400
+
+                source_version = str(payload.get('version') or '1.0')
+                ok_version, version_msg = self._validate_routing_import_version(source_version)
+                if not ok_version:
+                    return jsonify({'success': False, 'error': version_msg}), 400
+
+                raw_routes = payload.get('routes')
+                if not isinstance(raw_routes, list):
+                    return jsonify({'success': False, 'error': 'routes muss eine Liste sein'}), 400
+
+                normalized_routes, warnings, errors = self._normalize_routing_rules(raw_routes)
+                if errors:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Import enthält ungültige Routen',
+                        'errors': errors,
+                        'warnings': warnings
+                    }), 400
+
+                current_cfg = self._load_routing_config_json()
+                settings = payload.get('settings') if isinstance(payload.get('settings'), dict) else current_cfg.get('settings', {})
+                description = str(payload.get('description') or current_cfg.get('description') or 'Routing-Konfiguration')
+                out = {
+                    'version': self._routing_schema_version(),
+                    'description': description,
+                    'routes': normalized_routes,
+                    'settings': settings if isinstance(settings, dict) else {}
+                }
+
+                path = self._routing_config_path()
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump(out, f, indent=2, ensure_ascii=False)
+
+                if self.data_gateway and hasattr(self.data_gateway, '_load_routing_config'):
+                    try:
+                        self.data_gateway._load_routing_config()
+                    except Exception as reload_err:
+                        logger.warning(f"Routing-Config gespeichert, Reload fehlgeschlagen: {reload_err}")
+
+                return jsonify({'success': True, 'warnings': warnings, 'config': out})
+            except Exception as e:
+                logger.error(f"Fehler bei /api/routing/config: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
 
         @self.app.route('/api/camera-triggers', methods=['GET', 'POST'])
         def camera_triggers():
@@ -2106,6 +2172,98 @@ class WebManager(BaseModule):
                 },
             ])
         return symbols
+
+    def _routing_config_path(self) -> str:
+        return os.path.join(os.path.abspath(os.getcwd()), 'config', 'routing.json')
+
+    @staticmethod
+    def _routing_schema_version() -> str:
+        return "1.0"
+
+    def _validate_routing_import_version(self, source_version: str):
+        """Prüft, ob eine Routing-Import-Version unterstützt wird."""
+        try:
+            src = str(source_version or '1.0').strip()
+            major = int(src.split('.', 1)[0])
+            current_major = int(self._routing_schema_version().split('.', 1)[0])
+            if major <= current_major:
+                return True, ''
+            return False, f'Import-Version {src} wird von Schema {self._routing_schema_version()} nicht unterstützt'
+        except Exception:
+            return False, f'Ungültige Versionsangabe: {source_version}'
+
+    def _load_routing_config_json(self) -> Dict[str, Any]:
+        path = self._routing_config_path()
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f) or {}
+                    if isinstance(data, dict):
+                        data.setdefault('version', self._routing_schema_version())
+                        data.setdefault('description', 'Routing-Konfiguration')
+                        data.setdefault('routes', [])
+                        data.setdefault('settings', {})
+                        return data
+            except Exception as e:
+                logger.warning(f"Konnte routing.json nicht laden: {e}")
+        return {
+            'version': self._routing_schema_version(),
+            'description': 'Routing-Konfiguration',
+            'routes': [],
+            'settings': {}
+        }
+
+    def _normalize_routing_rules(self, routes: List[Dict[str, Any]]):
+        normalized = []
+        warnings = []
+        errors = []
+        used_ids = set()
+
+        for idx, raw in enumerate(routes):
+            if not isinstance(raw, dict):
+                errors.append(f"Route {idx + 1}: muss ein Objekt sein")
+                continue
+
+            route_id = str(raw.get('id') or f"route_{idx + 1}").strip()
+            if not route_id:
+                route_id = f"route_{idx + 1}"
+            if route_id in used_ids:
+                suffix = 2
+                base_id = route_id
+                while f"{base_id}_{suffix}" in used_ids:
+                    suffix += 1
+                route_id = f"{base_id}_{suffix}"
+                warnings.append(f"Doppelte Route-ID erkannt, umbenannt zu {route_id}")
+            used_ids.add(route_id)
+
+            from_pattern = str(raw.get('from') or raw.get('pattern') or '').strip()
+            if not from_pattern:
+                errors.append(f"Route {route_id}: from fehlt")
+                continue
+
+            raw_to = raw.get('to')
+            if isinstance(raw_to, str):
+                to_targets = [t.strip() for t in raw_to.split(',') if t.strip()]
+            elif isinstance(raw_to, list):
+                to_targets = [str(t).strip() for t in raw_to if str(t).strip()]
+            elif raw.get('target'):
+                to_targets = [str(raw.get('target')).strip()]
+            else:
+                to_targets = []
+
+            if not to_targets:
+                errors.append(f"Route {route_id}: to fehlt")
+                continue
+
+            normalized.append({
+                'id': route_id,
+                'description': str(raw.get('description') or route_id),
+                'from': from_pattern,
+                'to': to_targets,
+                'enabled': bool(raw.get('enabled', True))
+            })
+
+        return normalized, warnings, errors
 
     def _camera_trigger_config_path(self) -> str:
         return os.path.join(os.path.abspath(os.getcwd()), 'config', 'camera_triggers.json')

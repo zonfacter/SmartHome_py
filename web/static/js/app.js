@@ -53,6 +53,8 @@ class SmartHomeApp {
         this._ruleEditorPage = 1;
         this._ruleEditorPageSize = parseInt(localStorage.getItem('ruleEditorPageSize') || '25', 10) || 25;
         this._ruleEditorActiveGroup = '';
+        this._routingConfig = { version: '1.0', description: 'Routing-Konfiguration', routes: [], settings: {} };
+        this._routeEditorSelectedId = null;
 
         // Initialisierung
         this.init();
@@ -459,6 +461,7 @@ class SmartHomeApp {
         const amsId = document.getElementById('plc-ams-id')?.value;
         const amsPort = parseInt(document.getElementById('plc-ams-port')?.value || '851');
         const ipAddress = document.getElementById('plc-ip-address')?.value;
+        const runtimeType = (document.getElementById('plc-runtime-type')?.value || 'TC3').toUpperCase();
 
         if (!amsId) {
             alert('Bitte AMS Net ID eingeben!');
@@ -471,6 +474,7 @@ class SmartHomeApp {
         localStorage.setItem('plc_ams_id', amsId);
         localStorage.setItem('plc_ams_port', amsPort.toString());
         localStorage.setItem('plc_ip_address', ipAddress);
+        localStorage.setItem('plc_runtime_type', runtimeType);
 
         try {
             const response = await fetch('/api/plc/connect', {
@@ -479,7 +483,8 @@ class SmartHomeApp {
                 body: JSON.stringify({
                     ams_id: amsId,
                     ams_port: amsPort,
-                    ip_address: ipAddress
+                    ip_address: ipAddress,
+                    runtime_type: runtimeType
                 })
             });
 
@@ -2983,6 +2988,7 @@ class SmartHomeApp {
         const savedAmsId = localStorage.getItem('plc_ams_id');
         const savedAmsPort = localStorage.getItem('plc_ams_port');
         const savedIpAddress = localStorage.getItem('plc_ip_address');
+        const savedRuntimeType = (localStorage.getItem('plc_runtime_type') || 'TC3').toUpperCase();
 
         if (savedAmsId) {
             const amsIdInput = document.getElementById('plc-ams-id');
@@ -2997,6 +3003,28 @@ class SmartHomeApp {
         if (savedIpAddress) {
             const ipAddressInput = document.getElementById('plc-ip-address');
             if (ipAddressInput) ipAddressInput.value = savedIpAddress;
+        }
+
+        const runtimeInput = document.getElementById('plc-runtime-type');
+        const amsPortInput = document.getElementById('plc-ams-port');
+        if (runtimeInput) {
+            runtimeInput.value = savedRuntimeType === 'TC2' ? 'TC2' : 'TC3';
+            if (!runtimeInput.hasAttribute('data-listener-attached')) {
+                runtimeInput.addEventListener('change', () => {
+                    const rt = (runtimeInput.value || 'TC3').toUpperCase();
+                    localStorage.setItem('plc_runtime_type', rt);
+                    if (amsPortInput && amsPortInput.getAttribute('data-user-edited') !== '1') {
+                        amsPortInput.value = rt === 'TC2' ? '801' : '851';
+                    }
+                });
+                runtimeInput.setAttribute('data-listener-attached', 'true');
+            }
+        }
+        if (amsPortInput && !amsPortInput.hasAttribute('data-listener-attached')) {
+            amsPortInput.addEventListener('input', () => {
+                amsPortInput.setAttribute('data-user-edited', '1');
+            });
+            amsPortInput.setAttribute('data-listener-attached', 'true');
         }
 
         // Setup PLC-Button Event-Listener (falls noch nicht registriert)
@@ -3128,6 +3156,201 @@ class SmartHomeApp {
         setTimeout(() => {
             this._initCameraRuleEditor();
         }, 150);
+
+        // Routing-Editor laden
+        setTimeout(() => {
+            this._initRoutingEditor();
+        }, 180);
+    }
+
+    async _initRoutingEditor() {
+        const list = document.getElementById('route-list');
+        if (!list) return;
+        this._bindRoutingEditorEvents();
+        await this._loadRoutingConfig();
+    }
+
+    _bindRoutingEditorEvents() {
+        const bindOnce = (id, fn, eventName = 'click') => {
+            const el = document.getElementById(id);
+            if (!el || el.hasAttribute('data-listener-attached')) return;
+            el.addEventListener(eventName, fn);
+            el.setAttribute('data-listener-attached', 'true');
+        };
+
+        bindOnce('route-refresh-btn', () => this._loadRoutingConfig());
+        bindOnce('route-add-btn', () => this._clearRouteForm());
+        bindOnce('route-save-btn', () => this._saveRouteFromForm());
+        bindOnce('route-delete-btn', () => this._deleteRouteFromForm());
+    }
+
+    async _loadRoutingConfig() {
+        const list = document.getElementById('route-list');
+        if (list) {
+            list.innerHTML = '<p class="text-xs text-gray-500">Lade Routen...</p>';
+        }
+        try {
+            const resp = await fetch('/api/routing/config');
+            const data = await resp.json();
+            if (!resp.ok) {
+                throw new Error(data.error || 'Routing-Laden fehlgeschlagen');
+            }
+            this._routingConfig = {
+                version: data.version || '1.0',
+                description: data.description || 'Routing-Konfiguration',
+                routes: Array.isArray(data.routes) ? data.routes : [],
+                settings: data.settings && typeof data.settings === 'object' ? data.settings : {}
+            };
+            this._renderRouteList();
+        } catch (e) {
+            if (list) {
+                list.innerHTML = `<p class="text-xs text-red-500">${e.message}</p>`;
+            }
+        }
+    }
+
+    _renderRouteList() {
+        const list = document.getElementById('route-list');
+        if (!list) return;
+        const routes = Array.isArray(this._routingConfig.routes) ? this._routingConfig.routes : [];
+        if (routes.length === 0) {
+            list.innerHTML = '<p class="text-xs text-gray-500">Keine Routen vorhanden</p>';
+            return;
+        }
+
+        list.innerHTML = routes.map((route) => {
+            const id = String(route.id || '');
+            const enabled = route.enabled !== false;
+            const selected = id && id === this._routeEditorSelectedId;
+            return `
+                <button class="route-item-btn w-full text-left p-2 rounded border ${selected ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-200 dark:border-gray-700'} hover:border-blue-400"
+                        data-route-id="${id}">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm font-medium text-gray-900 dark:text-white">${id || '(ohne ID)'}</span>
+                        <span class="text-[11px] px-2 py-0.5 rounded ${enabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'}">${enabled ? 'aktiv' : 'inaktiv'}</span>
+                    </div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 truncate mt-1">${String(route.from || '')} → ${(Array.isArray(route.to) ? route.to.join(', ') : String(route.to || ''))}</div>
+                </button>
+            `;
+        }).join('');
+
+        list.querySelectorAll('.route-item-btn').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const routeId = btn.getAttribute('data-route-id') || '';
+                const route = (this._routingConfig.routes || []).find((r) => String(r.id || '') === routeId);
+                if (!route) return;
+                this._routeEditorSelectedId = routeId;
+                this._fillRouteForm(route);
+                this._renderRouteList();
+            });
+        });
+    }
+
+    _fillRouteForm(route) {
+        document.getElementById('route-edit-id').value = String(route.id || '');
+        document.getElementById('route-id').value = String(route.id || '');
+        document.getElementById('route-description').value = String(route.description || '');
+        document.getElementById('route-from').value = String(route.from || '');
+        document.getElementById('route-to').value = Array.isArray(route.to) ? route.to.join(', ') : String(route.to || '');
+        document.getElementById('route-enabled').checked = route.enabled !== false;
+    }
+
+    _clearRouteForm() {
+        this._routeEditorSelectedId = null;
+        document.getElementById('route-edit-id').value = '';
+        document.getElementById('route-id').value = '';
+        document.getElementById('route-description').value = '';
+        document.getElementById('route-from').value = '';
+        document.getElementById('route-to').value = '';
+        document.getElementById('route-enabled').checked = true;
+        this._renderRouteList();
+    }
+
+    _collectRouteForm() {
+        const editId = (document.getElementById('route-edit-id')?.value || '').trim();
+        const id = (document.getElementById('route-id')?.value || '').trim();
+        const description = (document.getElementById('route-description')?.value || '').trim();
+        const from = (document.getElementById('route-from')?.value || '').trim();
+        const toRaw = (document.getElementById('route-to')?.value || '').trim();
+        const enabled = !!document.getElementById('route-enabled')?.checked;
+        const to = toRaw.split(',').map((v) => v.trim()).filter(Boolean);
+        return { editId, id, description, from, to, enabled };
+    }
+
+    async _saveRouteFromForm() {
+        const form = this._collectRouteForm();
+        if (!form.id) {
+            alert('Route-ID fehlt');
+            return;
+        }
+        if (!form.from) {
+            alert('From Pattern fehlt');
+            return;
+        }
+        if (!form.to.length) {
+            alert('Mindestens ein Ziel (to) erforderlich');
+            return;
+        }
+
+        const routes = Array.isArray(this._routingConfig.routes) ? [...this._routingConfig.routes] : [];
+        const oldId = form.editId || form.id;
+        const oldIdx = routes.findIndex((r) => String(r.id || '') === oldId);
+        const routeObj = {
+            id: form.id,
+            description: form.description || form.id,
+            from: form.from,
+            to: form.to,
+            enabled: form.enabled
+        };
+        if (oldIdx >= 0) {
+            routes[oldIdx] = routeObj;
+        } else {
+            routes.push(routeObj);
+        }
+
+        await this._persistRoutingConfig(routes, form.id);
+    }
+
+    async _deleteRouteFromForm() {
+        const form = this._collectRouteForm();
+        const routeId = form.editId || form.id;
+        if (!routeId) {
+            alert('Keine Route ausgewählt');
+            return;
+        }
+        if (!confirm(`Route "${routeId}" wirklich löschen?`)) return;
+        const routes = (this._routingConfig.routes || []).filter((r) => String(r.id || '') !== routeId);
+        await this._persistRoutingConfig(routes, null);
+        this._clearRouteForm();
+    }
+
+    async _persistRoutingConfig(routes, selectedId = null) {
+        try {
+            const payload = {
+                version: this._routingConfig.version || '1.0',
+                description: this._routingConfig.description || 'Routing-Konfiguration',
+                settings: this._routingConfig.settings || {},
+                routes
+            };
+            const resp = await fetch('/api/routing/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                throw new Error(data.error || 'Speichern fehlgeschlagen');
+            }
+            this._routingConfig = data.config || payload;
+            this._routeEditorSelectedId = selectedId;
+            if (selectedId) {
+                const selected = (this._routingConfig.routes || []).find((r) => String(r.id || '') === selectedId);
+                if (selected) this._fillRouteForm(selected);
+            }
+            this._renderRouteList();
+        } catch (e) {
+            alert(`Routing speichern fehlgeschlagen: ${e.message}`);
+        }
     }
 
     async _initCameraRuleEditor() {

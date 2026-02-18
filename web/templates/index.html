@@ -396,7 +396,15 @@
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
                 <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">PLC-Konfiguration</h2>
 
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Runtime</label>
+                        <select id="plc-runtime-type"
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                            <option value="TC3">TwinCAT 3</option>
+                            <option value="TC2">TwinCAT 2</option>
+                        </select>
+                    </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">AMS Net ID</label>
                         <input type="text" id="plc-ams-id" placeholder="192.168.1.100.1.1" value="192.168.1.100.1.1"
@@ -427,6 +435,60 @@
                     <div id="plc-status-badge" class="flex items-center space-x-2">
                         <div class="w-2 h-2 rounded-full bg-gray-400"></div>
                         <span class="text-sm">Nicht verbunden</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Routing Setup -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Routing-Regeln</h2>
+                    <button id="route-refresh-btn" class="px-3 py-1.5 text-xs bg-gray-600 text-white rounded hover:bg-gray-500">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5 inline mr-1"></i> Aktualisieren
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+                        <div class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Aktive Routen</div>
+                        <div id="route-list" class="max-h-72 overflow-y-auto space-y-2">
+                            <p class="text-xs text-gray-500">Lade Routen...</p>
+                        </div>
+                    </div>
+                    <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-3">
+                        <div class="text-sm font-medium text-gray-700 dark:text-gray-300">Route bearbeiten</div>
+                        <input type="hidden" id="route-edit-id">
+                        <div>
+                            <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">ID</label>
+                            <input id="route-id" type="text" placeholder="z.B. plc_to_mqtt_temp"
+                                class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Beschreibung</label>
+                            <input id="route-description" type="text" placeholder="Temperatur von PLC an MQTT senden"
+                                class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">From Pattern</label>
+                            <input id="route-from" type="text" placeholder="plc_001/MAIN.fTemperature"
+                                class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">To Targets (CSV)</label>
+                            <input id="route-to" type="text" placeholder="mqtt:home/temperature,unified_data_space"
+                                class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                <input id="route-enabled" type="checkbox" checked>
+                                Aktiv
+                            </label>
+                        </div>
+                        <div class="flex gap-2">
+                            <button id="route-add-btn" class="px-3 py-2 text-xs bg-green-600 text-white rounded hover:bg-green-500">Neu</button>
+                            <button id="route-save-btn" class="px-3 py-2 text-xs bg-blue-600 text-white rounded hover:bg-blue-500">Speichern</button>
+                            <button id="route-delete-btn" class="px-3 py-2 text-xs bg-red-600 text-white rounded hover:bg-red-500">Löschen</button>
+                        </div>
                     </div>
                 </div>
             </div>
