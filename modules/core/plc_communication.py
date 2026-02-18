@@ -100,27 +100,51 @@ class PLCCommunication(BaseModule):
             self.connected = False
             return False
 
-        try:
-            if self.plc:
-                self.plc.close()
+        configured_port = int(self.config['port'])
+        ports_to_try = [configured_port]
+        for candidate in (851, 801):
+            if candidate not in ports_to_try:
+                ports_to_try.append(candidate)
 
-            self.plc = pyads.Connection(
-                self.config['ams_net_id'],
-                self.config['port']
-            )
+        last_error = None
+        for port in ports_to_try:
+            try:
+                if self.plc:
+                    self.plc.close()
 
-            self.plc.open()
-            self.connected = True
-            self.consecutive_errors = 0
+                self.plc = pyads.Connection(
+                    self.config['ams_net_id'],
+                    port
+                )
+                self.plc.open()
+                self.connected = True
+                self.consecutive_errors = 0
+                self.config['port'] = port
 
-            print(f"  ✓ PLC verbunden: {self.config['ams_net_id']}")
-            return True
+                # Persistiere funktionierenden Port, um spätere Neustarts zu beschleunigen.
+                if port != configured_port:
+                    try:
+                        cfg = self.app_context.module_manager.get_module('config_manager') if self.app_context else None
+                        if cfg:
+                            cfg.set_config_value('plc_ams_port', port)
+                            print(f"  ℹ️  PLC-Port automatisch angepasst: {configured_port} -> {port}")
+                    except Exception:
+                        pass
 
-        except Exception as e:
-            print(f"  ✗ PLC-Verbindung fehlgeschlagen: {e}")
-            print(f"     AMS NetID: {self.config['ams_net_id']}, Port: {self.config['port']}")
-            self.connected = False
-            return False
+                print(f"  ✓ PLC verbunden: {self.config['ams_net_id']} (Port {port})")
+                return True
+            except Exception as e:
+                last_error = e
+                err_text = str(e).lower()
+                # Bei Port-Fehler weiterprobieren, sonst direkt abbrechen.
+                if ('target port not found' in err_text or 'ads server not started' in err_text or 'adserror: 6' in err_text):
+                    continue
+                break
+
+        print(f"  ✗ PLC-Verbindung fehlgeschlagen: {last_error}")
+        print(f"     AMS NetID: {self.config['ams_net_id']}, Ports versucht: {ports_to_try}")
+        self.connected = False
+        return False
     
     def disconnect(self):
         """Trennt PLC-Verbindung"""
