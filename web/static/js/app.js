@@ -47,6 +47,8 @@ class SmartHomeApp {
         this._ringWidgetModes = {};
         this._cameraAlertTimer = null;
         this._cameraAlertRestorePage = null;
+        this._cameraTriggerRules = [];
+        this._ruleVariableOptions = [];
 
         // Initialisierung
         this.init();
@@ -3117,6 +3119,268 @@ class SmartHomeApp {
         setTimeout(() => {
             this.searchPLCSymbols();
         }, 300);
+
+        // Trigger-Regel-Editor laden
+        setTimeout(() => {
+            this._initCameraRuleEditor();
+        }, 150);
+    }
+
+    async _initCameraRuleEditor() {
+        const list = document.getElementById('rule-editor-list');
+        if (!list) return;
+
+        this._bindCameraRuleEditorEvents();
+        await this._loadRuleCameraOptions();
+        await this._loadCameraTriggerRules();
+        await this._searchRuleVariables('');
+    }
+
+    _bindCameraRuleEditorEvents() {
+        const bindOnce = (id, fn) => {
+            const el = document.getElementById(id);
+            if (!el || el.hasAttribute('data-listener-attached')) return;
+            el.addEventListener('click', fn);
+            el.setAttribute('data-listener-attached', 'true');
+        };
+
+        bindOnce('rule-refresh-btn', () => this._loadCameraTriggerRules());
+        bindOnce('rule-var-search-btn', () => {
+            const q = document.getElementById('rule-var-search')?.value || '';
+            this._searchRuleVariables(q);
+        });
+        bindOnce('rule-add-btn', () => this._clearRuleForm());
+        bindOnce('rule-save-btn', () => this._saveRuleFromForm());
+        bindOnce('rule-delete-btn', () => this._deleteRuleFromForm());
+
+        const varSearchInput = document.getElementById('rule-var-search');
+        if (varSearchInput && !varSearchInput.hasAttribute('data-listener-attached')) {
+            varSearchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    this._searchRuleVariables(varSearchInput.value || '');
+                }
+            });
+            varSearchInput.setAttribute('data-listener-attached', 'true');
+        }
+    }
+
+    async _loadRuleCameraOptions() {
+        const select = document.getElementById('rule-camera-id');
+        if (!select) return;
+
+        try {
+            const resp = await fetch('/api/cameras');
+            const data = await resp.json();
+            const cams = data.cameras || {};
+            const ids = Object.keys(cams);
+
+            if (ids.length === 0) {
+                select.innerHTML = '<option value="">Keine Kamera</option>';
+                return;
+            }
+
+            select.innerHTML = ids.map((id) => {
+                const cam = cams[id] || {};
+                return `<option value="${id}">${cam.name || id} (${id})</option>`;
+            }).join('');
+        } catch (e) {
+            select.innerHTML = '<option value="">Fehler beim Laden</option>';
+        }
+    }
+
+    async _searchRuleVariables(query) {
+        const select = document.getElementById('rule-variable');
+        if (!select) return;
+        try {
+            const params = new URLSearchParams();
+            params.set('limit', '200');
+            if (query && query.trim()) params.set('q', query.trim());
+            const resp = await fetch(`/api/variables/search?${params.toString()}`);
+            const data = await resp.json();
+            const vars = data.variables || [];
+            this._ruleVariableOptions = vars;
+
+            if (vars.length === 0) {
+                select.innerHTML = '<option value="">Keine Variablen gefunden</option>';
+                return;
+            }
+            select.innerHTML = vars.map((v) =>
+                `<option value="${v.name}">${v.name} (${v.type || 'UNKNOWN'})</option>`
+            ).join('');
+        } catch (e) {
+            select.innerHTML = '<option value="">Fehler bei Variablensuche</option>';
+        }
+    }
+
+    async _loadCameraTriggerRules() {
+        const list = document.getElementById('rule-editor-list');
+        if (!list) return;
+        try {
+            const resp = await fetch('/api/camera-triggers');
+            const data = await resp.json();
+            this._cameraTriggerRules = data.rules || [];
+            this._renderRuleEditorList();
+            if (this._cameraTriggerRules.length > 0) {
+                this._fillRuleForm(this._cameraTriggerRules[0]);
+            } else {
+                this._clearRuleForm();
+            }
+        } catch (e) {
+            list.innerHTML = '<p class="text-xs text-red-500">Regeln konnten nicht geladen werden</p>';
+        }
+    }
+
+    _renderRuleEditorList() {
+        const list = document.getElementById('rule-editor-list');
+        if (!list) return;
+        if (!this._cameraTriggerRules.length) {
+            list.innerHTML = '<p class="text-xs text-gray-500">Keine Regeln vorhanden</p>';
+            return;
+        }
+        list.innerHTML = this._cameraTriggerRules.map((r) => {
+            const state = r.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700';
+            const op = r.operator || 'eq';
+            return `
+                <button class="rule-row w-full text-left p-2 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+                        data-rule-id="${r.id}">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm font-medium text-gray-900 dark:text-white">${r.name || r.id}</span>
+                        <span class="text-[10px] px-2 py-0.5 rounded ${state}">${r.enabled ? 'aktiv' : 'aus'}</span>
+                    </div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 truncate">${r.variable} ${op} ${JSON.stringify(r.on_value)}</div>
+                    <div class="text-[11px] text-gray-500 dark:text-gray-400">→ ${r.camera_id} (${r.duration_seconds || 30}s)</div>
+                </button>
+            `;
+        }).join('');
+
+        list.querySelectorAll('.rule-row').forEach((el) => {
+            el.addEventListener('click', () => {
+                const id = el.getAttribute('data-rule-id');
+                const rule = this._cameraTriggerRules.find((r) => r.id === id);
+                if (rule) this._fillRuleForm(rule);
+            });
+        });
+    }
+
+    _fillRuleForm(rule) {
+        if (!rule) return;
+        const setVal = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.value = value ?? '';
+        };
+        setVal('rule-edit-id', rule.id || '');
+        setVal('rule-name', rule.name || '');
+        setVal('rule-variable', rule.variable || '');
+        setVal('rule-operator', rule.operator || 'eq');
+        setVal('rule-on-value', typeof rule.on_value === 'string' ? rule.on_value : JSON.stringify(rule.on_value));
+        setVal('rule-camera-id', rule.camera_id || '');
+        setVal('rule-duration-seconds', rule.duration_seconds || 30);
+        setVal('rule-cooldown-seconds', rule.cooldown_seconds || 0);
+        const enabled = document.getElementById('rule-enabled');
+        if (enabled) enabled.checked = !!rule.enabled;
+    }
+
+    _clearRuleForm() {
+        this._fillRuleForm({
+            id: '',
+            name: '',
+            variable: '',
+            operator: 'eq',
+            on_value: true,
+            camera_id: '',
+            duration_seconds: 30,
+            cooldown_seconds: 0,
+            enabled: true
+        });
+    }
+
+    _parseRuleInputValue(raw) {
+        const v = (raw || '').trim();
+        if (!v.length) return true;
+        const lower = v.toLowerCase();
+        if (lower === 'true') return true;
+        if (lower === 'false') return false;
+        if (!Number.isNaN(Number(v)) && v !== '') return Number(v);
+        try {
+            return JSON.parse(v);
+        } catch (e) {
+            return v;
+        }
+    }
+
+    _collectRuleForm() {
+        const getVal = (id) => document.getElementById(id)?.value ?? '';
+        const enabled = document.getElementById('rule-enabled')?.checked ?? true;
+        const editId = getVal('rule-edit-id').trim();
+        const variable = getVal('rule-variable').trim();
+        const cameraId = getVal('rule-camera-id').trim();
+        const name = getVal('rule-name').trim() || `${variable} -> ${cameraId}`;
+        const operator = getVal('rule-operator').trim() || 'eq';
+        const onValue = this._parseRuleInputValue(getVal('rule-on-value'));
+        const duration = Math.max(5, Math.min(parseInt(getVal('rule-duration-seconds') || '30', 10), 300));
+        const cooldown = Math.max(0, Math.min(parseInt(getVal('rule-cooldown-seconds') || '0', 10), 3600));
+
+        if (!variable || !cameraId) {
+            throw new Error('Variable und Kamera sind erforderlich');
+        }
+        return {
+            id: editId || `rule_${Date.now()}`,
+            name,
+            enabled,
+            variable,
+            operator,
+            on_value: onValue,
+            camera_id: cameraId,
+            camera_type: 'ring',
+            duration_seconds: duration,
+            cooldown_seconds: cooldown
+        };
+    }
+
+    async _saveRuleFromForm() {
+        try {
+            const rule = this._collectRuleForm();
+            const idx = this._cameraTriggerRules.findIndex((r) => r.id === rule.id);
+            if (idx >= 0) this._cameraTriggerRules[idx] = rule;
+            else this._cameraTriggerRules.unshift(rule);
+
+            const resp = await fetch('/api/camera-triggers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rules: this._cameraTriggerRules })
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                throw new Error(data.error || 'Regel konnte nicht gespeichert werden');
+            }
+            this._cameraTriggerRules = data.rules || [];
+            this._renderRuleEditorList();
+            this._fillRuleForm(rule);
+        } catch (e) {
+            alert(`Regel speichern fehlgeschlagen: ${e.message}`);
+        }
+    }
+
+    async _deleteRuleFromForm() {
+        const editId = document.getElementById('rule-edit-id')?.value?.trim();
+        if (!editId) return;
+        this._cameraTriggerRules = this._cameraTriggerRules.filter((r) => r.id !== editId);
+        try {
+            const resp = await fetch('/api/camera-triggers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rules: this._cameraTriggerRules })
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                throw new Error(data.error || 'Regel konnte nicht gelöscht werden');
+            }
+            this._cameraTriggerRules = data.rules || [];
+            this._renderRuleEditorList();
+            this._clearRuleForm();
+        } catch (e) {
+            alert(`Regel löschen fehlgeschlagen: ${e.message}`);
+        }
     }
 
     // ========================================================================

@@ -28,6 +28,7 @@ except ImportError:
 try:
     from modules.plc.symbol_browser import get_symbol_browser
     from modules.gateway.plc_config_manager import PLCConfigManager
+    from modules.gateway.camera_trigger_store import CameraTriggerStore
     from modules.plc.variable_manager import create_variable_manager
     MANAGERS_AVAILABLE = True
 except ImportError:
@@ -83,6 +84,8 @@ class WebManager(BaseModule):
         self._ring_doorbell_pulse_seconds = 10.0
         self._camera_trigger_rules = []
         self._camera_trigger_state = {}
+        self._camera_trigger_last_fired = {}
+        self._trigger_store = None
 
     def initialize(self, app_context: Any):
         """Initialisiert das Modul und erzwingt absolute Pfade für alle Manager."""
@@ -143,6 +146,7 @@ class WebManager(BaseModule):
                 # ⭐ v5.1.0: Initialize Variable Manager
                 logger.info("Initialisiere Variable Manager...")
                 self.variable_manager = create_variable_manager()
+                self._trigger_store = CameraTriggerStore(os.path.join(conf_dir, 'automation_rules.db'))
 
                 # Register symbols from cache
                 if self.symbol_browser:
@@ -479,6 +483,51 @@ class WebManager(BaseModule):
             except Exception as e:
                 logger.error(f"Symbol-Abruf Fehler: {e}", exc_info=True)
                 return jsonify({'symbols': [], 'count': 0, 'error': str(e)})
+
+        @self.app.route('/api/variables/search', methods=['GET'])
+        def search_variables():
+            """Serverseitige Variablensuche (skalierbar für große Symbolmengen)."""
+            try:
+                conn_id = request.args.get('connection_id', 'plc_001')
+                query = (request.args.get('q') or request.args.get('query') or '').strip().lower()
+                type_filter = (request.args.get('type') or '').strip().upper()
+                limit = max(1, min(int(request.args.get('limit', 200)), 1000))
+
+                symbols = []
+                if self.symbol_browser:
+                    symbols = self.symbol_browser.get_symbols(conn_id, force_refresh=False) or []
+
+                # Gateway virtuelle Variablen ergänzen
+                symbols.extend(self._get_gateway_virtual_symbols())
+
+                results = []
+                for sym in symbols:
+                    if not isinstance(sym, dict):
+                        continue
+                    name = str(sym.get('name', ''))
+                    sym_type = str(sym.get('type', ''))
+                    if query and query not in name.lower():
+                        continue
+                    if type_filter and type_filter not in sym_type.upper():
+                        continue
+                    results.append({
+                        'name': name,
+                        'type': sym_type,
+                        'comment': sym.get('comment', '')
+                    })
+                    if len(results) >= limit:
+                        break
+
+                return jsonify({
+                    'success': True,
+                    'query': query,
+                    'count': len(results),
+                    'limit': limit,
+                    'variables': results
+                })
+            except Exception as e:
+                logger.error(f"Variable-Suche Fehler: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e), 'variables': []}), 500
 
         @self.app.route('/api/plc/symbols/upload', methods=['POST'])
         def upload_tpy():
@@ -979,6 +1028,7 @@ class WebManager(BaseModule):
             """Liest/aktualisiert Kamera-Trigger-Regeln."""
             try:
                 if request.method == 'GET':
+                    self._load_camera_trigger_rules()
                     return jsonify({'success': True, 'rules': self._camera_trigger_rules})
 
                 data = request.get_json(silent=True) or {}
@@ -986,12 +1036,18 @@ class WebManager(BaseModule):
                 if not isinstance(rules, list):
                     return jsonify({'success': False, 'error': 'rules muss eine Liste sein'}), 400
 
-                path = os.path.join(os.path.abspath(os.getcwd()), 'config', 'camera_triggers.json')
-                payload = {'version': '1.0', 'rules': rules}
-                with open(path, 'w', encoding='utf-8') as f:
-                    json.dump(payload, f, indent=2, ensure_ascii=False)
+                if self._trigger_store:
+                    stored = self._trigger_store.replace_rules(rules)
+                    self._camera_trigger_rules = stored
+                    self._camera_trigger_state = {}
+                    self._camera_trigger_last_fired = {}
+                else:
+                    path = os.path.join(os.path.abspath(os.getcwd()), 'config', 'camera_triggers.json')
+                    payload = {'version': '1.0', 'rules': rules}
+                    with open(path, 'w', encoding='utf-8') as f:
+                        json.dump(payload, f, indent=2, ensure_ascii=False)
+                    self._load_camera_trigger_rules()
 
-                self._load_camera_trigger_rules()
                 return jsonify({'success': True, 'rules': self._camera_trigger_rules})
             except Exception as e:
                 logger.error(f"Fehler bei /api/camera-triggers: {e}", exc_info=True)
@@ -1944,16 +2000,18 @@ class WebManager(BaseModule):
         return os.path.join(os.path.abspath(os.getcwd()), 'config', 'camera_triggers.json')
 
     def _load_camera_trigger_rules(self):
-        path = self._camera_trigger_config_path()
         rules = []
-        try:
-            if os.path.exists(path):
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = json.load(f) or {}
-                    if isinstance(data.get('rules'), list):
-                        rules = data.get('rules')
-        except Exception as e:
-            logger.warning(f"Konnte camera_triggers.json nicht laden: {e}")
+        path = self._camera_trigger_config_path()
+
+        # SQLite is source of truth. Import legacy JSON once when DB is empty.
+        if self._trigger_store:
+            try:
+                if self._trigger_store.is_empty():
+                    self._trigger_store.import_legacy_json(path)
+                rules = self._trigger_store.list_rules()
+            except Exception as e:
+                logger.warning(f"Konnte Trigger-Regeln nicht aus DB laden: {e}")
+                rules = []
 
         # Default-Regel: Ring Doorbell Variable triggert Ring-Kamera Popup
         if not rules:
@@ -1964,30 +2022,75 @@ class WebManager(BaseModule):
                     "enabled": True,
                     "variable": f"GATEWAY.RING.{cam['cam_id']}.doorbell",
                     "on_value": True,
+                    "operator": "eq",
                     "camera_id": cam['cam_id'],
-                    "duration_seconds": 30
+                    "camera_type": "ring",
+                    "duration_seconds": 30,
+                    "cooldown_seconds": 0
                 })
             rules = default_rules
-            try:
-                with open(path, 'w', encoding='utf-8') as f:
-                    json.dump({"version": "1.0", "rules": rules}, f, indent=2, ensure_ascii=False)
-            except Exception as e:
-                logger.warning(f"Konnte camera_triggers.json nicht schreiben: {e}")
+            if self._trigger_store:
+                try:
+                    rules = self._trigger_store.replace_rules(rules)
+                except Exception as e:
+                    logger.warning(f"Konnte Default-Trigger-Regeln nicht in DB schreiben: {e}")
+            else:
+                try:
+                    with open(path, 'w', encoding='utf-8') as f:
+                        json.dump({"version": "1.0", "rules": rules}, f, indent=2, ensure_ascii=False)
+                except Exception as e:
+                    logger.warning(f"Konnte camera_triggers.json nicht schreiben: {e}")
 
         self._camera_trigger_rules = rules
         self._camera_trigger_state = {}
+        self._camera_trigger_last_fired = {}
         logger.info(f"Kamera-Trigger-Regeln geladen: {len(rules)}")
 
     @staticmethod
-    def _trigger_value_matches(actual: Any, expected: Any) -> bool:
-        if isinstance(expected, bool):
-            if isinstance(actual, bool):
-                return actual is expected
-            if isinstance(actual, (int, float)):
-                return bool(actual) is expected
-            if isinstance(actual, str):
-                norm = actual.strip().lower()
-                return (norm in ('1', 'true', 'on', 'yes')) if expected else (norm in ('0', 'false', 'off', 'no'))
+    def _to_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            return value.strip().lower() in ('1', 'true', 'on', 'yes')
+        return bool(value)
+
+    @staticmethod
+    def _to_float(value: Any):
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    def _trigger_value_matches(self, actual: Any, expected: Any, operator: str = 'eq') -> bool:
+        op = (operator or 'eq').strip().lower()
+        if op in ('eq', '=='):
+            if isinstance(expected, bool):
+                return self._to_bool(actual) is expected
+            return actual == expected
+        if op in ('ne', '!='):
+            if isinstance(expected, bool):
+                return self._to_bool(actual) is not expected
+            return actual != expected
+        if op in ('gt', '>'):
+            a = self._to_float(actual)
+            b = self._to_float(expected)
+            return a is not None and b is not None and a > b
+        if op in ('gte', '>='):
+            a = self._to_float(actual)
+            b = self._to_float(expected)
+            return a is not None and b is not None and a >= b
+        if op in ('lt', '<'):
+            a = self._to_float(actual)
+            b = self._to_float(expected)
+            return a is not None and b is not None and a < b
+        if op in ('lte', '<='):
+            a = self._to_float(actual)
+            b = self._to_float(expected)
+            return a is not None and b is not None and a <= b
+        if op == 'contains':
+            return str(expected).lower() in str(actual).lower()
         return actual == expected
 
     def _handle_camera_trigger_rules(self, key: str, value: Any):
@@ -2002,16 +2105,24 @@ class WebManager(BaseModule):
 
             rule_id = str(rule.get('id') or key)
             previous = self._camera_trigger_state.get(rule_id, None)
-            current_match = self._trigger_value_matches(value, rule.get('on_value', True))
-            previous_match = self._trigger_value_matches(previous, rule.get('on_value', True)) if previous is not None else False
+            operator = str(rule.get('operator') or 'eq')
+            current_match = self._trigger_value_matches(value, rule.get('on_value', True), operator)
+            previous_match = self._trigger_value_matches(previous, rule.get('on_value', True), operator) if previous is not None else False
             self._camera_trigger_state[rule_id] = value
 
             # Trigger nur auf Flanke (false -> true), verhindert Dauer-Popup
             if current_match and not previous_match:
+                cooldown = max(0, int(rule.get('cooldown_seconds') or 0))
+                last_fired = float(self._camera_trigger_last_fired.get(rule_id, 0))
+                now = time.time()
+                if cooldown > 0 and (now - last_fired) < cooldown:
+                    continue
+
                 cam_id = str(rule.get('camera_id', '')).strip()
                 if not cam_id:
                     continue
                 duration = int(rule.get('duration_seconds') or 30)
+                self._camera_trigger_last_fired[rule_id] = now
                 self.broadcast_event('camera_alert', {
                     'cam_id': cam_id,
                     'type': str(rule.get('camera_type') or 'ring'),
