@@ -33,6 +33,8 @@ class CameraTriggerStore:
                     variable TEXT NOT NULL,
                     operator TEXT NOT NULL DEFAULT 'eq',
                     on_value TEXT NOT NULL,
+                    category TEXT NOT NULL DEFAULT 'general',
+                    tags TEXT NOT NULL DEFAULT '[]',
                     camera_id TEXT NOT NULL,
                     camera_type TEXT NOT NULL DEFAULT 'ring',
                     duration_seconds INTEGER NOT NULL DEFAULT 30,
@@ -42,6 +44,12 @@ class CameraTriggerStore:
                 )
                 """
             )
+            # Migrations for existing DBs
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(trigger_rules)").fetchall()}
+            if "category" not in cols:
+                conn.execute("ALTER TABLE trigger_rules ADD COLUMN category TEXT NOT NULL DEFAULT 'general'")
+            if "tags" not in cols:
+                conn.execute("ALTER TABLE trigger_rules ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
 
     @staticmethod
     def _decode_value(raw: str) -> Any:
@@ -58,7 +66,7 @@ class CameraTriggerStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, name, enabled, variable, operator, on_value, camera_id, camera_type,
+                SELECT id, name, enabled, variable, operator, on_value, category, tags, camera_id, camera_type,
                        duration_seconds, cooldown_seconds, created_at, updated_at
                 FROM trigger_rules
                 ORDER BY updated_at DESC, id ASC
@@ -67,6 +75,9 @@ class CameraTriggerStore:
 
         result: List[Dict[str, Any]] = []
         for row in rows:
+            tags = self._decode_value(row["tags"]) if row["tags"] else []
+            if not isinstance(tags, list):
+                tags = []
             result.append(
                 {
                     "id": row["id"],
@@ -75,6 +86,8 @@ class CameraTriggerStore:
                     "variable": row["variable"],
                     "operator": row["operator"],
                     "on_value": self._decode_value(row["on_value"]),
+                    "category": (row["category"] or "general"),
+                    "tags": tags,
                     "camera_id": row["camera_id"],
                     "camera_type": row["camera_type"],
                     "duration_seconds": int(row["duration_seconds"]),
@@ -96,9 +109,9 @@ class CameraTriggerStore:
                 conn.execute(
                     """
                     INSERT INTO trigger_rules (
-                        id, name, enabled, variable, operator, on_value, camera_id, camera_type,
+                        id, name, enabled, variable, operator, on_value, category, tags, camera_id, camera_type,
                         duration_seconds, cooldown_seconds, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         rule_id,
@@ -107,6 +120,8 @@ class CameraTriggerStore:
                         str(r.get("variable") or ""),
                         str(r.get("operator") or "eq"),
                         self._encode_value(r.get("on_value", True)),
+                        str(r.get("category") or "general"),
+                        self._encode_value(r.get("tags") if isinstance(r.get("tags"), list) else []),
                         str(r.get("camera_id") or ""),
                         str(r.get("camera_type") or "ring"),
                         max(5, min(int(r.get("duration_seconds", 30)), 300)),
@@ -135,4 +150,3 @@ class CameraTriggerStore:
             return True
         except Exception:
             return False
-

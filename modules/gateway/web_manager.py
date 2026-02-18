@@ -2019,10 +2019,13 @@ class WebManager(BaseModule):
             for cam in self._get_ring_camera_configs():
                 default_rules.append({
                     "id": f"ring_{cam['cam_id']}_doorbell_popup",
+                    "name": f"Ring Klingel {cam['name']}",
                     "enabled": True,
                     "variable": f"GATEWAY.RING.{cam['cam_id']}.doorbell",
                     "on_value": True,
                     "operator": "eq",
+                    "category": "ring",
+                    "tags": ["ring", "doorbell", "popup"],
                     "camera_id": cam['cam_id'],
                     "camera_type": "ring",
                     "duration_seconds": 30,

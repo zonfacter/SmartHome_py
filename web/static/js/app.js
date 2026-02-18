@@ -52,6 +52,7 @@ class SmartHomeApp {
         this._ruleEditorSelectedIds = new Set();
         this._ruleEditorPage = 1;
         this._ruleEditorPageSize = parseInt(localStorage.getItem('ruleEditorPageSize') || '25', 10) || 25;
+        this._ruleEditorActiveGroup = '';
 
         // Initialisierung
         this.init();
@@ -3158,7 +3159,15 @@ class SmartHomeApp {
             this._ruleEditorPage = 1;
             this._renderRuleEditorList();
         }, 'input');
+        bindOnce('rule-filter-tag', () => {
+            this._ruleEditorPage = 1;
+            this._renderRuleEditorList();
+        }, 'input');
         bindOnce('rule-filter-camera', () => {
+            this._ruleEditorPage = 1;
+            this._renderRuleEditorList();
+        }, 'change');
+        bindOnce('rule-filter-category', () => {
             this._ruleEditorPage = 1;
             this._renderRuleEditorList();
         }, 'change');
@@ -3207,6 +3216,16 @@ class SmartHomeApp {
             });
             varSearchInput.setAttribute('data-listener-attached', 'true');
         }
+
+        document.querySelectorAll('.rule-group-btn').forEach((btn) => {
+            if (btn.hasAttribute('data-listener-attached')) return;
+            btn.addEventListener('click', () => {
+                this._ruleEditorActiveGroup = btn.getAttribute('data-group') || '';
+                this._ruleEditorPage = 1;
+                this._renderRuleEditorList();
+            });
+            btn.setAttribute('data-listener-attached', 'true');
+        });
     }
 
     async _loadRuleCameraOptions() {
@@ -3272,6 +3291,7 @@ class SmartHomeApp {
             this._cameraTriggerRules = data.rules || [];
             this._ruleEditorSelectedIds.clear();
             this._ruleEditorPage = 1;
+            this._refreshRuleCategoryFilterOptions();
             this._renderRuleEditorList();
             if (this._cameraTriggerRules.length > 0) {
                 this._fillRuleForm(this._cameraTriggerRules[0]);
@@ -3283,18 +3303,40 @@ class SmartHomeApp {
         }
     }
 
+    _refreshRuleCategoryFilterOptions() {
+        const categorySelect = document.getElementById('rule-filter-category');
+        if (!categorySelect) return;
+        const current = categorySelect.value || '';
+        const categories = Array.from(new Set(
+            this._cameraTriggerRules
+                .map((r) => String(r.category || 'general').trim().toLowerCase())
+                .filter(Boolean)
+        )).sort();
+        const options = categories.map((c) => `<option value="${c}">${c}</option>`).join('');
+        categorySelect.innerHTML = `<option value="">Alle Kategorien</option>${options}`;
+        if (categories.includes(current)) categorySelect.value = current;
+    }
+
     _getRuleEditorFilteredRules() {
         const q = (document.getElementById('rule-filter-search')?.value || '').trim().toLowerCase();
         const cameraId = (document.getElementById('rule-filter-camera')?.value || '').trim();
+        const category = (document.getElementById('rule-filter-category')?.value || '').trim().toLowerCase();
+        const tagFilter = (document.getElementById('rule-filter-tag')?.value || '').trim().toLowerCase();
         const enabledFilter = (document.getElementById('rule-filter-enabled')?.value || '').trim();
+        const group = (this._ruleEditorActiveGroup || '').trim().toLowerCase();
 
         return this._cameraTriggerRules.filter((r) => {
             if (cameraId && r.camera_id !== cameraId) return false;
+            const rCategory = String(r.category || 'general').trim().toLowerCase();
+            const rTags = Array.isArray(r.tags) ? r.tags.map((t) => String(t).toLowerCase()) : [];
+            if (category && rCategory !== category) return false;
+            if (tagFilter && !rTags.some((t) => t.includes(tagFilter))) return false;
+            if (group && rCategory !== group && !rTags.includes(group)) return false;
             if (enabledFilter === '1' && !r.enabled) return false;
             if (enabledFilter === '0' && !!r.enabled) return false;
             if (!q) return true;
 
-            const haystack = `${r.id || ''} ${r.name || ''} ${r.variable || ''} ${r.camera_id || ''}`.toLowerCase();
+            const haystack = `${r.id || ''} ${r.name || ''} ${r.variable || ''} ${r.camera_id || ''} ${rCategory} ${(rTags || []).join(' ')}`.toLowerCase();
             return haystack.includes(q);
         });
     }
@@ -3315,6 +3357,14 @@ class SmartHomeApp {
     _renderRuleEditorList() {
         const list = document.getElementById('rule-editor-list');
         if (!list) return;
+        document.querySelectorAll('.rule-group-btn').forEach((btn) => {
+            const group = btn.getAttribute('data-group') || '';
+            if (group === (this._ruleEditorActiveGroup || '')) {
+                btn.classList.add('ring-2', 'ring-offset-1', 'ring-white');
+            } else {
+                btn.classList.remove('ring-2', 'ring-offset-1', 'ring-white');
+            }
+        });
 
         const statsEl = document.getElementById('rule-list-stats');
         const pageInfoEl = document.getElementById('rule-page-info');
@@ -3347,6 +3397,9 @@ class SmartHomeApp {
             const state = r.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700';
             const op = r.operator || 'eq';
             const checked = this._ruleEditorSelectedIds.has(r.id) ? 'checked' : '';
+            const category = String(r.category || 'general');
+            const tags = Array.isArray(r.tags) ? r.tags : [];
+            const tagHtml = tags.slice(0, 4).map((t) => `<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200">${t}</span>`).join('');
             return `
                 <div class="flex items-start gap-2 p-2 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700">
                     <input type="checkbox" class="rule-select mt-1" data-rule-id="${r.id}" ${checked}>
@@ -3357,6 +3410,10 @@ class SmartHomeApp {
                         </div>
                         <div class="text-xs text-gray-500 dark:text-gray-400 truncate">${r.variable} ${op} ${JSON.stringify(r.on_value)}</div>
                         <div class="text-[11px] text-gray-500 dark:text-gray-400">→ ${r.camera_id} (${r.duration_seconds || 30}s)</div>
+                        <div class="mt-1 flex items-center gap-1 flex-wrap">
+                            <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200">${category}</span>
+                            ${tagHtml}
+                        </div>
                     </button>
                 </div>
             `;
@@ -3403,6 +3460,7 @@ class SmartHomeApp {
             throw new Error(data.error || 'Regeln konnten nicht gespeichert werden');
         }
         this._cameraTriggerRules = data.rules || [];
+        this._refreshRuleCategoryFilterOptions();
     }
 
     async _applyBulkRuleAction(action) {
@@ -3449,6 +3507,8 @@ class SmartHomeApp {
         setVal('rule-variable', rule.variable || '');
         setVal('rule-operator', rule.operator || 'eq');
         setVal('rule-on-value', typeof rule.on_value === 'string' ? rule.on_value : JSON.stringify(rule.on_value));
+        setVal('rule-category', rule.category || 'general');
+        setVal('rule-tags', Array.isArray(rule.tags) ? rule.tags.join(',') : '');
         setVal('rule-camera-id', rule.camera_id || '');
         setVal('rule-duration-seconds', rule.duration_seconds || 30);
         setVal('rule-cooldown-seconds', rule.cooldown_seconds || 0);
@@ -3463,6 +3523,8 @@ class SmartHomeApp {
             variable: '',
             operator: 'eq',
             on_value: true,
+            category: 'general',
+            tags: [],
             camera_id: '',
             duration_seconds: 30,
             cooldown_seconds: 0,
@@ -3493,6 +3555,11 @@ class SmartHomeApp {
         const name = getVal('rule-name').trim() || `${variable} -> ${cameraId}`;
         const operator = getVal('rule-operator').trim() || 'eq';
         const onValue = this._parseRuleInputValue(getVal('rule-on-value'));
+        const category = (getVal('rule-category').trim().toLowerCase() || 'general').replace(/[^a-z0-9_-]/g, '');
+        const tags = getVal('rule-tags')
+            .split(',')
+            .map((t) => t.trim().toLowerCase())
+            .filter((t) => !!t);
         const duration = Math.max(5, Math.min(parseInt(getVal('rule-duration-seconds') || '30', 10), 300));
         const cooldown = Math.max(0, Math.min(parseInt(getVal('rule-cooldown-seconds') || '0', 10), 3600));
 
@@ -3506,6 +3573,8 @@ class SmartHomeApp {
             variable,
             operator,
             on_value: onValue,
+            category: category || 'general',
+            tags: Array.from(new Set(tags)),
             camera_id: cameraId,
             camera_type: 'ring',
             duration_seconds: duration,
