@@ -881,6 +881,26 @@ class WebManager(BaseModule):
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
 
+        @self.app.route('/api/admin/service/restart', methods=['POST'])
+        def restart_service():
+            """Plant einen verzögerten Service-Restart."""
+            try:
+                from modules.core.service_manager import ServiceManager
+                data = request.get_json(silent=True) or {}
+                try:
+                    delay = int(data.get('delay', 2))
+                except Exception:
+                    delay = 2
+                delay = max(1, min(delay, 30))
+                ServiceManager.schedule_restart(delay_seconds=delay)
+                return jsonify({
+                    'success': True,
+                    'message': f'Service-Neustart in {delay}s geplant'
+                })
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/admin/service/restart: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
         @self.app.route('/api/monitor/dataflow')
         def get_dataflow_stats():
             """Echtzeit-Datenfluss-Statistiken"""

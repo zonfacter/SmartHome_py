@@ -54,44 +54,28 @@ class ServiceManager:
             sys.stderr.flush()
 
             system_platform = platform.system()
+            cwd = os.getcwd()
 
+            # Robuster Restart über separaten Prozess:
+            # vermeidet Socket-FD-Vererbung/Port-Konflikte bei execv.
             if system_platform == "Windows":
-                logger.info("Windows-Umgebung erkannt. Starte subprocess...")
-
-                # Windows benötigt einen neuen Prozess
-                # CREATE_NEW_CONSOLE = Neues Konsolenfenster (sichtbar)
-                # DETACHED_PROCESS = Kein Konsolenfenster (unsichtbar, aber funktioniert nicht immer)
-                # Wir verwenden CREATE_NEW_CONSOLE für Debugging
-                import subprocess
-
-                # Working Directory beibehalten
-                cwd = os.getcwd()
-
-                # Neuen Prozess starten (mit SICHTBAREM Konsolenfenster für Debugging)
-                # CREATE_NEW_CONSOLE = 0x00000010
                 process = subprocess.Popen(
                     [python] + args,
-                    creationflags=subprocess.CREATE_NEW_CONSOLE,  # Sichtbares Fenster!
-                    cwd=cwd
+                    cwd=cwd,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                    close_fds=True
+                )
+            else:
+                process = subprocess.Popen(
+                    [python] + args,
+                    cwd=cwd,
+                    start_new_session=True,
+                    close_fds=True
                 )
 
-                logger.info(f"Neuer Prozess gestartet (PID: {process.pid}). Beende alten Prozess...")
-
-                # Kleiner Delay für sauberen Shutdown
-                time.sleep(0.5)
-
-                # Alten Prozess hart beenden
-                os._exit(0)
-
-            else:
-                # Linux/Docker: Wir ersetzen den aktuellen Prozess (behält PID)
-                logger.info("Linux/Docker-Umgebung erkannt. Führe execv aus...")
-
-                # execv ersetzt den aktuellen Prozess komplett
-                # Wichtig: Der erste Argument muss der Programm-Name sein
-                os.execv(python, [python] + args)
-
-                # Diese Zeile wird NIE erreicht (Prozess wurde ersetzt)
+            logger.info(f"Neuer Prozess gestartet (PID: {process.pid}). Beende alten Prozess...")
+            time.sleep(0.5)
+            os._exit(0)
 
         except Exception as e:
             logger.error(f"❌ CRITICAL: Restart failed: {e}", exc_info=True)

@@ -21,6 +21,7 @@ def main():
     parser = argparse.ArgumentParser(description='SmartHome OS Web-HMI')
     parser.add_argument('--port', type=int, default=5000, help='Server-Port (default: 5000)')
     parser.add_argument('--host', type=str, default='0.0.0.0', help='Server-Host (default: 0.0.0.0)')
+    parser.add_argument('--restarted', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     # ========================================================================
@@ -57,7 +58,7 @@ def main():
     print()
 
     # Zeige ob dies ein Restart ist
-    if '--restarted' in sys.argv:
+    if args.restarted:
         print("✅ Service neu gestartet (Hot-Reload)\n")
 
     # Erstelle App-Context (minimale Version)
