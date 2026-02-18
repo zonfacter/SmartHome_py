@@ -3151,6 +3151,11 @@ class SmartHomeApp {
         };
 
         bindOnce('rule-refresh-btn', () => this._loadCameraTriggerRules());
+        bindOnce('rule-export-btn', () => this._exportCameraTriggerRules());
+        bindOnce('rule-import-btn', () => {
+            const input = document.getElementById('rule-import-file');
+            if (input) input.click();
+        });
         bindOnce('rule-var-search-btn', () => {
             const q = document.getElementById('rule-var-search')?.value || '';
             this._searchRuleVariables(q);
@@ -3215,6 +3220,17 @@ class SmartHomeApp {
                 }
             });
             varSearchInput.setAttribute('data-listener-attached', 'true');
+        }
+
+        const importFileInput = document.getElementById('rule-import-file');
+        if (importFileInput && !importFileInput.hasAttribute('data-listener-attached')) {
+            importFileInput.addEventListener('change', async () => {
+                const file = importFileInput.files && importFileInput.files[0];
+                if (!file) return;
+                await this._importCameraTriggerRulesFromFile(file);
+                importFileInput.value = '';
+            });
+            importFileInput.setAttribute('data-listener-attached', 'true');
         }
 
         document.querySelectorAll('.rule-group-btn').forEach((btn) => {
@@ -3449,11 +3465,70 @@ class SmartHomeApp {
         });
     }
 
+    async _exportCameraTriggerRules() {
+        try {
+            const resp = await fetch('/api/camera-triggers/export');
+            if (!resp.ok) {
+                throw new Error(`HTTP ${resp.status}`);
+            }
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const ts = new Date().toISOString().replace(/[:.]/g, '-');
+            a.href = url;
+            a.download = `camera_trigger_rules_${ts}.json`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            alert(`Export fehlgeschlagen: ${e.message}`);
+        }
+    }
+
+    async _importCameraTriggerRulesFromFile(file) {
+        try {
+            const text = await file.text();
+            let payload = null;
+            try {
+                payload = JSON.parse(text);
+            } catch (e) {
+                throw new Error('Datei ist kein gültiges JSON');
+            }
+
+            const mode = confirm('Regeln zusammenführen? "OK" = Merge, "Abbrechen" = Ersetzen') ? 'merge' : 'replace';
+            const resp = await fetch('/api/camera-triggers/import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ payload, mode })
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                const details = (data.errors && data.errors.length) ? `\n${data.errors.slice(0, 5).join('\n')}` : '';
+                throw new Error((data.error || 'Import fehlgeschlagen') + details);
+            }
+
+            this._cameraTriggerRules = data.rules || [];
+            this._ruleEditorSelectedIds.clear();
+            this._ruleEditorPage = 1;
+            this._refreshRuleCategoryFilterOptions();
+            this._renderRuleEditorList();
+            if (this._cameraTriggerRules.length > 0) this._fillRuleForm(this._cameraTriggerRules[0]);
+            else this._clearRuleForm();
+
+            if (data.warnings && data.warnings.length) {
+                alert(`Import erfolgreich mit Warnungen:\n${data.warnings.slice(0, 10).join('\n')}`);
+            }
+        } catch (e) {
+            alert(`Import fehlgeschlagen: ${e.message}`);
+        }
+    }
+
     async _persistCameraTriggerRules() {
         const resp = await fetch('/api/camera-triggers', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rules: this._cameraTriggerRules })
+            body: JSON.stringify({ version: '2.0', rules: this._cameraTriggerRules })
         });
         const data = await resp.json();
         if (!resp.ok || !data.success) {
@@ -3461,6 +3536,9 @@ class SmartHomeApp {
         }
         this._cameraTriggerRules = data.rules || [];
         this._refreshRuleCategoryFilterOptions();
+        if (data.warnings && data.warnings.length) {
+            console.warn('Trigger-Regel Warnungen:', data.warnings);
+        }
     }
 
     async _applyBulkRuleAction(action) {

@@ -1035,22 +1035,113 @@ class WebManager(BaseModule):
                 rules = data.get('rules')
                 if not isinstance(rules, list):
                     return jsonify({'success': False, 'error': 'rules muss eine Liste sein'}), 400
+                source_version = str(data.get('version') or '1.0')
+                ok_version, version_msg = self._validate_trigger_import_version(source_version)
+                if not ok_version:
+                    return jsonify({'success': False, 'error': version_msg}), 400
+
+                normalized_rules, warnings, errors = self._normalize_camera_trigger_rules(rules)
+                if errors:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Import enthält ungültige Regeln',
+                        'errors': errors,
+                        'warnings': warnings
+                    }), 400
 
                 if self._trigger_store:
-                    stored = self._trigger_store.replace_rules(rules)
+                    stored = self._trigger_store.replace_rules(normalized_rules)
                     self._camera_trigger_rules = stored
                     self._camera_trigger_state = {}
                     self._camera_trigger_last_fired = {}
                 else:
                     path = os.path.join(os.path.abspath(os.getcwd()), 'config', 'camera_triggers.json')
-                    payload = {'version': '1.0', 'rules': rules}
+                    payload = {'version': self._camera_trigger_schema_version(), 'rules': normalized_rules}
                     with open(path, 'w', encoding='utf-8') as f:
                         json.dump(payload, f, indent=2, ensure_ascii=False)
                     self._load_camera_trigger_rules()
 
-                return jsonify({'success': True, 'rules': self._camera_trigger_rules})
+                return jsonify({'success': True, 'rules': self._camera_trigger_rules, 'warnings': warnings})
             except Exception as e:
                 logger.error(f"Fehler bei /api/camera-triggers: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/camera-triggers/export', methods=['GET'])
+        def export_camera_triggers():
+            """Exportiert versionierte Kamera-Trigger-Regeln als JSON."""
+            try:
+                self._load_camera_trigger_rules()
+                payload = {
+                    'format': 'camera_trigger_rules',
+                    'version': self._camera_trigger_schema_version(),
+                    'exported_at': int(time.time()),
+                    'rules': self._camera_trigger_rules
+                }
+                resp = jsonify(payload)
+                resp.headers['Content-Disposition'] = f'attachment; filename="camera_trigger_rules_v{self._camera_trigger_schema_version()}.json"'
+                return resp
+            except Exception as e:
+                logger.error(f"Fehler bei /api/camera-triggers/export: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/camera-triggers/import', methods=['POST'])
+        def import_camera_triggers():
+            """Importiert versionierte/legacy Kamera-Trigger-Regeln mit Kompatibilitätsprüfung."""
+            try:
+                data = request.get_json(silent=True) or {}
+                payload = data.get('payload') if isinstance(data.get('payload'), dict) else data
+                if not isinstance(payload, dict):
+                    return jsonify({'success': False, 'error': 'Ungültiges JSON-Payload'}), 400
+
+                source_version = str(payload.get('version') or '1.0')
+                ok_version, version_msg = self._validate_trigger_import_version(source_version)
+                if not ok_version:
+                    return jsonify({'success': False, 'error': version_msg}), 400
+
+                raw_rules = payload.get('rules')
+                if not isinstance(raw_rules, list):
+                    return jsonify({'success': False, 'error': 'rules muss eine Liste sein'}), 400
+
+                normalized_rules, warnings, errors = self._normalize_camera_trigger_rules(raw_rules)
+                if errors:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Import enthält ungültige Regeln',
+                        'errors': errors,
+                        'warnings': warnings
+                    }), 400
+
+                mode = str(data.get('mode') or 'replace').strip().lower()
+                if mode not in ('replace', 'merge'):
+                    mode = 'replace'
+
+                if mode == 'merge':
+                    self._load_camera_trigger_rules()
+                    existing = {str(r.get('id')): r for r in self._camera_trigger_rules}
+                    for r in normalized_rules:
+                        existing[str(r.get('id'))] = r
+                    normalized_rules = list(existing.values())
+
+                if self._trigger_store:
+                    stored = self._trigger_store.replace_rules(normalized_rules)
+                    self._camera_trigger_rules = stored
+                    self._camera_trigger_state = {}
+                    self._camera_trigger_last_fired = {}
+                else:
+                    path = os.path.join(os.path.abspath(os.getcwd()), 'config', 'camera_triggers.json')
+                    with open(path, 'w', encoding='utf-8') as f:
+                        json.dump({'version': self._camera_trigger_schema_version(), 'rules': normalized_rules}, f, indent=2, ensure_ascii=False)
+                    self._load_camera_trigger_rules()
+
+                return jsonify({
+                    'success': True,
+                    'imported': len(normalized_rules),
+                    'rules': self._camera_trigger_rules,
+                    'warnings': warnings,
+                    'mode': mode
+                })
+            except Exception as e:
+                logger.error(f"Fehler bei /api/camera-triggers/import: {e}", exc_info=True)
                 return jsonify({'success': False, 'error': str(e)}), 500
 
         @self.app.route('/api/cameras', methods=['GET'])
@@ -1998,6 +2089,126 @@ class WebManager(BaseModule):
 
     def _camera_trigger_config_path(self) -> str:
         return os.path.join(os.path.abspath(os.getcwd()), 'config', 'camera_triggers.json')
+
+    @staticmethod
+    def _camera_trigger_schema_version() -> str:
+        return "2.0"
+
+    def _validate_trigger_import_version(self, source_version: str):
+        """Prüft, ob eine Import-Version unterstützt wird."""
+        try:
+            src = str(source_version or '1.0').strip()
+            major = int(src.split('.', 1)[0])
+            current_major = int(self._camera_trigger_schema_version().split('.', 1)[0])
+            if major <= current_major:
+                return True, ''
+            return False, f'Import-Version {src} wird von Schema {self._camera_trigger_schema_version()} nicht unterstützt'
+        except Exception:
+            return False, f'Ungültige Versionsangabe: {source_version}'
+
+    def _available_camera_ids(self):
+        cams = set()
+        try:
+            path = os.path.join(os.path.abspath(os.getcwd()), 'config', 'cameras.json')
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f) or {}
+                    for cam_id in (data.get('cameras') or {}).keys():
+                        cams.add(str(cam_id))
+        except Exception:
+            pass
+        return cams
+
+    def _available_variable_names(self):
+        vars_set = set()
+        try:
+            symbols = []
+            if self.symbol_browser:
+                symbols = self.symbol_browser.get_symbols('plc_001', force_refresh=False) or []
+            symbols.extend(self._get_gateway_virtual_symbols())
+            for s in symbols:
+                if isinstance(s, dict) and s.get('name'):
+                    vars_set.add(str(s.get('name')))
+        except Exception:
+            pass
+        return vars_set
+
+    def _normalize_camera_trigger_rules(self, rules: List[Dict[str, Any]]):
+        normalized = []
+        warnings = []
+        errors = []
+        camera_ids = self._available_camera_ids()
+        known_variables = self._available_variable_names()
+
+        for idx, raw in enumerate(rules):
+            if not isinstance(raw, dict):
+                errors.append(f"Regel {idx + 1}: muss ein Objekt sein")
+                continue
+
+            rule_id = str(raw.get('id') or f"rule_{idx + 1}").strip()
+            if not rule_id:
+                errors.append(f"Regel {idx + 1}: id fehlt")
+                continue
+
+            variable = str(raw.get('variable') or raw.get('symbol') or raw.get('key') or '').strip()
+            if not variable:
+                errors.append(f"Regel {rule_id}: variable fehlt")
+                continue
+
+            camera_id = str(raw.get('camera_id') or raw.get('cam_id') or raw.get('camera') or '').strip()
+            if not camera_id:
+                errors.append(f"Regel {rule_id}: camera_id fehlt")
+                continue
+
+            operator = str(raw.get('operator') or 'eq').strip().lower()
+            if operator not in ('eq', '==', 'ne', '!=', 'gt', '>', 'gte', '>=', 'lt', '<', 'lte', '<=', 'contains'):
+                warnings.append(f"Regel {rule_id}: Operator {operator} unbekannt, setze eq")
+                operator = 'eq'
+
+            enabled = bool(raw.get('enabled', True))
+            if camera_ids and camera_id not in camera_ids:
+                warnings.append(f"Regel {rule_id}: Kamera {camera_id} nicht vorhanden, Regel wird deaktiviert")
+                enabled = False
+            if known_variables and variable not in known_variables:
+                warnings.append(f"Regel {rule_id}: Variable {variable} unbekannt, Regel wird deaktiviert")
+                enabled = False
+
+            raw_tags = raw.get('tags')
+            if isinstance(raw_tags, str):
+                tags = [t.strip().lower() for t in raw_tags.split(',') if t.strip()]
+            elif isinstance(raw_tags, list):
+                tags = [str(t).strip().lower() for t in raw_tags if str(t).strip()]
+            else:
+                tags = []
+
+            category = str(raw.get('category') or raw.get('group') or 'general').strip().lower()
+            category = ''.join(ch for ch in category if ch.isalnum() or ch in ('_', '-')) or 'general'
+
+            try:
+                duration = max(5, min(int(raw.get('duration_seconds', 30)), 300))
+            except Exception:
+                duration = 30
+            try:
+                cooldown = max(0, min(int(raw.get('cooldown_seconds', 0)), 3600))
+            except Exception:
+                cooldown = 0
+
+            normalized.append({
+                'id': rule_id,
+                'name': str(raw.get('name') or rule_id),
+                'enabled': enabled,
+                'variable': variable,
+                'operator': operator,
+                'on_value': raw.get('on_value', True),
+                'category': category,
+                'tags': list(dict.fromkeys(tags)),
+                'camera_id': camera_id,
+                'camera_type': str(raw.get('camera_type') or raw.get('type') or 'ring'),
+                'duration_seconds': duration,
+                'cooldown_seconds': cooldown
+            })
+
+        return normalized, warnings, errors
 
     def _load_camera_trigger_rules(self):
         rules = []
