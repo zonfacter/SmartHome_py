@@ -81,6 +81,8 @@ class WebManager(BaseModule):
         self._ring_last_event_ids = {}
         self._ring_doorbell_until = {}
         self._ring_doorbell_pulse_seconds = 10.0
+        self._camera_trigger_rules = []
+        self._camera_trigger_state = {}
 
     def initialize(self, app_context: Any):
         """Initialisiert das Modul und erzwingt absolute Pfade für alle Manager."""
@@ -168,6 +170,7 @@ class WebManager(BaseModule):
                 logger.info("Initialisiere Flask App...")
                 self._setup_flask()
                 logger.info("Flask App bereit")
+                self._load_camera_trigger_rules()
 
                 # Jetzt, da Flask + SocketIO initialisiert sind, starten
                 # wir das Variable-Polling (falls Manager vorhanden).
@@ -970,6 +973,29 @@ class WebManager(BaseModule):
             path = _cameras_config_path()
             with open(path, 'w') as f:
                 json.dump(config, f, indent=2)
+
+        @self.app.route('/api/camera-triggers', methods=['GET', 'POST'])
+        def camera_triggers():
+            """Liest/aktualisiert Kamera-Trigger-Regeln."""
+            try:
+                if request.method == 'GET':
+                    return jsonify({'success': True, 'rules': self._camera_trigger_rules})
+
+                data = request.get_json(silent=True) or {}
+                rules = data.get('rules')
+                if not isinstance(rules, list):
+                    return jsonify({'success': False, 'error': 'rules muss eine Liste sein'}), 400
+
+                path = os.path.join(os.path.abspath(os.getcwd()), 'config', 'camera_triggers.json')
+                payload = {'version': '1.0', 'rules': rules}
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump(payload, f, indent=2, ensure_ascii=False)
+
+                self._load_camera_trigger_rules()
+                return jsonify({'success': True, 'rules': self._camera_trigger_rules})
+            except Exception as e:
+                logger.error(f"Fehler bei /api/camera-triggers: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
 
         @self.app.route('/api/cameras', methods=['GET'])
         def list_cameras():
@@ -1906,6 +1932,88 @@ class WebManager(BaseModule):
             ])
         return symbols
 
+    def _camera_trigger_config_path(self) -> str:
+        return os.path.join(os.path.abspath(os.getcwd()), 'config', 'camera_triggers.json')
+
+    def _load_camera_trigger_rules(self):
+        path = self._camera_trigger_config_path()
+        rules = []
+        try:
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f) or {}
+                    if isinstance(data.get('rules'), list):
+                        rules = data.get('rules')
+        except Exception as e:
+            logger.warning(f"Konnte camera_triggers.json nicht laden: {e}")
+
+        # Default-Regel: Ring Doorbell Variable triggert Ring-Kamera Popup
+        if not rules:
+            default_rules = []
+            for cam in self._get_ring_camera_configs():
+                default_rules.append({
+                    "id": f"ring_{cam['cam_id']}_doorbell_popup",
+                    "enabled": True,
+                    "variable": f"GATEWAY.RING.{cam['cam_id']}.doorbell",
+                    "on_value": True,
+                    "camera_id": cam['cam_id'],
+                    "duration_seconds": 30
+                })
+            rules = default_rules
+            try:
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump({"version": "1.0", "rules": rules}, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                logger.warning(f"Konnte camera_triggers.json nicht schreiben: {e}")
+
+        self._camera_trigger_rules = rules
+        self._camera_trigger_state = {}
+        logger.info(f"Kamera-Trigger-Regeln geladen: {len(rules)}")
+
+    @staticmethod
+    def _trigger_value_matches(actual: Any, expected: Any) -> bool:
+        if isinstance(expected, bool):
+            if isinstance(actual, bool):
+                return actual is expected
+            if isinstance(actual, (int, float)):
+                return bool(actual) is expected
+            if isinstance(actual, str):
+                norm = actual.strip().lower()
+                return (norm in ('1', 'true', 'on', 'yes')) if expected else (norm in ('0', 'false', 'off', 'no'))
+        return actual == expected
+
+    def _handle_camera_trigger_rules(self, key: str, value: Any):
+        if not self._camera_trigger_rules:
+            return
+
+        for rule in self._camera_trigger_rules:
+            if not rule.get('enabled', True):
+                continue
+            if str(rule.get('variable', '')).strip() != key:
+                continue
+
+            rule_id = str(rule.get('id') or key)
+            previous = self._camera_trigger_state.get(rule_id, None)
+            current_match = self._trigger_value_matches(value, rule.get('on_value', True))
+            previous_match = self._trigger_value_matches(previous, rule.get('on_value', True)) if previous is not None else False
+            self._camera_trigger_state[rule_id] = value
+
+            # Trigger nur auf Flanke (false -> true), verhindert Dauer-Popup
+            if current_match and not previous_match:
+                cam_id = str(rule.get('camera_id', '')).strip()
+                if not cam_id:
+                    continue
+                duration = int(rule.get('duration_seconds') or 30)
+                self.broadcast_event('camera_alert', {
+                    'cam_id': cam_id,
+                    'type': str(rule.get('camera_type') or 'ring'),
+                    'source': 'camera_trigger_rule',
+                    'trigger_rule_id': rule_id,
+                    'trigger_variable': key,
+                    'duration_seconds': max(5, min(duration, 120)),
+                    'timestamp': int(time.time())
+                })
+
     def _set_ring_doorbell_state(self, cam_id: str, cam_name: str, event_id: str, ding_ts: Any, active: bool):
         if not self.data_gateway:
             return
@@ -1976,6 +2084,8 @@ class WebManager(BaseModule):
     def _start_ring_event_monitor(self):
         if self._ring_event_active:
             return
+        # Trigger-Regeln aktualisieren (z. B. nach Ring-Import neuer Kameras)
+        self._load_camera_trigger_rules()
         # Initialisiere bekannte Ring-Variablen mit Defaultwerten,
         # damit sie sofort im Gateway lesbar sind.
         if self.data_gateway:
@@ -1991,6 +2101,13 @@ class WebManager(BaseModule):
         if self._ring_event_thread and self._ring_event_thread.is_alive():
             self._ring_event_thread.join(timeout=2.0)
         self._ring_event_thread = None
+
+    def handle_telemetry_update(self, key: str, value: Any):
+        """Hook für DataGateway-Telemetrieänderungen."""
+        try:
+            self._handle_camera_trigger_rules(key, value)
+        except Exception as e:
+            logger.debug(f"Trigger-Regelverarbeitung fehlgeschlagen ({key}): {e}")
 
     def broadcast_telemetry(self, key: str, value: Any):
         """

@@ -2617,6 +2617,7 @@ class SmartHomeApp {
     async _handleCameraAlert(data) {
         const camId = data?.cam_id || data?.camera_id || data?.id;
         if (!camId) return;
+        const durationMs = Math.max(5000, Math.min(120000, (parseInt(data?.duration_seconds, 10) || 30) * 1000));
 
         const previousPage = this.currentPage;
         if (this.currentPage !== 'cameras') {
@@ -2632,7 +2633,7 @@ class SmartHomeApp {
             card.classList.add('ring-4', 'ring-red-500', 'ring-offset-2');
             setTimeout(() => {
                 card.classList.remove('ring-4', 'ring-red-500', 'ring-offset-2');
-            }, 30000);
+            }, durationMs);
             card.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
 
@@ -2652,7 +2653,7 @@ class SmartHomeApp {
             }
             this._cameraAlertRestorePage = null;
             this._cameraAlertTimer = null;
-        }, 30000);
+        }, durationMs);
     }
 
     // ========================================================================

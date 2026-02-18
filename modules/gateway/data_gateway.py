@@ -776,6 +776,13 @@ class DataGateway(BaseModule):
             # Broadcast Update
             self._broadcast_telemetry_update(key, value)
 
+            # Optionaler Hook (z. B. Kamera-Trigger-Regeln im WebManager)
+            if self.web_manager and hasattr(self.web_manager, 'handle_telemetry_update'):
+                try:
+                    self.web_manager.handle_telemetry_update(key, value)
+                except Exception:
+                    pass
+
     def get_telemetry(self, key: str) -> Optional[Any]:
         """
         Holt Telemetrie-Wert aus Cache
@@ -1195,6 +1202,8 @@ class DataGateway(BaseModule):
                         if not cached or cached[0] != value:
                             # Wert hat sich geändert → Update
                             self.variable_manager.update_value(var_name, value, plc_id)
+                            # Spiegel in Telemetrie-Cache für Regel-Engine/Frontend
+                            self.update_telemetry(f"PLC.{var_name}", value)
 
                             updates[plc_id][var_name] = {
                                 'value': value,
