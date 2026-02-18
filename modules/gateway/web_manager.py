@@ -999,6 +999,30 @@ class WebManager(BaseModule):
                 logger.error(f"Fehler bei GET /api/cameras: {e}", exc_info=True)
                 return jsonify({'error': str(e)}), 500
 
+        @self.app.route('/api/cameras/alert', methods=['POST'])
+        def trigger_camera_alert():
+            """Broadcastet ein Kamera-Alarm-Event ans Frontend (Vorbereitung Gateway-Trigger)."""
+            try:
+                data = request.get_json(silent=True) or {}
+                cam_id = str(data.get('cam_id') or data.get('camera_id') or '').strip()
+                if not cam_id:
+                    return jsonify({'success': False, 'error': 'cam_id fehlt'}), 400
+
+                config = _load_cameras_config()
+                cam_cfg = config.get('cameras', {}).get(cam_id, {})
+                payload = {
+                    'cam_id': cam_id,
+                    'name': data.get('name') or cam_cfg.get('name') or cam_id,
+                    'type': data.get('type') or cam_cfg.get('type') or 'ring',
+                    'source': data.get('source', 'gateway'),
+                    'timestamp': int(time.time())
+                }
+                self.broadcast_event('camera_alert', payload)
+                return jsonify({'success': True, 'event': payload})
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/cameras/alert: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
         @self.app.route('/api/cameras/<cam_id>/snapshot', methods=['GET'])
         def camera_snapshot(cam_id):
             """Liefert Snapshot fuer Ring- und RTSP-Kameras."""

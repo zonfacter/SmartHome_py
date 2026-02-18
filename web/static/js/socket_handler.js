@@ -127,6 +127,11 @@ class SocketHandler {
             // Callback
             this.triggerCallback('mqtt_message', data);
         });
+
+        this.socket.on('camera_alert', (data) => {
+            console.log('[SocketHandler] Camera Alert:', data);
+            this.triggerCallback('camera_alert', data);
+        });
     }
 
     /**

@@ -43,6 +43,10 @@ class SmartHomeApp {
         this._ringWebrtcSessionId = null;
         this._ringWebrtcKeepaliveTimer = null;
         this._ringWidgetConnections = {};
+        this._ringWidgetHls = {};
+        this._ringWidgetModes = {};
+        this._cameraAlertTimer = null;
+        this._cameraAlertRestorePage = null;
 
         // Initialisierung
         this.init();
@@ -310,6 +314,10 @@ class SmartHomeApp {
             } else {
                 console.error(`❌ PLC-Write Fehler: ${data.error}`);
             }
+        });
+
+        this.socket.registerCallback('camera_alert', (data) => {
+            this._handleCameraAlert(data);
         });
     }
 
@@ -1516,6 +1524,10 @@ class SmartHomeApp {
                                     data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="ring">
                                 <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i><span>Vollbild</span>
                             </button>
+                            <button class="ring-widget-mode-btn px-3 py-1.5 bg-orange-600 text-white text-xs rounded hover:bg-orange-500 flex items-center space-x-1"
+                                    data-cam-id="${camId}" data-mode="snapshot">
+                                <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span id="ring-mode-label-${camId}">Snapshot</span>
+                            </button>
                             <span class="text-xs px-2 py-0.5 rounded bg-orange-100 text-orange-800">RING</span>
                         </div>
                         <div id="widget-ptz-${camId}" class="widget-ptz-panel hidden mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg select-none"></div>
@@ -1612,29 +1624,11 @@ class SmartHomeApp {
                     return;
                 }
 
-                this._loadRingSnapshot(camId, `cam-image-${camId}`, 5000, 2, 1);
-                this._startRingSnapshotRefresh(camId, `cam-image-${camId}`, 12000);
-                const webrtcAvailable = !!ringStatus.webrtc_available;
-                const preferWebrtc = webrtcAvailable && (localStorage.getItem('ringWebrtcPreferred') || '1') === '1';
-                if (preferWebrtc && window.RTCPeerConnection) {
-                    const videoEl = document.getElementById(`ring-video-${camId}`);
-                    const imageEl = document.getElementById(`cam-image-${camId}`);
-                    if (videoEl) {
-                        this._startRingWidgetWebrtc(camId, videoEl, imageEl)
-                            .then(() => {
-                                if (loadingEl) loadingEl.style.display = 'none';
-                            })
-                            .catch(() => {
-                                if (loadingEl) loadingEl.style.display = 'none';
-                                // Snapshot fallback läuft bereits via Timer
-                            });
-                    } else if (loadingEl) {
-                        loadingEl.style.display = 'none';
-                    }
-                } else {
-                    const loadingEl = document.getElementById(`ring-loading-${camId}`);
+                this._syncRingWidgetModeButton(camId);
+                this._applyRingWidgetMode(camId, ringStatus).catch((e) => {
+                    console.warn(`Ring-Widget-Modus konnte nicht gesetzt werden (${camId}):`, e);
                     if (loadingEl) loadingEl.style.display = 'none';
-                }
+                });
             }
         });
 
@@ -1677,6 +1671,13 @@ class SmartHomeApp {
             btn.addEventListener('click', () => {
                 const camId = btn.getAttribute('data-camera-id');
                 this._saveCamera(camId);
+            });
+        });
+
+        document.querySelectorAll('.ring-widget-mode-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const camId = btn.getAttribute('data-cam-id');
+                await this._toggleRingWidgetMode(camId);
             });
         });
 
@@ -1892,6 +1893,185 @@ class SmartHomeApp {
         this._rtspSnapshotObjectUrls = {};
     }
 
+    _getRingWidgetMode(camId) {
+        if (!camId) return 'snapshot';
+        if (this._ringWidgetModes[camId]) return this._ringWidgetModes[camId];
+
+        const stored = localStorage.getItem(`ringWidgetMode:${camId}`);
+        const mode = stored === 'live' ? 'live' : 'snapshot';
+        this._ringWidgetModes[camId] = mode;
+        return mode;
+    }
+
+    _setRingWidgetMode(camId, mode) {
+        const normalized = mode === 'live' ? 'live' : 'snapshot';
+        this._ringWidgetModes[camId] = normalized;
+        localStorage.setItem(`ringWidgetMode:${camId}`, normalized);
+        this._syncRingWidgetModeButton(camId);
+    }
+
+    _syncRingWidgetModeButton(camId) {
+        const btn = document.querySelector(`.ring-widget-mode-btn[data-cam-id="${camId}"]`);
+        const label = document.getElementById(`ring-mode-label-${camId}`);
+        const mode = this._getRingWidgetMode(camId);
+        if (!btn || !label) return;
+
+        if (mode === 'live') {
+            btn.setAttribute('data-mode', 'live');
+            label.textContent = 'Live';
+            btn.classList.remove('bg-orange-600', 'hover:bg-orange-500');
+            btn.classList.add('bg-green-600', 'hover:bg-green-500');
+        } else {
+            btn.setAttribute('data-mode', 'snapshot');
+            label.textContent = 'Snapshot';
+            btn.classList.remove('bg-green-600', 'hover:bg-green-500');
+            btn.classList.add('bg-orange-600', 'hover:bg-orange-500');
+        }
+    }
+
+    async _toggleRingWidgetMode(camId) {
+        const nextMode = this._getRingWidgetMode(camId) === 'live' ? 'snapshot' : 'live';
+        this._setRingWidgetMode(camId, nextMode);
+        await this._applyRingWidgetMode(camId);
+    }
+
+    async _stopRingWidgetLive(camId) {
+        const hls = this._ringWidgetHls[camId];
+        if (hls) {
+            try { hls.destroy(); } catch (e) {}
+            delete this._ringWidgetHls[camId];
+        }
+        await this._stopRingWidgetWebrtc(camId);
+        try {
+            await fetch(`/api/cameras/${camId}/stop`, { method: 'POST' });
+        } catch (e) {}
+    }
+
+    async _startRingWidgetLiveHls(camId, videoEl, imageEl, loadingEl) {
+        await this._stopRingWidgetLive(camId);
+
+        const startResp = await fetch(`/api/cameras/${camId}/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const startData = await startResp.json();
+        if (!startResp.ok || !startData.success || !startData.hls_url) {
+            throw new Error(startData.error || 'Ring Live-Start fehlgeschlagen');
+        }
+
+        const hlsUrl = `${startData.hls_url}${startData.hls_url.includes('?') ? '&' : '?'}ts=${Date.now()}`;
+
+        await new Promise((resolve, reject) => {
+            if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                const hls = new Hls({
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    liveSyncDurationCount: 1,
+                    liveMaxLatencyDurationCount: 3,
+                    maxBufferLength: 2,
+                    backBufferLength: 0
+                });
+                this._ringWidgetHls[camId] = hls;
+                let settled = false;
+
+                const fail = (err) => {
+                    if (settled) return;
+                    settled = true;
+                    try { hls.destroy(); } catch (e) {}
+                    delete this._ringWidgetHls[camId];
+                    reject(err);
+                };
+
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    if (settled) return;
+                    settled = true;
+                    videoEl.play().catch(() => {});
+                    videoEl.style.display = '';
+                    imageEl.style.display = 'none';
+                    if (loadingEl) loadingEl.style.display = 'none';
+                    resolve();
+                });
+                hls.on(Hls.Events.ERROR, (event, data) => {
+                    if (data && data.fatal) {
+                        fail(new Error(data.type || 'HLS fatal'));
+                    }
+                });
+
+                hls.loadSource(hlsUrl);
+                hls.attachMedia(videoEl);
+                return;
+            }
+
+            if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+                videoEl.src = hlsUrl;
+                videoEl.onloadedmetadata = () => {
+                    videoEl.play().catch(() => {});
+                    videoEl.style.display = '';
+                    imageEl.style.display = 'none';
+                    if (loadingEl) loadingEl.style.display = 'none';
+                    resolve();
+                };
+                videoEl.onerror = () => reject(new Error('Native HLS Fehler'));
+                return;
+            }
+
+            reject(new Error('HLS im Browser nicht unterstützt'));
+        });
+    }
+
+    async _applyRingWidgetMode(camId, ringStatus = null) {
+        if (!camId) return;
+
+        const imageEl = document.getElementById(`cam-image-${camId}`);
+        const videoEl = document.getElementById(`ring-video-${camId}`);
+        const loadingEl = document.getElementById(`ring-loading-${camId}`);
+        const imgElementId = `cam-image-${camId}`;
+        if (!imageEl || !videoEl) return;
+
+        let status = ringStatus;
+        if (!status) {
+            try {
+                const resp = await fetch('/api/ring/status');
+                status = await resp.json();
+            } catch (e) {
+                status = { available: false, configured: false };
+            }
+        }
+        if (!status.available || !status.configured) {
+            if (loadingEl) {
+                loadingEl.innerHTML = '<p class="text-sm text-yellow-300 px-3 text-center">Ring nicht verbunden.</p>';
+                loadingEl.style.display = '';
+            }
+            return;
+        }
+
+        const mode = this._getRingWidgetMode(camId);
+        if (mode === 'live') {
+            if (loadingEl) {
+                loadingEl.innerHTML = '<div class="text-center"><i data-lucide="loader" class="w-8 h-8 mx-auto mb-2 animate-spin"></i><p class="text-sm">Ring Live wird geladen...</p></div>';
+                loadingEl.style.display = '';
+                if (typeof lucide !== 'undefined') lucide.createIcons();
+            }
+            this._stopRingSnapshotRefresh(camId, imgElementId);
+            try {
+                await this._startRingWidgetLiveHls(camId, videoEl, imageEl, loadingEl);
+            } catch (e) {
+                console.warn(`Ring Live fehlgeschlagen (${camId}), fallback auf Snapshot`, e);
+                this._setRingWidgetMode(camId, 'snapshot');
+                await this._applyRingWidgetMode(camId, status);
+            }
+            return;
+        }
+
+        await this._stopRingWidgetLive(camId);
+        videoEl.style.display = 'none';
+        imageEl.style.display = '';
+        if (loadingEl) loadingEl.style.display = 'none';
+
+        await this._loadRingSnapshot(camId, imgElementId, 5000, 2, 1);
+        this._startRingSnapshotRefresh(camId, imgElementId, 15000);
+    }
+
     async _loadRingSnapshot(camId, imgElementId, timeoutMs = 5000, retries = 2, delay = 1) {
         const key = `${camId}:${imgElementId}`;
         if (this._ringSnapshotInFlight[key]) return;
@@ -1928,7 +2108,7 @@ class SmartHomeApp {
         }
     }
 
-    _startRingSnapshotRefresh(camId, imgElementId, intervalMs = 12000) {
+    _startRingSnapshotRefresh(camId, imgElementId, intervalMs = 15000) {
         const key = `${camId}:${imgElementId}`;
         if (this._ringSnapshotTimers[key]) {
             clearInterval(this._ringSnapshotTimers[key]);
@@ -1937,6 +2117,14 @@ class SmartHomeApp {
         this._ringSnapshotTimers[key] = setInterval(async () => {
             await this._loadRingSnapshot(camId, imgElementId, 5000, 2, 1);
         }, intervalMs);
+    }
+
+    _stopRingSnapshotRefresh(camId, imgElementId) {
+        const key = `${camId}:${imgElementId}`;
+        if (this._ringSnapshotTimers[key]) {
+            clearInterval(this._ringSnapshotTimers[key]);
+            delete this._ringSnapshotTimers[key];
+        }
     }
 
     _clearRingSnapshotTimers() {
@@ -2135,6 +2323,11 @@ class SmartHomeApp {
         for (const camId of ringCamIds) {
             await this._stopRingWidgetWebrtc(camId);
         }
+        for (const [camId, hls] of Object.entries(this._ringWidgetHls)) {
+            try { hls.destroy(); } catch (e) {}
+            try { await fetch(`/api/cameras/${camId}/stop`, { method: 'POST' }); } catch (e) {}
+        }
+        this._ringWidgetHls = {};
         // HLS-Instanzen zerstören
         for (const [camId, hls] of Object.entries(this._hlsInstances)) {
             try {
@@ -2163,6 +2356,11 @@ class SmartHomeApp {
         for (const camId of ringCamIds) {
             await this._stopRingWidgetWebrtc(camId);
         }
+        for (const [camId, hls] of Object.entries(this._ringWidgetHls)) {
+            try { hls.destroy(); } catch (e) {}
+            try { await fetch(`/api/cameras/${camId}/stop`, { method: 'POST' }); } catch (e) {}
+        }
+        this._ringWidgetHls = {};
         for (const [camId, hls] of Object.entries(this._cameraWallHls)) {
             try {
                 hls.destroy();
@@ -2414,6 +2612,47 @@ class SmartHomeApp {
 
             this._fullscreenCamId = null;
         }
+    }
+
+    async _handleCameraAlert(data) {
+        const camId = data?.cam_id || data?.camera_id || data?.id;
+        if (!camId) return;
+
+        const previousPage = this.currentPage;
+        if (this.currentPage !== 'cameras') {
+            this.showPage('cameras');
+            await new Promise(r => setTimeout(r, 500));
+        }
+
+        const card = document.querySelector(`.camera-card[data-cam-id="${camId}"]`);
+        const camName = data?.name || card?.getAttribute('data-cam-name') || camId;
+        const camType = data?.type || card?.getAttribute('data-cam-type') || 'ring';
+
+        if (card) {
+            card.classList.add('ring-4', 'ring-red-500', 'ring-offset-2');
+            setTimeout(() => {
+                card.classList.remove('ring-4', 'ring-red-500', 'ring-offset-2');
+            }, 30000);
+            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        await this.openCameraFullscreen(camId, camName, camType);
+
+        if (this._cameraAlertTimer) {
+            clearTimeout(this._cameraAlertTimer);
+            this._cameraAlertTimer = null;
+        }
+        this._cameraAlertRestorePage = previousPage !== 'cameras' ? previousPage : null;
+        this._cameraAlertTimer = setTimeout(async () => {
+            if (this._fullscreenCamId === camId) {
+                await this.closeCameraFullscreen();
+            }
+            if (this._cameraAlertRestorePage) {
+                this.showPage(this._cameraAlertRestorePage);
+            }
+            this._cameraAlertRestorePage = null;
+            this._cameraAlertTimer = null;
+        }, 30000);
     }
 
     // ========================================================================
