@@ -534,8 +534,38 @@
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-3">
                         <div class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Regeln</div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
+                            <input id="rule-filter-search" type="text" placeholder="Suche Name/Variable/Kamera..."
+                                class="px-3 py-2 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                            <select id="rule-filter-camera" class="px-3 py-2 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                                <option value="">Alle Kameras</option>
+                            </select>
+                            <select id="rule-filter-enabled" class="px-3 py-2 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                                <option value="">Alle Status</option>
+                                <option value="1">Nur aktiv</option>
+                                <option value="0">Nur inaktiv</option>
+                            </select>
+                            <select id="rule-page-size" class="px-3 py-2 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                                <option value="25">25 pro Seite</option>
+                                <option value="50">50 pro Seite</option>
+                                <option value="100">100 pro Seite</option>
+                            </select>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2 mb-2">
+                            <button id="rule-select-page-btn" class="px-2 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-500">Seite markieren</button>
+                            <button id="rule-select-none-btn" class="px-2 py-1 text-xs bg-gray-500 text-white rounded hover:bg-gray-400">Auswahl löschen</button>
+                            <button id="rule-bulk-enable-btn" class="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-500">Auswahl aktivieren</button>
+                            <button id="rule-bulk-disable-btn" class="px-2 py-1 text-xs bg-yellow-600 text-white rounded hover:bg-yellow-500">Auswahl deaktivieren</button>
+                            <button id="rule-bulk-delete-btn" class="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-500">Auswahl löschen</button>
+                        </div>
+                        <div id="rule-list-stats" class="text-[11px] text-gray-500 dark:text-gray-400 mb-2">0 Regeln</div>
                         <div id="rule-editor-list" class="max-h-72 overflow-y-auto space-y-2">
                             <p class="text-xs text-gray-500">Lade Regeln...</p>
+                        </div>
+                        <div class="flex items-center justify-between mt-2">
+                            <button id="rule-page-prev-btn" class="px-2 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-500">Zurück</button>
+                            <span id="rule-page-info" class="text-[11px] text-gray-500 dark:text-gray-400">Seite 1/1</span>
+                            <button id="rule-page-next-btn" class="px-2 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-500">Weiter</button>
                         </div>
                     </div>
 

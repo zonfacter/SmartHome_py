@@ -49,6 +49,9 @@ class SmartHomeApp {
         this._cameraAlertRestorePage = null;
         this._cameraTriggerRules = [];
         this._ruleVariableOptions = [];
+        this._ruleEditorSelectedIds = new Set();
+        this._ruleEditorPage = 1;
+        this._ruleEditorPageSize = parseInt(localStorage.getItem('ruleEditorPageSize') || '25', 10) || 25;
 
         // Initialisierung
         this.init();
@@ -3132,15 +3135,17 @@ class SmartHomeApp {
 
         this._bindCameraRuleEditorEvents();
         await this._loadRuleCameraOptions();
-        await this._loadCameraTriggerRules();
         await this._searchRuleVariables('');
+        const pageSizeEl = document.getElementById('rule-page-size');
+        if (pageSizeEl) pageSizeEl.value = String(this._ruleEditorPageSize);
+        await this._loadCameraTriggerRules();
     }
 
     _bindCameraRuleEditorEvents() {
-        const bindOnce = (id, fn) => {
+        const bindOnce = (id, fn, eventName = 'click') => {
             const el = document.getElementById(id);
             if (!el || el.hasAttribute('data-listener-attached')) return;
-            el.addEventListener('click', fn);
+            el.addEventListener(eventName, fn);
             el.setAttribute('data-listener-attached', 'true');
         };
 
@@ -3149,6 +3154,46 @@ class SmartHomeApp {
             const q = document.getElementById('rule-var-search')?.value || '';
             this._searchRuleVariables(q);
         });
+        bindOnce('rule-filter-search', () => {
+            this._ruleEditorPage = 1;
+            this._renderRuleEditorList();
+        }, 'input');
+        bindOnce('rule-filter-camera', () => {
+            this._ruleEditorPage = 1;
+            this._renderRuleEditorList();
+        }, 'change');
+        bindOnce('rule-filter-enabled', () => {
+            this._ruleEditorPage = 1;
+            this._renderRuleEditorList();
+        }, 'change');
+        bindOnce('rule-page-size', () => {
+            const size = parseInt(document.getElementById('rule-page-size')?.value || '25', 10);
+            this._ruleEditorPageSize = [25, 50, 100].includes(size) ? size : 25;
+            localStorage.setItem('ruleEditorPageSize', String(this._ruleEditorPageSize));
+            this._ruleEditorPage = 1;
+            this._renderRuleEditorList();
+        }, 'change');
+        bindOnce('rule-page-prev-btn', () => {
+            this._ruleEditorPage = Math.max(1, this._ruleEditorPage - 1);
+            this._renderRuleEditorList();
+        });
+        bindOnce('rule-page-next-btn', () => {
+            const totalPages = this._getRuleEditorTotalPages();
+            this._ruleEditorPage = Math.min(totalPages, this._ruleEditorPage + 1);
+            this._renderRuleEditorList();
+        });
+        bindOnce('rule-select-page-btn', () => {
+            const pageRules = this._getRuleEditorPageRules();
+            pageRules.forEach((r) => this._ruleEditorSelectedIds.add(r.id));
+            this._renderRuleEditorList();
+        });
+        bindOnce('rule-select-none-btn', () => {
+            this._ruleEditorSelectedIds.clear();
+            this._renderRuleEditorList();
+        });
+        bindOnce('rule-bulk-enable-btn', () => this._applyBulkRuleAction('enable'));
+        bindOnce('rule-bulk-disable-btn', () => this._applyBulkRuleAction('disable'));
+        bindOnce('rule-bulk-delete-btn', () => this._applyBulkRuleAction('delete'));
         bindOnce('rule-add-btn', () => this._clearRuleForm());
         bindOnce('rule-save-btn', () => this._saveRuleFromForm());
         bindOnce('rule-delete-btn', () => this._deleteRuleFromForm());
@@ -3179,10 +3224,16 @@ class SmartHomeApp {
                 return;
             }
 
-            select.innerHTML = ids.map((id) => {
+            const options = ids.map((id) => {
                 const cam = cams[id] || {};
                 return `<option value="${id}">${cam.name || id} (${id})</option>`;
             }).join('');
+            select.innerHTML = options;
+
+            const filterSelect = document.getElementById('rule-filter-camera');
+            if (filterSelect) {
+                filterSelect.innerHTML = `<option value="">Alle Kameras</option>${options}`;
+            }
         } catch (e) {
             select.innerHTML = '<option value="">Fehler beim Laden</option>';
         }
@@ -3219,6 +3270,8 @@ class SmartHomeApp {
             const resp = await fetch('/api/camera-triggers');
             const data = await resp.json();
             this._cameraTriggerRules = data.rules || [];
+            this._ruleEditorSelectedIds.clear();
+            this._ruleEditorPage = 1;
             this._renderRuleEditorList();
             if (this._cameraTriggerRules.length > 0) {
                 this._fillRuleForm(this._cameraTriggerRules[0]);
@@ -3230,28 +3283,93 @@ class SmartHomeApp {
         }
     }
 
+    _getRuleEditorFilteredRules() {
+        const q = (document.getElementById('rule-filter-search')?.value || '').trim().toLowerCase();
+        const cameraId = (document.getElementById('rule-filter-camera')?.value || '').trim();
+        const enabledFilter = (document.getElementById('rule-filter-enabled')?.value || '').trim();
+
+        return this._cameraTriggerRules.filter((r) => {
+            if (cameraId && r.camera_id !== cameraId) return false;
+            if (enabledFilter === '1' && !r.enabled) return false;
+            if (enabledFilter === '0' && !!r.enabled) return false;
+            if (!q) return true;
+
+            const haystack = `${r.id || ''} ${r.name || ''} ${r.variable || ''} ${r.camera_id || ''}`.toLowerCase();
+            return haystack.includes(q);
+        });
+    }
+
+    _getRuleEditorTotalPages() {
+        const total = this._getRuleEditorFilteredRules().length;
+        return Math.max(1, Math.ceil(total / this._ruleEditorPageSize));
+    }
+
+    _getRuleEditorPageRules() {
+        const filtered = this._getRuleEditorFilteredRules();
+        const totalPages = Math.max(1, Math.ceil(filtered.length / this._ruleEditorPageSize));
+        if (this._ruleEditorPage > totalPages) this._ruleEditorPage = totalPages;
+        const start = (this._ruleEditorPage - 1) * this._ruleEditorPageSize;
+        return filtered.slice(start, start + this._ruleEditorPageSize);
+    }
+
     _renderRuleEditorList() {
         const list = document.getElementById('rule-editor-list');
         if (!list) return;
+
+        const statsEl = document.getElementById('rule-list-stats');
+        const pageInfoEl = document.getElementById('rule-page-info');
+        const prevBtn = document.getElementById('rule-page-prev-btn');
+        const nextBtn = document.getElementById('rule-page-next-btn');
+
         if (!this._cameraTriggerRules.length) {
             list.innerHTML = '<p class="text-xs text-gray-500">Keine Regeln vorhanden</p>';
+            if (statsEl) statsEl.textContent = '0 Regeln';
+            if (pageInfoEl) pageInfoEl.textContent = 'Seite 1/1';
+            if (prevBtn) prevBtn.disabled = true;
+            if (nextBtn) nextBtn.disabled = true;
             return;
         }
-        list.innerHTML = this._cameraTriggerRules.map((r) => {
+
+        const filtered = this._getRuleEditorFilteredRules();
+        const totalPages = this._getRuleEditorTotalPages();
+        const pageRules = this._getRuleEditorPageRules();
+
+        if (!filtered.length) {
+            list.innerHTML = '<p class="text-xs text-gray-500">Keine Treffer für den aktuellen Filter</p>';
+            if (statsEl) statsEl.textContent = `0 Treffer von ${this._cameraTriggerRules.length} Regeln`;
+            if (pageInfoEl) pageInfoEl.textContent = 'Seite 1/1';
+            if (prevBtn) prevBtn.disabled = true;
+            if (nextBtn) nextBtn.disabled = true;
+            return;
+        }
+
+        list.innerHTML = pageRules.map((r) => {
             const state = r.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700';
             const op = r.operator || 'eq';
+            const checked = this._ruleEditorSelectedIds.has(r.id) ? 'checked' : '';
             return `
-                <button class="rule-row w-full text-left p-2 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
-                        data-rule-id="${r.id}">
-                    <div class="flex items-center justify-between">
-                        <span class="text-sm font-medium text-gray-900 dark:text-white">${r.name || r.id}</span>
-                        <span class="text-[10px] px-2 py-0.5 rounded ${state}">${r.enabled ? 'aktiv' : 'aus'}</span>
-                    </div>
-                    <div class="text-xs text-gray-500 dark:text-gray-400 truncate">${r.variable} ${op} ${JSON.stringify(r.on_value)}</div>
-                    <div class="text-[11px] text-gray-500 dark:text-gray-400">→ ${r.camera_id} (${r.duration_seconds || 30}s)</div>
-                </button>
+                <div class="flex items-start gap-2 p-2 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <input type="checkbox" class="rule-select mt-1" data-rule-id="${r.id}" ${checked}>
+                    <button class="rule-row flex-1 text-left" data-rule-id="${r.id}">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm font-medium text-gray-900 dark:text-white">${r.name || r.id}</span>
+                            <span class="text-[10px] px-2 py-0.5 rounded ${state}">${r.enabled ? 'aktiv' : 'aus'}</span>
+                        </div>
+                        <div class="text-xs text-gray-500 dark:text-gray-400 truncate">${r.variable} ${op} ${JSON.stringify(r.on_value)}</div>
+                        <div class="text-[11px] text-gray-500 dark:text-gray-400">→ ${r.camera_id} (${r.duration_seconds || 30}s)</div>
+                    </button>
+                </div>
             `;
         }).join('');
+
+        if (statsEl) {
+            statsEl.textContent = `${filtered.length} Treffer von ${this._cameraTriggerRules.length} Regeln · ${this._ruleEditorSelectedIds.size} markiert`;
+        }
+        if (pageInfoEl) {
+            pageInfoEl.textContent = `Seite ${this._ruleEditorPage}/${totalPages}`;
+        }
+        if (prevBtn) prevBtn.disabled = this._ruleEditorPage <= 1;
+        if (nextBtn) nextBtn.disabled = this._ruleEditorPage >= totalPages;
 
         list.querySelectorAll('.rule-row').forEach((el) => {
             el.addEventListener('click', () => {
@@ -3260,6 +3378,64 @@ class SmartHomeApp {
                 if (rule) this._fillRuleForm(rule);
             });
         });
+
+        list.querySelectorAll('.rule-select').forEach((el) => {
+            el.addEventListener('change', () => {
+                const id = el.getAttribute('data-rule-id');
+                if (!id) return;
+                if (el.checked) this._ruleEditorSelectedIds.add(id);
+                else this._ruleEditorSelectedIds.delete(id);
+                if (statsEl) {
+                    statsEl.textContent = `${filtered.length} Treffer von ${this._cameraTriggerRules.length} Regeln · ${this._ruleEditorSelectedIds.size} markiert`;
+                }
+            });
+        });
+    }
+
+    async _persistCameraTriggerRules() {
+        const resp = await fetch('/api/camera-triggers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rules: this._cameraTriggerRules })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            throw new Error(data.error || 'Regeln konnten nicht gespeichert werden');
+        }
+        this._cameraTriggerRules = data.rules || [];
+    }
+
+    async _applyBulkRuleAction(action) {
+        const ids = Array.from(this._ruleEditorSelectedIds);
+        if (!ids.length) return;
+
+        if (action === 'delete') {
+            const ok = confirm(`${ids.length} markierte Regel(n) wirklich löschen?`);
+            if (!ok) return;
+        }
+
+        if (action === 'enable' || action === 'disable') {
+            const enableValue = action === 'enable';
+            this._cameraTriggerRules = this._cameraTriggerRules.map((r) => (
+                ids.includes(r.id) ? { ...r, enabled: enableValue } : r
+            ));
+        } else if (action === 'delete') {
+            this._cameraTriggerRules = this._cameraTriggerRules.filter((r) => !ids.includes(r.id));
+        } else {
+            return;
+        }
+
+        try {
+            await this._persistCameraTriggerRules();
+            this._ruleEditorSelectedIds.clear();
+            this._renderRuleEditorList();
+            const currentId = document.getElementById('rule-edit-id')?.value?.trim();
+            if (currentId && !this._cameraTriggerRules.some((r) => r.id === currentId)) {
+                this._clearRuleForm();
+            }
+        } catch (e) {
+            alert(`Bulk-Aktion fehlgeschlagen: ${e.message}`);
+        }
     }
 
     _fillRuleForm(rule) {
@@ -3344,16 +3520,7 @@ class SmartHomeApp {
             if (idx >= 0) this._cameraTriggerRules[idx] = rule;
             else this._cameraTriggerRules.unshift(rule);
 
-            const resp = await fetch('/api/camera-triggers', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ rules: this._cameraTriggerRules })
-            });
-            const data = await resp.json();
-            if (!resp.ok || !data.success) {
-                throw new Error(data.error || 'Regel konnte nicht gespeichert werden');
-            }
-            this._cameraTriggerRules = data.rules || [];
+            await this._persistCameraTriggerRules();
             this._renderRuleEditorList();
             this._fillRuleForm(rule);
         } catch (e) {
@@ -3365,17 +3532,9 @@ class SmartHomeApp {
         const editId = document.getElementById('rule-edit-id')?.value?.trim();
         if (!editId) return;
         this._cameraTriggerRules = this._cameraTriggerRules.filter((r) => r.id !== editId);
+        this._ruleEditorSelectedIds.delete(editId);
         try {
-            const resp = await fetch('/api/camera-triggers', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ rules: this._cameraTriggerRules })
-            });
-            const data = await resp.json();
-            if (!resp.ok || !data.success) {
-                throw new Error(data.error || 'Regel konnte nicht gelöscht werden');
-            }
-            this._cameraTriggerRules = data.rules || [];
+            await this._persistCameraTriggerRules();
             this._renderRuleEditorList();
             this._clearRuleForm();
         } catch (e) {
