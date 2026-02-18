@@ -11,6 +11,7 @@ import threading
 import time
 import os
 import sys
+import json
 import logging
 import traceback
 
@@ -72,6 +73,9 @@ class WebManager(BaseModule):
 
         # ⭐ Variable Manager (v5.1.0)
         self.variable_manager = None
+
+        # ONVIF PTZ Controllers (lazy, gecacht)
+        self._onvif_controllers = {}
 
     def initialize(self, app_context: Any):
         """Initialisiert das Modul und erzwingt absolute Pfade für alle Manager."""
@@ -213,6 +217,21 @@ class WebManager(BaseModule):
         self.app.config['SECRET_KEY'] = 'smarthome-v5-secret'
         # async_mode='threading' ist stabiler für Windows-Hosts
         self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='threading')
+
+        @self.app.after_request
+        def _disable_hls_cache(response):
+            # HLS manifests/segments must not be cached, otherwise stale playlists
+            # can reference already deleted TS fragments and trigger endless 404 loops.
+            if request.path.startswith('/static/hls/'):
+                response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                response.headers['Pragma'] = 'no-cache'
+                response.headers['Expires'] = '0'
+            elif request.path.startswith('/static/js/') or request.path.startswith('/static/css/'):
+                # Avoid stale frontend bundles after backend hotfixes.
+                response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                response.headers['Pragma'] = 'no-cache'
+                response.headers['Expires'] = '0'
+            return response
 
         self._register_routes()
 
@@ -848,6 +867,677 @@ class WebManager(BaseModule):
                 'timestamp': time.time(),
                 'latency_ms': 0.5  # Stub - echte Messung würde über PLC gehen
             })
+
+        # ==========================================
+        # RING API ENDPOINTS
+        # ==========================================
+
+        @self.app.route('/api/ring/status', methods=['GET'])
+        def ring_status():
+            try:
+                from modules.integrations.ring_module import get_ring_status
+                return jsonify(get_ring_status())
+            except Exception as e:
+                logger.error(f"Fehler bei GET /api/ring/status: {e}", exc_info=True)
+                return jsonify({'available': False, 'configured': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/ring/auth', methods=['POST'])
+        def ring_auth():
+            try:
+                data = request.json or {}
+                username = (data.get('username') or '').strip()
+                password = data.get('password') or ''
+                otp_raw = (data.get('otp') or '').strip()
+                otp = ''.join(ch for ch in otp_raw if ch.isdigit()) or None
+                user_agent = (data.get('user_agent') or '').strip() or None
+
+                if not username or not password:
+                    return jsonify({'success': False, 'error': 'username und password erforderlich'}), 400
+
+                from modules.integrations.ring_module import authenticate_ring
+                result = authenticate_ring(username, password, otp=otp, user_agent=user_agent)
+
+                status = 200 if result.get('success') else 401
+                return jsonify(result), status
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/ring/auth: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/ring/cameras', methods=['GET'])
+        def ring_list_cameras():
+            try:
+                from modules.integrations.ring_module import list_ring_cameras
+                result = list_ring_cameras()
+                if result.get('success'):
+                    return jsonify(result)
+                return jsonify(result), 401
+            except Exception as e:
+                logger.error(f"Fehler bei GET /api/ring/cameras: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/ring/cameras/import', methods=['POST'])
+        def ring_import_camera():
+            """Importiert eine Ring-Kamera in cameras.json."""
+            try:
+                data = request.json or {}
+                ring_device_id = str(data.get('ring_device_id', '')).strip()
+                if not ring_device_id:
+                    return jsonify({'success': False, 'error': 'ring_device_id erforderlich'}), 400
+
+                cam_id = str(data.get('id', '')).strip() or f"ring_{ring_device_id}"
+                cam_name = data.get('name') or f"Ring {ring_device_id}"
+
+                config = _load_cameras_config()
+                config.setdefault('cameras', {})
+
+                config['cameras'][cam_id] = {
+                    'name': cam_name,
+                    'url': f"/api/cameras/{cam_id}/snapshot",
+                    'type': 'ring',
+                    'autostart': False,
+                    'ring': {
+                        'device_id': ring_device_id
+                    }
+                }
+                _save_cameras_config(config)
+
+                return jsonify({'success': True, 'camera_id': cam_id})
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/ring/cameras/import: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        # ==========================================
+        # CAMERA / STREAM API ENDPOINTS
+        # ==========================================
+
+        def _cameras_config_path():
+            return os.path.join(os.path.abspath(os.getcwd()), 'config', 'cameras.json')
+
+        def _load_cameras_config():
+            path = _cameras_config_path()
+            if os.path.exists(path):
+                with open(path, 'r') as f:
+                    return json.load(f)
+            return {"cameras": {}}
+
+        def _save_cameras_config(config):
+            path = _cameras_config_path()
+            with open(path, 'w') as f:
+                json.dump(config, f, indent=2)
+
+        @self.app.route('/api/cameras', methods=['GET'])
+        def list_cameras():
+            """Liste aller Kameras + Stream-Status"""
+            try:
+                config = _load_cameras_config()
+                cameras = config.get('cameras', {})
+                stream_mgr = self.app_context.module_manager.get_module('stream_manager')
+
+                result = {}
+                for cam_id, cam_cfg in cameras.items():
+                    running = False
+                    hls_url = None
+                    if stream_mgr:
+                        running = stream_mgr.is_stream_running(cam_id)
+                        if running:
+                            hls_url = f"/static/hls/{cam_id}.m3u8"
+                    result[cam_id] = {
+                        'name': cam_cfg.get('name', cam_id),
+                        'url': cam_cfg.get('url', ''),
+                        'substream_url': cam_cfg.get('substream_url', ''),
+                        'type': cam_cfg.get('type', 'rtsp'),
+                        'autostart': cam_cfg.get('autostart', False),
+                        'onvif': cam_cfg.get('onvif', None),
+                        'ring': cam_cfg.get('ring', None),
+                        'stream_running': running,
+                        'hls_url': hls_url,
+                        'preview_url': f"/api/cameras/{cam_id}/snapshot" if cam_cfg.get('type') == 'ring' else None
+                    }
+
+                return jsonify({'cameras': result})
+            except Exception as e:
+                logger.error(f"Fehler bei GET /api/cameras: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/cameras/<cam_id>/snapshot', methods=['GET'])
+        def camera_snapshot(cam_id):
+            """Liefert Snapshot fuer Ring- und RTSP-Kameras."""
+            try:
+                config = _load_cameras_config()
+                cam_cfg = config.get('cameras', {}).get(cam_id)
+                if not cam_cfg:
+                    return jsonify({'error': 'Kamera nicht gefunden'}), 404
+
+                cam_type = (cam_cfg.get('type') or 'rtsp').lower()
+                image_data = None
+
+                if cam_type == 'ring':
+                    ring_cfg = cam_cfg.get('ring') or {}
+                    ring_device_id = ring_cfg.get('device_id')
+                    if not ring_device_id:
+                        return jsonify({'error': 'Ring device_id fehlt in Kamera-Konfiguration'}), 400
+
+                    from modules.integrations.ring_module import get_ring_snapshot
+                    retries = request.args.get('retries', default=8, type=int)
+                    delay = request.args.get('delay', default=2, type=int)
+                    retries = max(1, min(retries, 20))
+                    delay = max(1, min(delay, 10))
+
+                    result = get_ring_snapshot(str(ring_device_id), retries=retries, delay=delay)
+                    if not result.get('success'):
+                        return jsonify({'error': result.get('error', 'Snapshot fehlgeschlagen')}), 500
+                    image_data = result.get('content')
+                elif cam_type == 'rtsp':
+                    stream_url = cam_cfg.get('substream_url') or cam_cfg.get('url')
+                    if not stream_url:
+                        return jsonify({'error': 'RTSP URL fehlt in Kamera-Konfiguration'}), 400
+
+                    stream_mgr = self.app_context.module_manager.get_module('stream_manager')
+                    if not stream_mgr:
+                        return jsonify({'error': 'Stream Manager nicht verfuegbar'}), 503
+
+                    timeout = request.args.get('timeout', default=6, type=int)
+                    image_data = stream_mgr.capture_snapshot(stream_url, timeout=timeout)
+                else:
+                    return jsonify({'error': f'Snapshot fuer Typ {cam_type} nicht unterstuetzt'}), 400
+
+                if not image_data:
+                    return jsonify({'error': 'Leerer Snapshot erhalten'}), 500
+
+                response = send_file(
+                    io.BytesIO(image_data),
+                    mimetype='image/jpeg',
+                    download_name=f'{cam_id}.jpg'
+                )
+                response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                response.headers['Pragma'] = 'no-cache'
+                return response
+            except Exception as e:
+                logger.error(f"Fehler bei GET /api/cameras/{cam_id}/snapshot: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/cameras/<cam_id>/ring/webrtc/start', methods=['POST'])
+        def start_ring_webrtc_stream(cam_id):
+            """Startet Ring WebRTC-Session anhand Browser SDP offer."""
+            try:
+                config = _load_cameras_config()
+                cam_cfg = config.get('cameras', {}).get(cam_id)
+                if not cam_cfg:
+                    return jsonify({'success': False, 'error': 'Kamera nicht gefunden'}), 404
+                if cam_cfg.get('type') != 'ring':
+                    return jsonify({'success': False, 'error': 'Nur fuer Ring-Kameras'}), 400
+
+                data = request.json or {}
+                sdp_offer = data.get('offer')
+                keep_alive_timeout = int(data.get('keep_alive_timeout', 45))
+                if not sdp_offer:
+                    return jsonify({'success': False, 'error': 'offer erforderlich'}), 400
+
+                ring_cfg = cam_cfg.get('ring') or {}
+                device_id = ring_cfg.get('device_id')
+                if not device_id:
+                    return jsonify({'success': False, 'error': 'Ring device_id fehlt'}), 400
+
+                from modules.integrations.ring_module import start_ring_webrtc
+                result = start_ring_webrtc(str(device_id), sdp_offer, keep_alive_timeout=keep_alive_timeout)
+                if result.get('success'):
+                    status = 200
+                else:
+                    err = (result.get('error') or '').lower()
+                    status = 503 if ('deaktiviert' in err or '406' in err) else 500
+                return jsonify(result), status
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/cameras/{cam_id}/ring/webrtc/start: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/cameras/<cam_id>/ring/webrtc/candidate', methods=['POST'])
+        def send_ring_webrtc_candidate_endpoint(cam_id):
+            """Leitet lokale ICE-Candidates vom Browser an Ring weiter."""
+            try:
+                data = request.json or {}
+                session_id = data.get('session_id')
+                candidate = data.get('candidate')
+                mline_index = data.get('sdpMLineIndex')
+                if session_id is None or candidate is None or mline_index is None:
+                    return jsonify({'success': False, 'error': 'session_id, candidate, sdpMLineIndex erforderlich'}), 400
+
+                from modules.integrations.ring_module import send_ring_webrtc_candidate
+                result = send_ring_webrtc_candidate(str(session_id), str(candidate), int(mline_index))
+                status = 200 if result.get('success') else 500
+                return jsonify(result), status
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/cameras/{cam_id}/ring/webrtc/candidate: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/cameras/<cam_id>/ring/webrtc/keepalive', methods=['POST'])
+        def keepalive_ring_webrtc_endpoint(cam_id):
+            """Hält bestehende Ring WebRTC Session aktiv."""
+            try:
+                data = request.json or {}
+                session_id = data.get('session_id')
+                if not session_id:
+                    return jsonify({'success': False, 'error': 'session_id erforderlich'}), 400
+
+                from modules.integrations.ring_module import keepalive_ring_webrtc
+                result = keepalive_ring_webrtc(str(session_id))
+                status = 200 if result.get('success') else 500
+                return jsonify(result), status
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/cameras/{cam_id}/ring/webrtc/keepalive: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/cameras/<cam_id>/ring/webrtc/stop', methods=['POST'])
+        def stop_ring_webrtc_endpoint(cam_id):
+            """Stoppt Ring WebRTC Session."""
+            try:
+                data = request.json or {}
+                session_id = data.get('session_id')
+                if not session_id:
+                    return jsonify({'success': False, 'error': 'session_id erforderlich'}), 400
+
+                from modules.integrations.ring_module import stop_ring_webrtc
+                result = stop_ring_webrtc(str(session_id))
+                status = 200 if result.get('success') else 500
+                return jsonify(result), status
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/cameras/{cam_id}/ring/webrtc/stop: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/cameras', methods=['POST'])
+        def add_camera():
+            """Kamera hinzufügen (speichert Config, startet Stream bei RTSP)"""
+            try:
+                data = request.json
+                cam_id = data.get('id')
+                cam_name = data.get('name', '')
+                cam_url = data.get('url', '')
+                cam_type = data.get('type', 'rtsp')
+                autostart = data.get('autostart', True)
+
+                if not cam_id or not cam_url:
+                    return jsonify({'error': 'id und url erforderlich'}), 400
+
+                # Config speichern
+                config = _load_cameras_config()
+                config['cameras'][cam_id] = {
+                    'name': cam_name,
+                    'url': cam_url,
+                    'type': cam_type,
+                    'autostart': autostart
+                }
+                _save_cameras_config(config)
+
+                # Stream starten bei RTSP
+                hls_url = None
+                stream_running = False
+                if cam_type == 'rtsp' and autostart:
+                    stream_mgr = self.app_context.module_manager.get_module('stream_manager')
+                    if stream_mgr and stream_mgr.has_ffmpeg:
+                        stream_mgr.start_stream(cam_id, cam_url)
+                        stream_running = stream_mgr.is_stream_running(cam_id)
+                        if stream_running:
+                            hls_url = f"/static/hls/{cam_id}.m3u8"
+
+                logger.info(f"Kamera hinzugefuegt: {cam_id} ({cam_url})")
+                return jsonify({
+                    'success': True,
+                    'camera_id': cam_id,
+                    'stream_running': stream_running,
+                    'hls_url': hls_url
+                })
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/cameras: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/cameras/<cam_id>', methods=['DELETE'])
+        def delete_camera(cam_id):
+            """Kamera entfernen (stoppt Stream, loescht Config)"""
+            try:
+                # Stream stoppen
+                stream_mgr = self.app_context.module_manager.get_module('stream_manager')
+                if stream_mgr:
+                    stream_mgr.stop_stream(cam_id)
+
+                # Aus Config entfernen
+                config = _load_cameras_config()
+                if cam_id in config.get('cameras', {}):
+                    del config['cameras'][cam_id]
+                    _save_cameras_config(config)
+
+                logger.info(f"Kamera entfernt: {cam_id}")
+                return jsonify({'success': True})
+            except Exception as e:
+                logger.error(f"Fehler bei DELETE /api/cameras/{cam_id}: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/cameras/<cam_id>', methods=['PUT'])
+        def update_camera(cam_id):
+            """Kamera-Konfiguration aktualisieren"""
+            try:
+                config = _load_cameras_config()
+                if cam_id not in config.get('cameras', {}):
+                    return jsonify({'error': 'Kamera nicht gefunden'}), 404
+
+                data = request.json or {}
+                cam_cfg = config['cameras'][cam_id]
+                restart_stream = False
+
+                # Aktualisierbare Felder
+                if 'name' in data:
+                    cam_cfg['name'] = data['name']
+                if 'url' in data:
+                    if cam_cfg.get('url') != data['url']:
+                        restart_stream = True
+                    cam_cfg['url'] = data['url']
+                if 'substream_url' in data:
+                    if cam_cfg.get('substream_url') != data['substream_url']:
+                        restart_stream = True
+                    cam_cfg['substream_url'] = data['substream_url']
+                if 'type' in data:
+                    if cam_cfg.get('type') != data['type']:
+                        restart_stream = True
+                    cam_cfg['type'] = data['type']
+                if 'autostart' in data:
+                    cam_cfg['autostart'] = data['autostart']
+
+                # ONVIF-Config (komplett ersetzen wenn angegeben)
+                if 'onvif' in data:
+                    if data['onvif']:
+                        cam_cfg['onvif'] = data['onvif']
+                    else:
+                        cam_cfg.pop('onvif', None)
+
+                _save_cameras_config(config)
+
+                # Bei geänderter Stream-Quelle laufenden FFmpeg-Prozess beenden.
+                if restart_stream:
+                    stream_mgr = self.app_context.module_manager.get_module('stream_manager')
+                    if stream_mgr:
+                        stream_mgr.stop_stream(cam_id, cleanup=True)
+
+                logger.info(f"Kamera aktualisiert: {cam_id}")
+                return jsonify({'success': True, 'camera': cam_cfg})
+            except Exception as e:
+                logger.error(f"Fehler bei PUT /api/cameras/{cam_id}: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/cameras/<cam_id>/start', methods=['POST'])
+        def start_camera_stream(cam_id):
+            """Startet HLS-Transkodierung fuer eine Kamera"""
+            try:
+                config = _load_cameras_config()
+                cam_cfg = config.get('cameras', {}).get(cam_id)
+                if not cam_cfg:
+                    return jsonify({'error': 'Kamera nicht gefunden'}), 404
+
+                stream_mgr = self.app_context.module_manager.get_module('stream_manager')
+                if not stream_mgr:
+                    return jsonify({'error': 'Stream Manager nicht verfuegbar'}), 503
+
+                cam_type = (cam_cfg.get('type') or 'rtsp').lower()
+                if cam_type == 'ring':
+                    ring_cfg = cam_cfg.get('ring') or {}
+                    ring_device_id = ring_cfg.get('device_id')
+                    if not ring_device_id:
+                        return jsonify({'error': 'Ring device_id fehlt'}), 400
+
+                    from modules.integrations.ring_module import get_ring_refresh_token
+                    refresh_token = get_ring_refresh_token()
+                    if not refresh_token:
+                        return jsonify({'error': 'Kein Ring refresh_token vorhanden. Bitte neu anmelden.'}), 401
+
+                    success = stream_mgr.start_ring_stream(cam_id, str(ring_device_id), refresh_token)
+                    if success:
+                        return jsonify({
+                            'success': True,
+                            'hls_url': f"/static/hls/{cam_id}.m3u8",
+                            'mode': 'ring_bridge'
+                        })
+                    return jsonify({'error': 'Ring-Bridge konnte nicht gestartet werden'}), 500
+
+                if not stream_mgr.has_ffmpeg:
+                    return jsonify({'error': 'Stream Manager oder FFmpeg nicht verfuegbar'}), 503
+
+                # Stream-URL und Resolution bestimmen
+                stream_url = cam_cfg['url']
+                resolution = None
+
+                data = request.get_json(silent=True) or {}
+                if data:
+                    use_substream = data.get('use_substream', False)
+                    if use_substream:
+                        # SubStream: copy passthrough wenn substream_url vorhanden
+                        substream_url = cam_cfg.get('substream_url')
+                        if substream_url:
+                            stream_url = substream_url
+                            resolution = None  # copy passthrough
+                        else:
+                            # Fallback: MainStream mit Skalierung
+                            resolution = '640x360'
+                    else:
+                        resolution = data.get('resolution')
+
+                success = stream_mgr.start_stream(cam_id, stream_url, resolution=resolution)
+                if success:
+                    return jsonify({
+                        'success': True,
+                        'hls_url': f"/static/hls/{cam_id}.m3u8"
+                    })
+                else:
+                    return jsonify({'error': 'Stream konnte nicht gestartet werden'}), 500
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/cameras/{cam_id}/start: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/cameras/<cam_id>/stop', methods=['POST'])
+        def stop_camera_stream(cam_id):
+            """Stoppt HLS-Transkodierung fuer eine Kamera"""
+            try:
+                stream_mgr = self.app_context.module_manager.get_module('stream_manager')
+                if not stream_mgr:
+                    return jsonify({'error': 'Stream Manager nicht verfuegbar'}), 503
+
+                success = stream_mgr.stop_stream(cam_id)
+                return jsonify({'success': success})
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/cameras/{cam_id}/stop: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
+
+        # ==========================================
+        # CAMERA DIAGNOSTICS ENDPOINT
+        # ==========================================
+
+        @self.app.route('/api/cameras/diagnose', methods=['POST'])
+        def diagnose_camera_endpoint():
+            """Kamera-Diagnose: Port-Scan, RTSP-Probe, ONVIF, Snapshot"""
+            try:
+                data = request.json or {}
+                host = data.get('host', '').strip()
+                if not host:
+                    return jsonify({'error': 'host erforderlich'}), 400
+
+                user = data.get('user', 'admin')
+                password = data.get('password', 'admin')
+
+                from modules.integrations.camera_diagnostics import diagnose_camera
+                result = diagnose_camera(host, user=user, password=password)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Kamera-Diagnose Fehler: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/cameras/scan', methods=['POST'])
+        def scan_network_endpoint():
+            """Netzwerk nach Kameras scannen (WS-Discovery + Port-Scan)"""
+            try:
+                data = request.json or {}
+                subnet = data.get('subnet')
+                ports = data.get('ports')
+                user = data.get('user', 'admin')
+                password = data.get('password', 'admin')
+
+                # Ports validieren
+                if ports:
+                    ports = [int(p) for p in ports if 0 < int(p) <= 65535]
+
+                from modules.integrations.camera_diagnostics import scan_network
+                result = scan_network(subnet=subnet, ports=ports or None,
+                                      user=user, password=password)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Netzwerk-Scan Fehler: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
+
+        # ==========================================
+        # ONVIF PTZ API ENDPOINTS
+        # ==========================================
+
+        def _get_onvif_controller(cam_id):
+            """Lazy-Init eines ONVIF PTZ Controllers fuer eine Kamera."""
+            if cam_id in self._onvif_controllers:
+                ctrl = self._onvif_controllers[cam_id]
+                if ctrl.connected:
+                    return ctrl
+
+            config = _load_cameras_config()
+            cam_cfg = config.get('cameras', {}).get(cam_id)
+            if not cam_cfg or 'onvif' not in cam_cfg:
+                return None
+
+            try:
+                from modules.integrations.onvif_ptz import OnvifPTZController
+                onvif_cfg = cam_cfg['onvif']
+                ctrl = OnvifPTZController(
+                    host=onvif_cfg['host'],
+                    port=onvif_cfg.get('port', 80),
+                    user=onvif_cfg.get('user', 'admin'),
+                    password=onvif_cfg.get('password', 'admin')
+                )
+                ctrl.connect()
+                self._onvif_controllers[cam_id] = ctrl
+                return ctrl
+            except Exception as e:
+                logger.error(f"ONVIF Controller Fehler fuer {cam_id}: {e}")
+                return None
+
+        @self.app.route('/api/cameras/<cam_id>/ptz/status', methods=['GET'])
+        def ptz_status(cam_id):
+            """PTZ-Status und Faehigkeiten"""
+            try:
+                ctrl = _get_onvif_controller(cam_id)
+                if not ctrl:
+                    return jsonify({'has_ptz': False, 'connected': False})
+
+                status = ctrl.get_ptz_status()
+                return jsonify({
+                    'has_ptz': ctrl.has_ptz,
+                    'connected': ctrl.connected,
+                    'position': status
+                })
+            except Exception as e:
+                logger.error(f"PTZ status Fehler: {e}", exc_info=True)
+                return jsonify({'has_ptz': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/cameras/<cam_id>/ptz/move', methods=['POST'])
+        def ptz_move(cam_id):
+            """Kontinuierliche PTZ-Bewegung starten"""
+            try:
+                ctrl = _get_onvif_controller(cam_id)
+                if not ctrl or not ctrl.has_ptz:
+                    return jsonify({'error': 'PTZ nicht verfuegbar'}), 404
+
+                data = request.json or {}
+                pan = float(data.get('pan', 0.0))
+                tilt = float(data.get('tilt', 0.0))
+                zoom = float(data.get('zoom', 0.0))
+                timeout_ms = int(data.get('timeout_ms', 250))
+
+                success = ctrl.continuous_move(pan, tilt, zoom, timeout_ms=timeout_ms)
+                return jsonify({'success': success})
+            except Exception as e:
+                logger.error(f"PTZ move Fehler: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/cameras/<cam_id>/ptz/stop', methods=['POST'])
+        def ptz_stop(cam_id):
+            """PTZ-Bewegung stoppen"""
+            try:
+                ctrl = _get_onvif_controller(cam_id)
+                if not ctrl or not ctrl.has_ptz:
+                    return jsonify({'error': 'PTZ nicht verfuegbar'}), 404
+
+                success = ctrl.stop()
+                return jsonify({'success': success})
+            except Exception as e:
+                logger.error(f"PTZ stop Fehler: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/cameras/<cam_id>/ptz/presets', methods=['GET'])
+        def ptz_presets(cam_id):
+            """Preset-Liste abrufen"""
+            try:
+                ctrl = _get_onvif_controller(cam_id)
+                if not ctrl or not ctrl.has_ptz:
+                    return jsonify({'presets': []})
+
+                presets = ctrl.get_presets()
+                return jsonify({'presets': presets})
+            except Exception as e:
+                logger.error(f"PTZ presets Fehler: {e}", exc_info=True)
+                return jsonify({'presets': [], 'error': str(e)}), 500
+
+        @self.app.route('/api/cameras/<cam_id>/ptz/preset', methods=['POST'])
+        def ptz_goto_preset(cam_id):
+            """Zu einem Preset fahren"""
+            try:
+                ctrl = _get_onvif_controller(cam_id)
+                if not ctrl or not ctrl.has_ptz:
+                    return jsonify({'error': 'PTZ nicht verfuegbar'}), 404
+
+                data = request.json or {}
+                token = data.get('token')
+                if not token:
+                    return jsonify({'error': 'token erforderlich'}), 400
+
+                success = ctrl.go_to_preset(token)
+                return jsonify({'success': success})
+            except Exception as e:
+                logger.error(f"PTZ goto preset Fehler: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/cameras/<cam_id>/ptz/preset/save', methods=['POST'])
+        def ptz_save_preset(cam_id):
+            """Aktuellen Standort als Preset speichern"""
+            try:
+                ctrl = _get_onvif_controller(cam_id)
+                if not ctrl or not ctrl.has_ptz:
+                    return jsonify({'error': 'PTZ nicht verfuegbar'}), 404
+
+                data = request.json or {}
+                name = data.get('name', 'Preset')
+
+                token = ctrl.set_preset(name)
+                if token:
+                    return jsonify({'success': True, 'token': token, 'name': name})
+                else:
+                    return jsonify({'error': 'Preset konnte nicht gespeichert werden'}), 500
+            except Exception as e:
+                logger.error(f"PTZ save preset Fehler: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/cameras/<cam_id>/ptz/home', methods=['POST'])
+        def ptz_home(cam_id):
+            """Home-Position anfahren"""
+            try:
+                ctrl = _get_onvif_controller(cam_id)
+                if not ctrl or not ctrl.has_ptz:
+                    return jsonify({'error': 'PTZ nicht verfuegbar'}), 404
+
+                success = ctrl.go_home()
+                return jsonify({'success': success})
+            except Exception as e:
+                logger.error(f"PTZ home Fehler: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
 
         # ==========================================
         # ⭐ VARIABLE MANAGER API ENDPOINTS (v5.1.0)

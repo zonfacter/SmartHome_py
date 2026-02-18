@@ -26,6 +26,9 @@
     <!-- Icons (Lucide) -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
+    <!-- HLS.js (RTSP -> HLS Playback) -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
     <!-- Custom CSS -->
     <link rel="stylesheet" href="/static/css/main.css">
 
@@ -74,6 +77,10 @@
             <a href="#" data-page="cameras" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg">
                 <i data-lucide="video" class="w-5 h-5"></i>
                 <span>Kameras</span>
+            </a>
+            <a href="#" data-page="camera-wall" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg">
+                <i data-lucide="layout-grid" class="w-5 h-5"></i>
+                <span>Kamera-Wand</span>
             </a>
             <a href="#" data-page="setup" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg">
                 <i data-lucide="settings" class="w-5 h-5"></i>
@@ -240,6 +247,93 @@
                     </div>
                     <p class="text-xs text-gray-500 dark:text-gray-400">Unterstützt RTSP und MJPEG/HTTP Streams</p>
 
+                    <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600 space-y-3">
+                        <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300">Ring Integration</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-2">
+                            <input type="text" id="ring-username" placeholder="Ring Benutzer/E-Mail"
+                                class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                            <input type="password" id="ring-password" placeholder="Ring Passwort"
+                                class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                            <input type="text" id="ring-otp" placeholder="2FA Code (optional)"
+                                class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                            <input type="text" id="ring-user-agent" placeholder="User-Agent (optional)"
+                                class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        </div>
+                        <div class="flex items-center flex-wrap gap-2">
+                            <button id="ring-auth-btn" class="px-4 py-2 bg-orange-600 text-white text-sm rounded-lg hover:bg-orange-700 flex items-center space-x-1">
+                                <i data-lucide="key-round" class="w-4 h-4"></i>
+                                <span>Ring verbinden</span>
+                            </button>
+                            <button id="import-ring-btn" class="px-4 py-2 bg-orange-700 text-white text-sm rounded-lg hover:bg-orange-800 flex items-center space-x-1">
+                                <i data-lucide="bell-ring" class="w-4 h-4"></i>
+                                <span>Ring Kameras laden</span>
+                            </button>
+                            <label class="inline-flex items-center space-x-2 text-xs text-gray-600 dark:text-gray-300 ml-1">
+                                <input type="checkbox" id="ring-webrtc-preferred" class="rounded" checked>
+                                <span>Ring Vollbild mit WebRTC (Liveview)</span>
+                            </label>
+                        </div>
+                        <div id="ring-status" class="text-xs text-gray-500">Ring Status: unbekannt</div>
+                    </div>
+                    <div id="ring-import-result" class="hidden mt-2 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg text-sm"></div>
+
+                    <!-- Netzwerk-Scan + Kamera-Diagnose -->
+                    <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
+                        <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Kamera suchen</h3>
+                        <!-- Zeile 1: IP + Buttons -->
+                        <div class="flex items-center space-x-2 flex-wrap gap-y-2">
+                            <input type="text" id="diagnose-ip" placeholder="IP-Adresse (z.B. 192.168.2.89)"
+                                class="flex-1 min-w-[200px] px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm">
+                            <button id="diagnose-btn" class="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 flex items-center space-x-1 whitespace-nowrap">
+                                <i data-lucide="search" class="w-4 h-4"></i>
+                                <span>Diagnose</span>
+                            </button>
+                            <button id="network-scan-btn" class="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 flex items-center space-x-1 whitespace-nowrap">
+                                <i data-lucide="radar" class="w-4 h-4"></i>
+                                <span>Netzwerk scannen</span>
+                            </button>
+                        </div>
+                        <!-- Zeile 2: Scan-Optionen (aufklappbar) -->
+                        <details class="mt-2" id="scan-options">
+                            <summary class="text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer">Scan-Optionen</summary>
+                            <div class="mt-2 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg space-y-2">
+                                <!-- Ports -->
+                                <div>
+                                    <label class="text-xs text-gray-600 dark:text-gray-400 font-medium">Ports</label>
+                                    <div class="flex flex-wrap gap-2 mt-1">
+                                        <label class="inline-flex items-center space-x-1 text-xs"><input type="checkbox" class="scan-port-cb rounded" value="554" checked><span>554 (RTSP)</span></label>
+                                        <label class="inline-flex items-center space-x-1 text-xs"><input type="checkbox" class="scan-port-cb rounded" value="80" checked><span>80 (HTTP)</span></label>
+                                        <label class="inline-flex items-center space-x-1 text-xs"><input type="checkbox" class="scan-port-cb rounded" value="8080" checked><span>8080</span></label>
+                                        <label class="inline-flex items-center space-x-1 text-xs"><input type="checkbox" class="scan-port-cb rounded" value="8999" checked><span>8999 (ONVIF)</span></label>
+                                        <label class="inline-flex items-center space-x-1 text-xs"><input type="checkbox" class="scan-port-cb rounded" value="443"><span>443 (HTTPS)</span></label>
+                                        <label class="inline-flex items-center space-x-1 text-xs"><input type="checkbox" class="scan-port-cb rounded" value="8000"><span>8000</span></label>
+                                        <label class="inline-flex items-center space-x-1 text-xs"><input type="checkbox" class="scan-port-cb rounded" value="8443"><span>8443</span></label>
+                                        <label class="inline-flex items-center space-x-1 text-xs"><input type="checkbox" class="scan-port-cb rounded" value="8899"><span>8899</span></label>
+                                        <div class="flex items-center space-x-1">
+                                            <input type="text" id="scan-custom-ports" placeholder="z.B. 9000,1935"
+                                                class="w-28 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- Credentials -->
+                                <div class="flex items-center space-x-3">
+                                    <div>
+                                        <label class="text-xs text-gray-600 dark:text-gray-400 font-medium">User</label>
+                                        <input type="text" id="scan-user" value="admin" class="w-24 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                                    </div>
+                                    <div>
+                                        <label class="text-xs text-gray-600 dark:text-gray-400 font-medium">Passwort</label>
+                                        <input type="text" id="scan-password" value="admin" class="w-24 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+                        <div id="scan-result" class="hidden mt-3 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg text-sm">
+                        </div>
+                        <div id="diagnose-result" class="hidden mt-3 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg text-sm">
+                        </div>
+                    </div>
+
                     <!-- Gespeicherte Streams -->
                     <div id="camera-list" class="space-y-2">
                         <p class="text-sm text-gray-500">Keine Kameras konfiguriert</p>
@@ -247,9 +341,50 @@
                 </div>
             </div>
 
+            <!-- Grid-Layout-Toggle -->
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Live-Streams</h2>
+                <div class="flex items-center space-x-2">
+                    <span class="text-sm text-gray-500 dark:text-gray-400 mr-2">Spalten:</span>
+                    <button data-grid-cols="1" class="grid-layout-btn px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 hover:bg-blue-500 hover:text-white hover:border-blue-500 transition">1</button>
+                    <button data-grid-cols="2" class="grid-layout-btn px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 hover:bg-blue-500 hover:text-white hover:border-blue-500 transition bg-blue-500 text-white border-blue-500">2</button>
+                    <button data-grid-cols="3" class="grid-layout-btn px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 hover:bg-blue-500 hover:text-white hover:border-blue-500 transition">3</button>
+                </div>
+            </div>
+
             <!-- Live-Streams -->
             <div id="cameras-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <p class="text-gray-500">Kameras werden nach Konfiguration hier angezeigt...</p>
+            </div>
+        </div>
+
+        <!-- Camera Wall Page -->
+        <div id="camera-wall-page" class="page page-container p-6">
+            <div class="flex items-center justify-between mb-6">
+                <h1 class="text-2xl font-bold text-gray-900 dark:text-white hidden md:block">Kamera-Wand</h1>
+                <div class="flex items-center space-x-3">
+                    <span class="text-sm text-gray-500 dark:text-gray-400">Layout:</span>
+                    <button data-wall-layout="1" class="wall-layout-btn px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 hover:bg-blue-500 hover:text-white transition">1x1</button>
+                    <button data-wall-layout="2" class="wall-layout-btn px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 hover:bg-blue-500 hover:text-white transition bg-blue-500 text-white border-blue-500">2x2</button>
+                    <button data-wall-layout="3" class="wall-layout-btn px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 hover:bg-blue-500 hover:text-white transition">3x3</button>
+                    <button id="wall-fullscreen-btn" class="px-3 py-1 text-sm rounded bg-gray-700 text-white hover:bg-gray-600 transition flex items-center space-x-1">
+                        <i data-lucide="maximize" class="w-4 h-4"></i>
+                        <span>Vollbild</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Kamera-Auswahl -->
+            <div id="camera-wall-selector" class="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mb-6">
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Kameras auswählen</h3>
+                <div id="camera-wall-checkboxes" class="flex flex-wrap gap-3">
+                    <p class="text-sm text-gray-500">Lade Kameras...</p>
+                </div>
+            </div>
+
+            <!-- Kamera-Grid -->
+            <div id="camera-wall-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <p class="text-gray-500">Kameras auswählen um sie hier anzuzeigen...</p>
             </div>
         </div>
 
@@ -919,6 +1054,45 @@
             </a>
         </div>
     </nav>
+
+    <!-- ================================================================
+         CAMERA FULLSCREEN OVERLAY
+         ================================================================ -->
+    <div id="camera-fullscreen-overlay" class="fixed inset-0 bg-black z-50 hidden">
+        <video id="fullscreen-video" class="w-full h-full object-contain" muted autoplay playsinline></video>
+        <img id="fullscreen-image" class="w-full h-full object-contain" style="display:none;" alt="Camera Fullscreen">
+        <button id="fullscreen-close" class="absolute top-4 right-4 w-10 h-10 bg-black bg-opacity-60 text-white rounded-full flex items-center justify-center hover:bg-opacity-80 text-xl font-bold z-10">&#10005;</button>
+        <div id="fullscreen-cam-name" class="absolute bottom-4 left-4 text-white text-lg font-semibold bg-black bg-opacity-50 px-4 py-2 rounded-lg z-10"></div>
+
+        <!-- PTZ Controls -->
+        <div id="ptz-controls" class="absolute bottom-4 right-4 z-10 hidden select-none">
+            <!-- D-Pad -->
+            <div class="grid grid-cols-3 gap-1 mb-2" style="width: 140px;">
+                <div></div>
+                <button data-ptz="up" class="ptz-btn w-11 h-11 bg-black bg-opacity-60 text-white rounded-lg flex items-center justify-center hover:bg-opacity-80 active:bg-blue-600 text-lg font-bold">&#9650;</button>
+                <div></div>
+                <button data-ptz="left" class="ptz-btn w-11 h-11 bg-black bg-opacity-60 text-white rounded-lg flex items-center justify-center hover:bg-opacity-80 active:bg-blue-600 text-lg font-bold">&#9664;</button>
+                <button data-ptz="home" class="ptz-btn w-11 h-11 bg-black bg-opacity-60 text-white rounded-lg flex items-center justify-center hover:bg-opacity-80 active:bg-blue-600 text-sm">&#8962;</button>
+                <button data-ptz="right" class="ptz-btn w-11 h-11 bg-black bg-opacity-60 text-white rounded-lg flex items-center justify-center hover:bg-opacity-80 active:bg-blue-600 text-lg font-bold">&#9654;</button>
+                <div></div>
+                <button data-ptz="down" class="ptz-btn w-11 h-11 bg-black bg-opacity-60 text-white rounded-lg flex items-center justify-center hover:bg-opacity-80 active:bg-blue-600 text-lg font-bold">&#9660;</button>
+                <div></div>
+            </div>
+            <!-- Zoom -->
+            <div class="flex space-x-1 mb-2" style="width: 140px;">
+                <button data-ptz="zoom-in" class="ptz-btn flex-1 h-10 bg-black bg-opacity-60 text-white rounded-lg flex items-center justify-center hover:bg-opacity-80 active:bg-blue-600 text-xl font-bold">+</button>
+                <button data-ptz="zoom-out" class="ptz-btn flex-1 h-10 bg-black bg-opacity-60 text-white rounded-lg flex items-center justify-center hover:bg-opacity-80 active:bg-blue-600 text-xl font-bold">&minus;</button>
+            </div>
+            <!-- Presets -->
+            <div class="flex space-x-1" style="width: 140px;">
+                <select id="ptz-preset-select" class="flex-1 h-9 bg-black bg-opacity-60 text-white text-xs rounded-lg px-2 border-none outline-none">
+                    <option value="">Presets...</option>
+                </select>
+                <button id="ptz-preset-go" class="h-9 px-2 bg-black bg-opacity-60 text-white rounded-lg text-xs hover:bg-opacity-80 active:bg-blue-600">Go</button>
+                <button id="ptz-preset-save" class="h-9 px-2 bg-black bg-opacity-60 text-white rounded-lg text-xs hover:bg-opacity-80 active:bg-green-600">Save</button>
+            </div>
+        </div>
+    </div>
 
     <!-- ================================================================
          JAVASCRIPT

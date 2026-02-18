@@ -25,6 +25,25 @@ class SmartHomeApp {
         this.currentSymbols = [];
         this.searchDebounceTimer = null;
 
+        // Camera Stream State
+        this._hlsInstances = {};
+        this._fullscreenHls = null;
+        this._fullscreenCamId = null;
+        this._activeCameraStreams = [];
+        this._cameraWallHls = {};
+        this._cameraWallStreams = [];
+        this._rtspSnapshotTimers = {};
+        this._rtspSnapshotInFlight = {};
+        this._rtspSnapshotObjectUrls = {};
+        this._ringSnapshotTimers = {};
+        this._ringSnapshotInFlight = {};
+        this._ringSnapshotObjectUrls = {};
+        this._fullscreenSnapshotTimer = null;
+        this._ringPeerConnection = null;
+        this._ringWebrtcSessionId = null;
+        this._ringWebrtcKeepaliveTimer = null;
+        this._ringWidgetConnections = {};
+
         // Initialisierung
         this.init();
     }
@@ -124,6 +143,14 @@ class SmartHomeApp {
     showPage(pageName) {
         console.log(`🔄 Zeige Seite: ${pageName}`);
 
+        // Cleanup beim Verlassen der Kamera-Seiten
+        if (this.currentPage === 'cameras' && pageName !== 'cameras') {
+            this._cleanupCameraStreams();
+        }
+        if (this.currentPage === 'camera-wall' && pageName !== 'camera-wall') {
+            this._cleanupCameraWallStreams();
+        }
+
         // Alle Seiten ausblenden (entferne 'active' Klasse)
         document.querySelectorAll('.page').forEach(page => {
             page.classList.remove('active');
@@ -185,6 +212,9 @@ class SmartHomeApp {
                 break;
             case 'monitor':
                 this.loadMonitorPage();
+                break;
+            case 'camera-wall':
+                this.loadCameraWallPage();
                 break;
         }
     }
@@ -771,6 +801,10 @@ class SmartHomeApp {
         // ⭐ v5.1.1: Lade Widgets für diese Page
         await this.loadAndRenderWidgets('cameras');
 
+        // Grid-Layout aus localStorage laden
+        this._applyGridLayout();
+        this._setupGridLayoutToggle();
+
         // Registriere Add-Camera-Button
         const addCameraBtn = document.getElementById('add-camera-btn');
         if (addCameraBtn && !addCameraBtn.hasAttribute('data-listener-attached')) {
@@ -780,11 +814,456 @@ class SmartHomeApp {
             addCameraBtn.setAttribute('data-listener-attached', 'true');
         }
 
-        // Lade gespeicherte Kameras aus LocalStorage
+        // Diagnose-Button registrieren
+        const diagnoseBtn = document.getElementById('diagnose-btn');
+        if (diagnoseBtn && !diagnoseBtn.hasAttribute('data-listener-attached')) {
+            diagnoseBtn.addEventListener('click', () => this._runCameraDiagnose());
+            diagnoseBtn.setAttribute('data-listener-attached', 'true');
+        }
+
+        // Netzwerk-Scan-Button registrieren
+        const scanBtn = document.getElementById('network-scan-btn');
+        if (scanBtn && !scanBtn.hasAttribute('data-listener-attached')) {
+            scanBtn.addEventListener('click', () => this._runNetworkScan());
+            scanBtn.setAttribute('data-listener-attached', 'true');
+        }
+
+        // Ring-Import-Button registrieren
+        const ringImportBtn = document.getElementById('import-ring-btn');
+        if (ringImportBtn && !ringImportBtn.hasAttribute('data-listener-attached')) {
+            ringImportBtn.addEventListener('click', () => this._openRingImport());
+            ringImportBtn.setAttribute('data-listener-attached', 'true');
+        }
+
+        const ringAuthBtn = document.getElementById('ring-auth-btn');
+        if (ringAuthBtn && !ringAuthBtn.hasAttribute('data-listener-attached')) {
+            ringAuthBtn.addEventListener('click', () => this._ringAuthenticateFromForm());
+            ringAuthBtn.setAttribute('data-listener-attached', 'true');
+        }
+
+        const ringWebrtcPreferred = document.getElementById('ring-webrtc-preferred');
+        if (ringWebrtcPreferred && !ringWebrtcPreferred.hasAttribute('data-listener-attached')) {
+            const stored = localStorage.getItem('ringWebrtcPreferred');
+            ringWebrtcPreferred.checked = stored !== '0';
+            ringWebrtcPreferred.addEventListener('change', () => {
+                localStorage.setItem('ringWebrtcPreferred', ringWebrtcPreferred.checked ? '1' : '0');
+            });
+            ringWebrtcPreferred.setAttribute('data-listener-attached', 'true');
+        }
+
+        this._refreshRingStatus();
+
+        // Lade gespeicherte Kameras und starte On-Demand Streams
         this.loadSavedCameras();
     }
 
-    addCamera() {
+    _getScanOptions() {
+        // Ports aus Checkboxen
+        const ports = [];
+        document.querySelectorAll('.scan-port-cb:checked').forEach(cb => {
+            ports.push(parseInt(cb.value));
+        });
+        // Custom Ports
+        const customPorts = document.getElementById('scan-custom-ports')?.value?.trim();
+        if (customPorts) {
+            customPorts.split(/[,\s]+/).forEach(p => {
+                const num = parseInt(p);
+                if (num > 0 && num <= 65535 && !ports.includes(num)) ports.push(num);
+            });
+        }
+        // Credentials
+        const user = document.getElementById('scan-user')?.value?.trim() || 'admin';
+        const password = document.getElementById('scan-password')?.value?.trim() || 'admin';
+        return { ports, user, password };
+    }
+
+    async _runNetworkScan() {
+        const resultPanel = document.getElementById('scan-result');
+        const btn = document.getElementById('network-scan-btn');
+        const opts = this._getScanOptions();
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="animate-pulse">Scanne Netzwerk...</span>';
+        resultPanel.classList.remove('hidden');
+        resultPanel.innerHTML = `<p class="text-gray-500 animate-pulse">WS-Discovery + Port-Scan (${opts.ports.join(', ')}) laeuft, bitte warten...</p>`;
+
+        try {
+            const resp = await fetch('/api/cameras/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ports: opts.ports, user: opts.user, password: opts.password })
+            });
+            const data = await resp.json();
+
+            if (!resp.ok) {
+                resultPanel.innerHTML = `<p class="text-red-500">Fehler: ${data.error || 'Unbekannt'}</p>`;
+                return;
+            }
+
+            let html = `<div class="mb-2 text-xs text-gray-500">Subnet: ${data.subnet}.0/24 | Methoden: ${(data.scan_method || []).join(', ')}</div>`;
+
+            if (!data.devices || data.devices.length === 0) {
+                html += '<p class="text-gray-500">Keine Kameras im Netzwerk gefunden</p>';
+            } else {
+                html += `<p class="font-semibold text-gray-900 dark:text-white mb-2">${data.devices.length} Geraet(e) gefunden:</p>`;
+                html += '<div class="space-y-2">';
+                data.devices.forEach(dev => {
+                    const typeColor = dev.type === 'camera'
+                        ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100'
+                        : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100';
+                    const typeLabel = dev.type === 'camera' ? 'Kamera' : 'Moeglich';
+                    const discoveryBadge = dev.discovery === 'onvif'
+                        ? '<span class="px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-100">ONVIF</span>'
+                        : '';
+                    const ports = (dev.ports || []).map(p => `<span class="px-1.5 py-0.5 rounded text-xs bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300">${p}</span>`).join(' ');
+
+                    html += `
+                        <div class="flex items-center justify-between p-2 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-600">
+                            <div class="flex items-center space-x-3">
+                                <span class="font-mono text-sm font-semibold text-gray-900 dark:text-white">${dev.host}</span>
+                                <span class="px-1.5 py-0.5 rounded text-xs ${typeColor}">${typeLabel}</span>
+                                ${discoveryBadge}
+                                <span class="text-xs text-gray-500">${dev.name || ''}</span>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs text-gray-400">Ports: ${ports}</span>
+                                <button class="scan-diagnose-btn px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700" data-host="${dev.host}">Diagnose</button>
+                            </div>
+                        </div>`;
+                });
+                html += '</div>';
+            }
+
+            resultPanel.innerHTML = html;
+
+            // Diagnose-Buttons: IP ins Diagnose-Feld eintragen und Diagnose starten
+            resultPanel.querySelectorAll('.scan-diagnose-btn').forEach(b => {
+                b.addEventListener('click', () => {
+                    const ip = b.getAttribute('data-host');
+                    const ipInput = document.getElementById('diagnose-ip');
+                    if (ipInput) ipInput.value = ip;
+                    this._runCameraDiagnose();
+                });
+            });
+
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+
+        } catch (e) {
+            resultPanel.innerHTML = `<p class="text-red-500">Verbindungsfehler: ${e.message}</p>`;
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i data-lucide="radar" class="w-4 h-4"></i><span>Netzwerk scannen</span>';
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+    }
+
+    async _runCameraDiagnose() {
+        const ipInput = document.getElementById('diagnose-ip');
+        const resultPanel = document.getElementById('diagnose-result');
+        const btn = document.getElementById('diagnose-btn');
+        const ip = ipInput?.value?.trim();
+        const opts = this._getScanOptions();
+
+        if (!ip) {
+            alert('Bitte IP-Adresse eingeben');
+            return;
+        }
+
+        // UI: Ladezustand
+        btn.disabled = true;
+        btn.innerHTML = '<span class="animate-pulse">Scanne...</span>';
+        resultPanel.classList.remove('hidden');
+        resultPanel.innerHTML = '<p class="text-gray-500 animate-pulse">Diagnose laeuft, bitte warten...</p>';
+
+        try {
+            const resp = await fetch('/api/cameras/diagnose', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ host: ip, user: opts.user, password: opts.password })
+            });
+            const data = await resp.json();
+
+            if (!resp.ok) {
+                resultPanel.innerHTML = `<p class="text-red-500">Fehler: ${data.error || 'Unbekannt'}</p>`;
+                return;
+            }
+
+            // Ergebnis rendern
+            let html = '';
+
+            // Offene Ports
+            html += `<div class="mb-3"><span class="font-semibold text-gray-900 dark:text-white">Offene Ports:</span> `;
+            if (data.ports && data.ports.length > 0) {
+                html += data.ports.map(p => `<span class="inline-block px-2 py-0.5 bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100 rounded text-xs mr-1">${p}</span>`).join('');
+            } else {
+                html += '<span class="text-gray-500">Keine gefunden</span>';
+            }
+            html += '</div>';
+
+            // Streams
+            html += '<div class="mb-3"><span class="font-semibold text-gray-900 dark:text-white">Erkannte Streams:</span>';
+            if (data.streams && data.streams.length > 0) {
+                html += '<div class="mt-1 space-y-1">';
+                data.streams.forEach(s => {
+                    const label = s.stream_type === 'mainstream' ? 'Main' : 'Sub';
+                    const badge = s.stream_type === 'mainstream'
+                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-100'
+                        : 'bg-purple-100 text-purple-800 dark:bg-purple-800 dark:text-purple-100';
+                    html += `<div class="flex items-center space-x-2">
+                        <span class="px-2 py-0.5 rounded text-xs ${badge}">${label}</span>
+                        <span class="font-mono text-xs text-gray-700 dark:text-gray-300">${s.url}</span>
+                        <span class="text-xs text-gray-500">${s.codec} ${s.width}x${s.height} ${s.fps || '?'}fps</span>
+                    </div>`;
+                });
+                html += '</div>';
+            } else {
+                html += ' <span class="text-gray-500">Keine gefunden</span>';
+            }
+            html += '</div>';
+
+            // ONVIF
+            html += '<div class="mb-3"><span class="font-semibold text-gray-900 dark:text-white">ONVIF:</span> ';
+            if (data.onvif && data.onvif.available) {
+                html += `<span class="text-green-600 dark:text-green-400">Ja (Port ${data.onvif.port})</span>`;
+                if (data.onvif.device_info) {
+                    const di = data.onvif.device_info;
+                    html += `<span class="text-xs text-gray-500 ml-2">${di.manufacturer} ${di.model}</span>`;
+                }
+                if (data.onvif.ptz_available) {
+                    html += ' <span class="px-2 py-0.5 bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100 rounded text-xs">PTZ</span>';
+                }
+            } else {
+                html += '<span class="text-gray-500">Nicht gefunden</span>';
+            }
+            html += '</div>';
+
+            // Snapshot
+            html += '<div class="mb-3"><span class="font-semibold text-gray-900 dark:text-white">Snapshot:</span> ';
+            if (data.snapshot) {
+                html += `<span class="text-green-600 dark:text-green-400 font-mono text-xs">${data.snapshot.url}</span>`;
+            } else {
+                html += '<span class="text-gray-500">Nicht gefunden</span>';
+            }
+            html += '</div>';
+
+            // Uebernehmen-Button
+            if (data.streams && data.streams.length > 0) {
+                // Daten fuer Uebernahme vorbereiten
+                const mainstream = data.streams.find(s => s.stream_type === 'mainstream');
+                const substream = data.streams.find(s => s.stream_type === 'substream');
+                const mainUrl = mainstream ? mainstream.url : (data.streams[0] ? data.streams[0].url : '');
+                const subUrl = substream ? substream.url : '';
+
+                html += `<button id="diagnose-apply-btn" class="mt-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+                    data-main-url="${mainUrl}"
+                    data-sub-url="${subUrl}"
+                    data-onvif-port="${data.onvif ? data.onvif.port : ''}"
+                    data-host="${ip}">
+                    Uebernehmen
+                </button>`;
+            }
+
+            resultPanel.innerHTML = html;
+
+            // Uebernehmen-Handler
+            const applyBtn = document.getElementById('diagnose-apply-btn');
+            if (applyBtn) {
+                applyBtn.addEventListener('click', () => {
+                    const nameInput = document.getElementById('camera-name');
+                    const urlInput = document.getElementById('camera-rtsp-url');
+                    if (nameInput) nameInput.value = `Kamera ${applyBtn.dataset.host}`;
+                    if (urlInput) urlInput.value = applyBtn.dataset.mainUrl;
+                });
+            }
+
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+
+        } catch (e) {
+            resultPanel.innerHTML = `<p class="text-red-500">Verbindungsfehler: ${e.message}</p>`;
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i data-lucide="search" class="w-4 h-4"></i><span>Diagnose</span>';
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+    }
+
+    async _refreshRingStatus() {
+        const statusEl = document.getElementById('ring-status');
+        const userAgentInput = document.getElementById('ring-user-agent');
+        if (!statusEl) return { available: false, configured: false };
+
+        try {
+            const resp = await fetch('/api/ring/status');
+            const data = await resp.json();
+
+            if (!resp.ok) {
+                statusEl.textContent = `Ring Status: Fehler (${data.error || 'Unbekannt'})`;
+                return { available: false, configured: false };
+            }
+
+            if (userAgentInput && data.user_agent && !userAgentInput.value) {
+                userAgentInput.value = data.user_agent;
+            }
+
+            if (!data.available) {
+                statusEl.textContent = 'Ring Status: Modul nicht installiert (ring_doorbell fehlt)';
+            } else if (data.configured) {
+                statusEl.textContent = `Ring Status: verbunden (User-Agent: ${data.user_agent || 'n/a'})`;
+            } else {
+                statusEl.textContent = 'Ring Status: nicht verbunden';
+            }
+
+            return data;
+        } catch (e) {
+            statusEl.textContent = `Ring Status: Fehler (${e.message})`;
+            return { available: false, configured: false };
+        }
+    }
+
+    async _ringAuthenticateFromForm() {
+        const username = document.getElementById('ring-username')?.value?.trim();
+        const password = document.getElementById('ring-password')?.value || '';
+        const otpRaw = document.getElementById('ring-otp')?.value?.trim() || '';
+        const otp = otpRaw.replace(/\D/g, '');
+        const userAgent = document.getElementById('ring-user-agent')?.value?.trim() || '';
+
+        if (!username || !password) {
+            alert('Bitte Ring Benutzer/E-Mail und Passwort eintragen.');
+            return false;
+        }
+
+        const resp = await fetch('/api/ring/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username,
+                password,
+                otp: otp || undefined,
+                user_agent: userAgent || undefined
+            })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            alert(`Ring-Authentifizierung fehlgeschlagen: ${data.error || 'Unbekannt'}`);
+            await this._refreshRingStatus();
+            return false;
+        }
+
+        // OTP nach Erfolg leeren
+        const otpInput = document.getElementById('ring-otp');
+        if (otpInput) otpInput.value = '';
+
+        await this._refreshRingStatus();
+        return true;
+    }
+
+    async _ringEnsureAuthenticated() {
+        const status = await this._refreshRingStatus();
+        if (!status.available) {
+            alert('Ring-Integration ist nicht verfügbar. Bitte ring_doorbell installieren.');
+            return false;
+        }
+        if (status.configured) return true;
+
+        return await this._ringAuthenticateFromForm();
+    }
+
+    async _openRingImport() {
+        const panel = document.getElementById('ring-import-result');
+        if (!panel) return;
+
+        panel.classList.remove('hidden');
+        panel.innerHTML = '<p class="text-gray-500 animate-pulse">Lade Ring-Kameras...</p>';
+
+        try {
+            const ok = await this._ringEnsureAuthenticated();
+            if (!ok) {
+                panel.innerHTML = '<p class="text-yellow-600">Ring-Authentifizierung abgebrochen.</p>';
+                return;
+            }
+
+            const resp = await fetch('/api/ring/cameras');
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                // Token kann als "configured" gelten, aber serverseitig ungueltig sein.
+                // Bei 401 versuchen wir automatisch einen Re-Auth mit den Formdaten.
+                if (resp.status === 401) {
+                    const reauthed = await this._ringAuthenticateFromForm();
+                    if (reauthed) {
+                        const retryResp = await fetch('/api/ring/cameras');
+                        const retryData = await retryResp.json();
+                        if (retryResp.ok && retryData.success) {
+                            return this._renderRingImportPanel(panel, retryData.cameras || []);
+                        }
+                        panel.innerHTML = `<p class=\"text-red-500\">Fehler nach Re-Auth: ${retryData.error || 'Unbekannt'}</p>`;
+                        return;
+                    }
+                }
+                panel.innerHTML = `<p class=\"text-red-500\">Fehler: ${data.error || 'Unbekannt'}</p>`;
+                return;
+            }
+
+            this._renderRingImportPanel(panel, data.cameras || []);
+        } catch (e) {
+            panel.innerHTML = `<p class=\"text-red-500\">Fehler: ${e.message}</p>`;
+        }
+    }
+
+    _renderRingImportPanel(panel, cameras) {
+        if (!panel) return;
+        if (!cameras || cameras.length === 0) {
+            panel.innerHTML = '<p class="text-gray-500">Keine Ring-Kameras gefunden.</p>';
+            return;
+        }
+
+        let html = '<div class="space-y-2">';
+        cameras.forEach((cam) => {
+            html += `
+                <div class="flex items-center justify-between p-2 rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800">
+                    <div class="min-w-0">
+                        <p class="font-medium text-gray-900 dark:text-white">${cam.name}</p>
+                        <p class="text-xs text-gray-500 font-mono">device_id: ${cam.device_id}</p>
+                    </div>
+                    <button class="ring-import-device-btn px-3 py-1.5 bg-orange-600 text-white text-xs rounded hover:bg-orange-700"
+                            data-device-id="${cam.device_id}" data-device-name="${cam.name}">
+                        Importieren
+                    </button>
+                </div>
+            `;
+        });
+        html += '</div>';
+        panel.innerHTML = html;
+
+        panel.querySelectorAll('.ring-import-device-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const ringDeviceId = btn.getAttribute('data-device-id');
+                const ringDeviceName = btn.getAttribute('data-device-name');
+                await this._importRingDevice(ringDeviceId, ringDeviceName);
+            });
+        });
+    }
+
+    async _importRingDevice(ringDeviceId, ringDeviceName) {
+        const camId = `ring_${ringDeviceId}`;
+        const resp = await fetch('/api/ring/cameras/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id: camId,
+                ring_device_id: ringDeviceId,
+                name: ringDeviceName
+            })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            alert(`Import fehlgeschlagen: ${data.error || 'Unbekannt'}`);
+            return;
+        }
+
+        this.loadSavedCameras();
+    }
+
+    async addCamera() {
         const nameInput = document.getElementById('camera-name');
         const urlInput = document.getElementById('camera-rtsp-url');
 
@@ -805,87 +1284,195 @@ class SmartHomeApp {
             return;
         }
 
-        // Lade bestehende Kameras
-        let cameras = JSON.parse(localStorage.getItem('cameras') || '[]');
+        const streamType = isRTSP ? 'rtsp' : 'mjpeg';
+        const camId = 'cam_' + Date.now();
 
-        // Ermittle Stream-Typ
-        const streamType = isRTSP ? 'RTSP' : 'MJPEG';
-
-        // Füge neue Kamera hinzu
-        cameras.push({
-            id: Date.now(),
-            name: name,
-            streamUrl: streamUrl,
-            streamType: streamType
-        });
-
-        // Speichere
-        localStorage.setItem('cameras', JSON.stringify(cameras));
+        try {
+            const resp = await fetch('/api/cameras', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: camId,
+                    name: name,
+                    url: streamUrl,
+                    type: streamType,
+                    autostart: true
+                })
+            });
+            const result = await resp.json();
+            if (!resp.ok) {
+                alert('Fehler: ' + (result.error || 'Unbekannt'));
+                return;
+            }
+            console.log(`Kamera hinzugefuegt: ${name} (${camId})`);
+        } catch (e) {
+            console.error('Fehler beim Hinzufuegen der Kamera:', e);
+            alert('Server nicht erreichbar');
+            return;
+        }
 
         // Leere Inputs
         if (nameInput) nameInput.value = '';
         if (urlInput) urlInput.value = '';
 
-        console.log(`✅ Kamera hinzugefügt: ${name}`);
-
         // Lade Liste neu
         this.loadSavedCameras();
     }
 
-    loadSavedCameras() {
+    async loadSavedCameras() {
         const cameraListContainer = document.getElementById('camera-list');
         const camerasGridContainer = document.getElementById('cameras-grid');
 
         if (!cameraListContainer || !camerasGridContainer) return;
 
-        // Lade Kameras aus LocalStorage
-        const cameras = JSON.parse(localStorage.getItem('cameras') || '[]');
+        // Lade Kameras vom Server
+        let cameras = {};
+        try {
+            const resp = await fetch('/api/cameras');
+            const data = await resp.json();
+            cameras = data.cameras || {};
+        } catch (e) {
+            console.error('Fehler beim Laden der Kameras:', e);
+            cameraListContainer.innerHTML = '<p class="text-sm text-red-500">Server nicht erreichbar</p>';
+            return;
+        }
 
-        if (cameras.length === 0) {
+        const camIds = Object.keys(cameras);
+        this._clearRingSnapshotTimers();
+        if (camIds.length === 0) {
             cameraListContainer.innerHTML = '<p class="text-sm text-gray-500">Keine Kameras konfiguriert</p>';
             camerasGridContainer.innerHTML = '<p class="text-gray-500">Kameras werden nach Konfiguration hier angezeigt...</p>';
             return;
         }
 
-        // Rendere Kamera-Liste
+        // Rendere Kamera-Liste (Config-Bereich)
         let listHtml = '<div class="space-y-2">';
-        cameras.forEach(camera => {
-            const streamUrl = camera.streamUrl || camera.rtspUrl; // Backward compatibility
-            const streamType = camera.streamType || 'RTSP';
+        camIds.forEach(camId => {
+            const cam = cameras[camId];
+            const streamType = (cam.type || 'rtsp').toUpperCase();
+            const statusDot = cam.stream_running
+                ? '<span class="w-2 h-2 rounded-full bg-green-500 inline-block mr-1"></span>'
+                : '<span class="w-2 h-2 rounded-full bg-gray-400 inline-block mr-1"></span>';
+
+            const onvifHost = cam.onvif?.host || '';
+            const onvifPort = cam.onvif?.port || '';
+            const onvifUser = cam.onvif?.user || 'admin';
+            const onvifPass = cam.onvif?.password || 'admin';
 
             listHtml += `
-                <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                    <div class="flex items-center space-x-3">
-                        <i data-lucide="video" class="w-5 h-5 text-blue-500"></i>
-                        <div>
-                            <p class="font-medium text-gray-900 dark:text-white">${camera.name}</p>
-                            <p class="text-xs text-gray-500 font-mono">${streamUrl}</p>
-                            <span class="text-xs px-2 py-0.5 rounded ${streamType === 'MJPEG' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}">${streamType}</span>
+                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg" id="cam-entry-${camId}">
+                    <!-- Anzeige-Modus -->
+                    <div class="cam-display flex items-center justify-between">
+                        <div class="flex items-center space-x-3 min-w-0">
+                            <i data-lucide="video" class="w-5 h-5 text-blue-500 flex-shrink-0"></i>
+                            <div class="min-w-0">
+                                <p class="font-medium text-gray-900 dark:text-white">${statusDot}${cam.name}</p>
+                                <p class="text-xs text-gray-500 font-mono truncate">${cam.url}</p>
+                                ${cam.substream_url ? `<p class="text-xs text-gray-400 font-mono truncate">Sub: ${cam.substream_url}</p>` : ''}
+                                <div class="flex items-center space-x-1 mt-0.5">
+                                    <span class="text-xs px-2 py-0.5 rounded ${streamType === 'MJPEG' ? 'bg-green-100 text-green-800' : streamType === 'RING' ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800'}">${streamType}</span>
+                                    ${cam.onvif ? '<span class="text-xs px-2 py-0.5 rounded bg-yellow-100 text-yellow-800">ONVIF</span>' : ''}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-2 flex-shrink-0">
+                            <button class="px-3 py-1 bg-gray-500 text-white text-sm rounded hover:bg-gray-600 edit-camera-btn"
+                                    data-camera-id="${camId}">
+                                <i data-lucide="pencil" class="w-4 h-4 inline"></i>
+                            </button>
+                            <button class="px-3 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600 remove-camera-btn"
+                                    data-camera-id="${camId}">
+                                <i data-lucide="trash-2" class="w-4 h-4 inline"></i>
+                            </button>
                         </div>
                     </div>
-                    <button class="px-3 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600 remove-camera-btn"
-                            data-camera-id="${camera.id}">
-                        <i data-lucide="trash-2" class="w-4 h-4 inline"></i>
-                    </button>
+                    <!-- Edit-Modus (versteckt) -->
+                    <div class="cam-edit hidden mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
+                            <div>
+                                <label class="text-xs text-gray-500 dark:text-gray-400">Name</label>
+                                <input type="text" class="cam-edit-name w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value="${cam.name}">
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500 dark:text-gray-400">Typ</label>
+                                <select class="cam-edit-type w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                                    <option value="rtsp" ${cam.type === 'rtsp' ? 'selected' : ''}>RTSP</option>
+                                    <option value="mjpeg" ${cam.type === 'mjpeg' ? 'selected' : ''}>MJPEG</option>
+                                    <option value="ring" ${cam.type === 'ring' ? 'selected' : ''}>Ring Snapshot</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="space-y-2 mb-2">
+                            <div>
+                                <label class="text-xs text-gray-500 dark:text-gray-400">Stream-URL (MainStream)</label>
+                                <input type="text" class="cam-edit-url w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono" value="${cam.url}">
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500 dark:text-gray-400">SubStream-URL (optional, fuer Widget)</label>
+                                <input type="text" class="cam-edit-substream w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono" value="${cam.substream_url || ''}">
+                            </div>
+                        </div>
+                        <details class="mb-2">
+                            <summary class="text-xs font-semibold text-gray-600 dark:text-gray-400 cursor-pointer">ONVIF-Konfiguration</summary>
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
+                                <div>
+                                    <label class="text-xs text-gray-500 dark:text-gray-400">Host</label>
+                                    <input type="text" class="cam-edit-onvif-host w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value="${onvifHost}">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-500 dark:text-gray-400">Port</label>
+                                    <input type="number" class="cam-edit-onvif-port w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value="${onvifPort}">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-500 dark:text-gray-400">User</label>
+                                    <input type="text" class="cam-edit-onvif-user w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value="${onvifUser}">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-500 dark:text-gray-400">Passwort</label>
+                                    <input type="text" class="cam-edit-onvif-pass w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value="${onvifPass}">
+                                </div>
+                            </div>
+                        </details>
+                        <div class="flex items-center space-x-2">
+                            <button class="save-camera-btn px-4 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700" data-camera-id="${camId}">Speichern</button>
+                            <button class="cancel-edit-btn px-4 py-1.5 bg-gray-400 text-white text-sm rounded hover:bg-gray-500" data-camera-id="${camId}">Abbrechen</button>
+                        </div>
+                    </div>
                 </div>
             `;
         });
         listHtml += '</div>';
         cameraListContainer.innerHTML = listHtml;
 
-        // Rendere Live-Streams
-        let gridHtml = '';
-        cameras.forEach(camera => {
-            const streamUrl = camera.streamUrl || camera.rtspUrl;
-            const streamType = camera.streamType || 'RTSP';
+        // On-Demand: Starte Widget-Streams (640x360) für RTSP-Kameras
+        const rtspCams = camIds.filter(id => (cameras[id].type || 'rtsp') === 'rtsp');
+        this._activeCameraStreams = [];
+        for (const camId of rtspCams) {
+            try {
+                await fetch(`/api/cameras/${camId}/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ use_substream: true })
+                });
+                this._activeCameraStreams.push(camId);
+                console.log(`On-Demand Stream gestartet: ${camId} (SubStream)`);
+            } catch (e) {
+                console.error(`Stream-Start fehlgeschlagen fuer ${camId}:`, e);
+            }
+        }
 
-            // MJPEG kann direkt im <img> angezeigt werden
-            if (streamType === 'MJPEG') {
+        // Rendere Live-Streams (Grid) - alle bekommen Video-Element
+        let gridHtml = '';
+        camIds.forEach(camId => {
+            const cam = cameras[camId];
+            const streamType = (cam.type || 'rtsp').toLowerCase();
+
+            if (streamType === 'mjpeg') {
                 gridHtml += `
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-                        <h3 class="font-semibold text-gray-900 dark:text-white mb-2">${camera.name}</h3>
-                        <div class="aspect-video bg-gray-900 rounded overflow-hidden">
-                            <img src="${streamUrl}" alt="${camera.name}" class="w-full h-full object-cover"
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4 camera-card" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="mjpeg">
+                        <h3 class="font-semibold text-gray-900 dark:text-white mb-2">${cam.name}</h3>
+                        <div class="aspect-video bg-gray-900 rounded overflow-hidden relative">
+                            <img id="cam-image-${camId}" src="${cam.url}" alt="${cam.name}" class="w-full h-full object-cover"
                                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                             <div class="w-full h-full flex items-center justify-center text-white bg-gray-900" style="display:none;">
                                 <div class="text-center">
@@ -894,24 +1481,75 @@ class SmartHomeApp {
                                 </div>
                             </div>
                         </div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-2 font-mono truncate">${streamUrl}</p>
-                        <span class="text-xs px-2 py-0.5 rounded bg-green-100 text-green-800 inline-block mt-1">MJPEG (Live)</span>
+                        <!-- Toolbar -->
+                        <div class="flex items-center space-x-2 mt-2">
+                            <button class="cam-fullscreen-btn px-3 py-1.5 bg-gray-700 text-white text-xs rounded hover:bg-gray-600 flex items-center space-x-1"
+                                    data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="mjpeg">
+                                <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i><span>Vollbild</span>
+                            </button>
+                            <button class="cam-ptz-toggle-btn px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-500 flex items-center space-x-1"
+                                    data-cam-id="${camId}" style="display:none;">
+                                <i data-lucide="move" class="w-3.5 h-3.5"></i><span>PTZ</span>
+                            </button>
+                            <span class="text-xs px-2 py-0.5 rounded bg-green-100 text-green-800">MJPEG</span>
+                        </div>
+                        <!-- Inline PTZ Controls (versteckt) -->
+                        <div id="widget-ptz-${camId}" class="widget-ptz-panel hidden mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg select-none"></div>
+                    </div>
+                `;
+            } else if (streamType === 'ring') {
+                gridHtml += `
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4 camera-card" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="ring">
+                        <h3 class="font-semibold text-gray-900 dark:text-white mb-2">${cam.name}</h3>
+                        <div class="aspect-video bg-gray-900 rounded overflow-hidden relative">
+                            <video id="ring-video-${camId}" class="w-full h-full object-cover" muted autoplay playsinline style="display:none;"></video>
+                            <img id="cam-image-${camId}" src="" alt="${cam.name}" class="w-full h-full object-cover">
+                            <div id="ring-loading-${camId}" class="absolute inset-0 flex items-center justify-center text-white bg-gray-900 bg-opacity-60">
+                                <div class="text-center">
+                                    <i data-lucide="loader" class="w-8 h-8 mx-auto mb-2 animate-spin"></i>
+                                    <p class="text-sm">Ring Stream wird geladen...</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-2 mt-2">
+                            <button class="cam-fullscreen-btn px-3 py-1.5 bg-gray-700 text-white text-xs rounded hover:bg-gray-600 flex items-center space-x-1"
+                                    data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="ring">
+                                <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i><span>Vollbild</span>
+                            </button>
+                            <span class="text-xs px-2 py-0.5 rounded bg-orange-100 text-orange-800">RING</span>
+                        </div>
+                        <div id="widget-ptz-${camId}" class="widget-ptz-panel hidden mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg select-none"></div>
                     </div>
                 `;
             } else {
-                // RTSP benötigt Transkodierung
+                // RTSP: Video wird nach kurzer Verzögerung via HLS geladen
                 gridHtml += `
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-                        <h3 class="font-semibold text-gray-900 dark:text-white mb-2">${camera.name}</h3>
-                        <div class="aspect-video bg-gray-900 rounded flex items-center justify-center text-white">
-                            <div class="text-center">
-                                <i data-lucide="play-circle" class="w-12 h-12 mx-auto mb-2"></i>
-                                <p class="text-sm">Stream wird transkodiert...</p>
-                                <p class="text-xs text-gray-400 mt-1">RTSP → HLS</p>
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4 camera-card" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="rtsp">
+                        <h3 class="font-semibold text-gray-900 dark:text-white mb-2">${cam.name}</h3>
+                        <div class="aspect-video bg-gray-900 rounded overflow-hidden relative">
+                            <img id="cam-image-${camId}" src="" alt="${cam.name}" class="w-full h-full object-cover">
+                            <video id="hls-video-${camId}" class="w-full h-full object-cover" muted autoplay playsinline style="display:none;"></video>
+                            <div id="hls-loading-${camId}" class="absolute inset-0 flex items-center justify-center text-white bg-gray-900">
+                                <div class="text-center">
+                                    <i data-lucide="loader" class="w-8 h-8 mx-auto mb-2 animate-spin"></i>
+                                    <p class="text-sm">Stream wird geladen...</p>
+                                </div>
                             </div>
                         </div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-2 font-mono truncate">${streamUrl}</p>
-                        <span class="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-800 inline-block mt-1">RTSP (Transkodierung erforderlich)</span>
+                        <!-- Toolbar -->
+                        <div class="flex items-center space-x-2 mt-2">
+                            <button class="cam-fullscreen-btn px-3 py-1.5 bg-gray-700 text-white text-xs rounded hover:bg-gray-600 flex items-center space-x-1"
+                                    data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="rtsp">
+                                <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i><span>Vollbild</span>
+                            </button>
+                            <button class="cam-ptz-toggle-btn px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-500 flex items-center space-x-1"
+                                    data-cam-id="${camId}" style="display:none;">
+                                <i data-lucide="move" class="w-3.5 h-3.5"></i><span>PTZ</span>
+                            </button>
+                            <span class="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-800">HLS</span>
+                        </div>
+                        <!-- Inline PTZ Controls (versteckt) -->
+                        <div id="widget-ptz-${camId}" class="widget-ptz-panel hidden mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg select-none"></div>
                     </div>
                 `;
             }
@@ -923,21 +1561,1140 @@ class SmartHomeApp {
             lucide.createIcons();
         }
 
-        // Event-Listener für Löschen-Buttons
+        // RTSP-Snapshot sofort anzeigen, bis HLS erfolgreich gestartet ist.
+        rtspCams.forEach(camId => {
+            this._loadRtspSnapshot(camId, `cam-image-${camId}`, 4500);
+            this._startRtspSnapshotRefresh(camId, `cam-image-${camId}`, 3500);
+        });
+
+        // HLS.js Player nach Verzögerung initialisieren (FFmpeg braucht Zeit)
+        setTimeout(() => {
+            (async () => {
+                for (const camId of rtspCams) {
+                    const videoEl = document.getElementById(`hls-video-${camId}`);
+                    if (!videoEl) continue;
+
+                    let hlsUrl = null;
+                    try {
+                        const startResp = await fetch(`/api/cameras/${camId}/start`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        const startData = await startResp.json();
+                        if (startResp.ok && startData.success && startData.hls_url) {
+                            hlsUrl = startData.hls_url;
+                        }
+                    } catch (e) {}
+
+                    if (!hlsUrl) {
+                        hlsUrl = `/static/hls/${camId}.m3u8`;
+                    }
+                    this._initHlsPlayer(videoEl, hlsUrl, camId);
+                }
+            })();
+        }, 3000);
+
+        let ringStatus = { available: false, configured: false };
+        try {
+            const ringStatusResp = await fetch('/api/ring/status');
+            ringStatus = await ringStatusResp.json();
+        } catch (e) {}
+
+        camIds.forEach(camId => {
+            const cam = cameras[camId];
+            if ((cam.type || 'rtsp').toLowerCase() === 'ring') {
+                const loadingEl = document.getElementById(`ring-loading-${camId}`);
+
+                if (!ringStatus.available || !ringStatus.configured) {
+                    if (loadingEl) {
+                        loadingEl.innerHTML = '<p class="text-sm text-yellow-300 px-3 text-center">Ring nicht verbunden. Bitte im Bereich "Ring Integration" erneut anmelden.</p>';
+                    }
+                    return;
+                }
+
+                this._loadRingSnapshot(camId, `cam-image-${camId}`, 5000, 2, 1);
+                this._startRingSnapshotRefresh(camId, `cam-image-${camId}`, 12000);
+                const webrtcAvailable = !!ringStatus.webrtc_available;
+                const preferWebrtc = webrtcAvailable && (localStorage.getItem('ringWebrtcPreferred') || '1') === '1';
+                if (preferWebrtc && window.RTCPeerConnection) {
+                    const videoEl = document.getElementById(`ring-video-${camId}`);
+                    const imageEl = document.getElementById(`cam-image-${camId}`);
+                    if (videoEl) {
+                        this._startRingWidgetWebrtc(camId, videoEl, imageEl)
+                            .then(() => {
+                                if (loadingEl) loadingEl.style.display = 'none';
+                            })
+                            .catch(() => {
+                                if (loadingEl) loadingEl.style.display = 'none';
+                                // Snapshot fallback läuft bereits via Timer
+                            });
+                    } else if (loadingEl) {
+                        loadingEl.style.display = 'none';
+                    }
+                } else {
+                    const loadingEl = document.getElementById(`ring-loading-${camId}`);
+                    if (loadingEl) loadingEl.style.display = 'none';
+                }
+            }
+        });
+
+        // Event-Listener: Loeschen-Buttons
         document.querySelectorAll('.remove-camera-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                const cameraId = parseInt(btn.getAttribute('data-camera-id'));
-                this.removeCamera(cameraId);
+                const cameraId = btn.getAttribute('data-camera-id');
+                if (confirm(`Kamera "${cameras[cameraId]?.name || cameraId}" wirklich loeschen?`)) {
+                    this.removeCamera(cameraId);
+                }
+            });
+        });
+
+        // Event-Listener: Edit-Buttons
+        document.querySelectorAll('.edit-camera-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const camId = btn.getAttribute('data-camera-id');
+                const entry = document.getElementById(`cam-entry-${camId}`);
+                if (entry) {
+                    entry.querySelector('.cam-display').classList.add('hidden');
+                    entry.querySelector('.cam-edit').classList.remove('hidden');
+                }
+            });
+        });
+
+        // Event-Listener: Cancel-Buttons
+        document.querySelectorAll('.cancel-edit-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const camId = btn.getAttribute('data-camera-id');
+                const entry = document.getElementById(`cam-entry-${camId}`);
+                if (entry) {
+                    entry.querySelector('.cam-display').classList.remove('hidden');
+                    entry.querySelector('.cam-edit').classList.add('hidden');
+                }
+            });
+        });
+
+        // Event-Listener: Save-Buttons
+        document.querySelectorAll('.save-camera-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const camId = btn.getAttribute('data-camera-id');
+                this._saveCamera(camId);
+            });
+        });
+
+        // Event-Listener: Vollbild-Buttons
+        document.querySelectorAll('.cam-fullscreen-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const camId = btn.getAttribute('data-cam-id');
+                const camName = btn.getAttribute('data-cam-name');
+                const camType = btn.getAttribute('data-cam-type');
+                this.openCameraFullscreen(camId, camName, camType);
+            });
+        });
+
+        // PTZ-Faehigkeit pruefen und Buttons einblenden
+        camIds.forEach(camId => {
+            this._checkWidgetPTZ(camId);
+        });
+
+        // Event-Listener: PTZ-Toggle-Buttons
+        document.querySelectorAll('.cam-ptz-toggle-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const camId = btn.getAttribute('data-cam-id');
+                this._toggleWidgetPTZ(camId);
             });
         });
     }
 
-    removeCamera(cameraId) {
-        let cameras = JSON.parse(localStorage.getItem('cameras') || '[]');
-        cameras = cameras.filter(cam => cam.id !== cameraId);
-        localStorage.setItem('cameras', JSON.stringify(cameras));
+    async _saveCamera(camId) {
+        const entry = document.getElementById(`cam-entry-${camId}`);
+        if (!entry) return;
 
-        console.log(`🗑️ Kamera entfernt: ID ${cameraId}`);
+        const name = entry.querySelector('.cam-edit-name')?.value?.trim();
+        const url = entry.querySelector('.cam-edit-url')?.value?.trim();
+        const substreamUrl = entry.querySelector('.cam-edit-substream')?.value?.trim();
+        const type = entry.querySelector('.cam-edit-type')?.value;
+        const onvifHost = entry.querySelector('.cam-edit-onvif-host')?.value?.trim();
+        const onvifPort = entry.querySelector('.cam-edit-onvif-port')?.value?.trim();
+        const onvifUser = entry.querySelector('.cam-edit-onvif-user')?.value?.trim();
+        const onvifPass = entry.querySelector('.cam-edit-onvif-pass')?.value?.trim();
+
+        if (!name || !url) {
+            alert('Name und Stream-URL sind Pflichtfelder');
+            return;
+        }
+
+        const data = { name, url, type, substream_url: substreamUrl || '' };
+
+        // ONVIF nur wenn Host angegeben
+        if (onvifHost) {
+            data.onvif = {
+                host: onvifHost,
+                port: parseInt(onvifPort) || 80,
+                user: onvifUser || 'admin',
+                password: onvifPass || 'admin'
+            };
+        } else {
+            data.onvif = null;
+        }
+
+        try {
+            const resp = await fetch(`/api/cameras/${camId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await resp.json();
+            if (!resp.ok) {
+                alert('Fehler: ' + (result.error || 'Unbekannt'));
+                return;
+            }
+            console.log(`Kamera aktualisiert: ${camId}`);
+            // Liste neu laden (Stream wird ggf. neu gestartet)
+            this.loadSavedCameras();
+        } catch (e) {
+            console.error('Fehler beim Speichern:', e);
+            alert('Server nicht erreichbar');
+        }
+    }
+
+    _initHlsPlayer(videoEl, hlsUrl, camId) {
+        const cacheBustedHlsUrl = `${hlsUrl}${hlsUrl.includes('?') ? '&' : '?'}ts=${Date.now()}`;
+        if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+            const hls = new Hls({
+                enableWorker: true,
+                lowLatencyMode: true,
+                liveSyncDurationCount: 1,
+                liveMaxLatencyDurationCount: 3,
+                maxBufferLength: 2,
+                backBufferLength: 0,
+                maxLiveSyncPlaybackRate: 1.5
+            });
+            hls.loadSource(cacheBustedHlsUrl);
+            hls.attachMedia(videoEl);
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                videoEl.play().catch(() => {});
+                videoEl.style.display = '';
+                const imageEl = camId ? document.getElementById(`cam-image-${camId}`) : null;
+                if (imageEl) imageEl.style.display = 'none';
+                if (camId) this._stopRtspSnapshotRefresh(camId, `cam-image-${camId}`);
+                // Loading-Overlay ausblenden
+                const loading = document.getElementById(`hls-loading-${camId}`);
+                if (loading) loading.style.display = 'none';
+            });
+            hls.on(Hls.Events.ERROR, (event, data) => {
+                if (data.fatal) {
+                    console.warn('HLS fatal error, retrying in 3s...', data.type);
+                    const imageEl = camId ? document.getElementById(`cam-image-${camId}`) : null;
+                    if (imageEl) imageEl.style.display = '';
+                    if (videoEl) videoEl.style.display = 'none';
+                    if (camId) this._startRtspSnapshotRefresh(camId, `cam-image-${camId}`, 3000);
+                    setTimeout(async () => {
+                        hls.destroy();
+                        if (camId) {
+                            delete this._hlsInstances[camId];
+                            await this._restartRtspStream(camId);
+                            await this._loadRtspSnapshot(camId, `cam-image-${camId}`, 4500);
+                        }
+                        this._initHlsPlayer(videoEl, hlsUrl, camId);
+                    }, 3000);
+                }
+            });
+            // Speichere HLS-Instanz für Cleanup
+            if (camId) {
+                this._hlsInstances[camId] = hls;
+            }
+            return hls;
+        } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+            // Safari native HLS
+            videoEl.src = cacheBustedHlsUrl;
+            videoEl.addEventListener('loadedmetadata', () => {
+                videoEl.play().catch(() => {});
+                videoEl.style.display = '';
+                const imageEl = camId ? document.getElementById(`cam-image-${camId}`) : null;
+                if (imageEl) imageEl.style.display = 'none';
+                if (camId) this._stopRtspSnapshotRefresh(camId, `cam-image-${camId}`);
+                const loading = document.getElementById(`hls-loading-${camId}`);
+                if (loading) loading.style.display = 'none';
+            });
+        }
+        return null;
+    }
+
+    async _restartRtspStream(camId) {
+        if (!camId) return;
+        try {
+            await fetch(`/api/cameras/${camId}/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ use_substream: true })
+            });
+        } catch (e) {}
+    }
+
+    async _loadRtspSnapshot(camId, imgElementId, timeoutMs = 4500) {
+        const key = `${camId}:${imgElementId}`;
+        if (this._rtspSnapshotInFlight[key]) return;
+
+        const img = document.getElementById(imgElementId);
+        if (!img) return;
+
+        this._rtspSnapshotInFlight[key] = true;
+        const controller = new AbortController();
+        const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const resp = await fetch(`/api/cameras/${camId}/snapshot?ts=${Date.now()}&timeout=6`, {
+                signal: controller.signal,
+                cache: 'no-store'
+            });
+            if (!resp.ok) return;
+            const blob = await resp.blob();
+            if (!blob || !blob.size) return;
+
+            const newUrl = URL.createObjectURL(blob);
+            img.src = newUrl;
+            if (this._rtspSnapshotObjectUrls[key]) {
+                URL.revokeObjectURL(this._rtspSnapshotObjectUrls[key]);
+            }
+            this._rtspSnapshotObjectUrls[key] = newUrl;
+        } catch (e) {
+        } finally {
+            clearTimeout(timeoutHandle);
+            this._rtspSnapshotInFlight[key] = false;
+        }
+    }
+
+    _startRtspSnapshotRefresh(camId, imgElementId, intervalMs = 3500) {
+        const key = `${camId}:${imgElementId}`;
+        if (this._rtspSnapshotTimers[key]) {
+            clearInterval(this._rtspSnapshotTimers[key]);
+        }
+        this._rtspSnapshotTimers[key] = setInterval(async () => {
+            await this._loadRtspSnapshot(camId, imgElementId, 4500);
+        }, intervalMs);
+    }
+
+    _stopRtspSnapshotRefresh(camId, imgElementId) {
+        const key = `${camId}:${imgElementId}`;
+        if (this._rtspSnapshotTimers[key]) {
+            clearInterval(this._rtspSnapshotTimers[key]);
+            delete this._rtspSnapshotTimers[key];
+        }
+    }
+
+    _clearRtspSnapshotTimers() {
+        Object.values(this._rtspSnapshotTimers).forEach(timer => clearInterval(timer));
+        this._rtspSnapshotTimers = {};
+        this._rtspSnapshotInFlight = {};
+        Object.values(this._rtspSnapshotObjectUrls).forEach(url => {
+            try { URL.revokeObjectURL(url); } catch (e) {}
+        });
+        this._rtspSnapshotObjectUrls = {};
+    }
+
+    async _loadRingSnapshot(camId, imgElementId, timeoutMs = 5000, retries = 2, delay = 1) {
+        const key = `${camId}:${imgElementId}`;
+        if (this._ringSnapshotInFlight[key]) return;
+
+        const img = document.getElementById(imgElementId);
+        if (!img) return;
+
+        this._ringSnapshotInFlight[key] = true;
+        const controller = new AbortController();
+        const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+            const resp = await fetch(`/api/cameras/${camId}/snapshot?ts=${Date.now()}&retries=${retries}&delay=${delay}`, {
+                signal: controller.signal,
+                cache: 'no-store'
+            });
+            if (!resp.ok) return;
+
+            const blob = await resp.blob();
+            if (!blob || !blob.size) return;
+
+            const newUrl = URL.createObjectURL(blob);
+            img.src = newUrl;
+
+            if (this._ringSnapshotObjectUrls[key]) {
+                URL.revokeObjectURL(this._ringSnapshotObjectUrls[key]);
+            }
+            this._ringSnapshotObjectUrls[key] = newUrl;
+        } catch (e) {
+            // Snapshot-Ausfall ist tolerierbar; WebRTC oder nächster Zyklus übernimmt.
+        } finally {
+            clearTimeout(timeoutHandle);
+            this._ringSnapshotInFlight[key] = false;
+        }
+    }
+
+    _startRingSnapshotRefresh(camId, imgElementId, intervalMs = 12000) {
+        const key = `${camId}:${imgElementId}`;
+        if (this._ringSnapshotTimers[key]) {
+            clearInterval(this._ringSnapshotTimers[key]);
+        }
+
+        this._ringSnapshotTimers[key] = setInterval(async () => {
+            await this._loadRingSnapshot(camId, imgElementId, 5000, 2, 1);
+        }, intervalMs);
+    }
+
+    _clearRingSnapshotTimers() {
+        Object.values(this._ringSnapshotTimers).forEach(timer => clearInterval(timer));
+        this._ringSnapshotTimers = {};
+        this._ringSnapshotInFlight = {};
+        Object.values(this._ringSnapshotObjectUrls).forEach(url => {
+            try { URL.revokeObjectURL(url); } catch (e) {}
+        });
+        this._ringSnapshotObjectUrls = {};
+    }
+
+    async _stopRingWebrtc(camId) {
+        if (this._ringWebrtcKeepaliveTimer) {
+            clearInterval(this._ringWebrtcKeepaliveTimer);
+            this._ringWebrtcKeepaliveTimer = null;
+        }
+
+        if (this._ringPeerConnection) {
+            try { this._ringPeerConnection.close(); } catch (e) {}
+            this._ringPeerConnection = null;
+        }
+
+        if (this._ringWebrtcSessionId && camId) {
+            try {
+                await fetch(`/api/cameras/${camId}/ring/webrtc/stop`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: this._ringWebrtcSessionId })
+                });
+            } catch (e) {}
+        }
+        this._ringWebrtcSessionId = null;
+    }
+
+    async _startRingWebrtc(camId, videoEl) {
+        await this._stopRingWebrtc(camId);
+
+        const pc = new RTCPeerConnection();
+        this._ringPeerConnection = pc;
+
+        pc.ontrack = (event) => {
+            if (event.streams && event.streams[0]) {
+                videoEl.srcObject = event.streams[0];
+                videoEl.play().catch(() => {});
+            }
+        };
+
+        pc.onicecandidate = async (event) => {
+            if (!event.candidate || !this._ringWebrtcSessionId) return;
+            try {
+                await fetch(`/api/cameras/${camId}/ring/webrtc/candidate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: this._ringWebrtcSessionId,
+                        candidate: event.candidate.candidate,
+                        sdpMLineIndex: event.candidate.sdpMLineIndex
+                    })
+                });
+            } catch (e) {
+                console.warn('Ring ICE candidate send failed', e);
+            }
+        };
+
+        // Ring stream is receive-only from browser perspective.
+        pc.addTransceiver('video', { direction: 'recvonly' });
+        pc.addTransceiver('audio', { direction: 'recvonly' });
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        const resp = await fetch(`/api/cameras/${camId}/ring/webrtc/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                offer: offer.sdp,
+                keep_alive_timeout: 45
+            })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            await this._stopRingWebrtc(camId);
+            throw new Error(data.error || 'Ring WebRTC Start fehlgeschlagen');
+        }
+
+        this._ringWebrtcSessionId = data.session_id;
+        await pc.setRemoteDescription({ type: 'answer', sdp: data.answer });
+
+        this._ringWebrtcKeepaliveTimer = setInterval(async () => {
+            if (!this._ringWebrtcSessionId) return;
+            try {
+                await fetch(`/api/cameras/${camId}/ring/webrtc/keepalive`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: this._ringWebrtcSessionId })
+                });
+            } catch (e) {}
+        }, 10000);
+    }
+
+    async _stopRingWidgetWebrtc(camId) {
+        const conn = this._ringWidgetConnections[camId];
+        if (!conn) return;
+
+        if (conn.keepaliveTimer) {
+            clearInterval(conn.keepaliveTimer);
+        }
+        if (conn.pc) {
+            try { conn.pc.close(); } catch (e) {}
+        }
+        if (conn.sessionId) {
+            try {
+                await fetch(`/api/cameras/${camId}/ring/webrtc/stop`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: conn.sessionId })
+                });
+            } catch (e) {}
+        }
+
+        delete this._ringWidgetConnections[camId];
+    }
+
+    async _startRingWidgetWebrtc(camId, videoEl, fallbackImageEl = null) {
+        await this._stopRingWidgetWebrtc(camId);
+
+        const pc = new RTCPeerConnection();
+        const conn = { pc, sessionId: null, keepaliveTimer: null };
+        this._ringWidgetConnections[camId] = conn;
+
+        pc.ontrack = (event) => {
+            if (event.streams && event.streams[0]) {
+                videoEl.srcObject = event.streams[0];
+                videoEl.play().catch(() => {});
+                videoEl.style.display = '';
+                if (fallbackImageEl) fallbackImageEl.style.display = 'none';
+            }
+        };
+
+        pc.onicecandidate = async (event) => {
+            if (!event.candidate || !conn.sessionId) return;
+            try {
+                await fetch(`/api/cameras/${camId}/ring/webrtc/candidate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: conn.sessionId,
+                        candidate: event.candidate.candidate,
+                        sdpMLineIndex: event.candidate.sdpMLineIndex
+                    })
+                });
+            } catch (e) {}
+        };
+
+        pc.addTransceiver('video', { direction: 'recvonly' });
+        pc.addTransceiver('audio', { direction: 'recvonly' });
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        const resp = await fetch(`/api/cameras/${camId}/ring/webrtc/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ offer: offer.sdp, keep_alive_timeout: 45 })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            throw new Error(data.error || 'Ring Widget WebRTC Start fehlgeschlagen');
+        }
+
+        conn.sessionId = data.session_id;
+        await pc.setRemoteDescription({ type: 'answer', sdp: data.answer });
+
+        conn.keepaliveTimer = setInterval(async () => {
+            if (!conn.sessionId) return;
+            try {
+                await fetch(`/api/cameras/${camId}/ring/webrtc/keepalive`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: conn.sessionId })
+                });
+            } catch (e) {}
+        }, 10000);
+    }
+
+    // ========================================================================
+    // ON-DEMAND STREAM CLEANUP
+    // ========================================================================
+
+    async _cleanupCameraStreams() {
+        console.log('Stoppe Camera-Widget-Streams...');
+        this._clearRtspSnapshotTimers();
+        this._clearRingSnapshotTimers();
+        const ringCamIds = Object.keys(this._ringWidgetConnections);
+        for (const camId of ringCamIds) {
+            await this._stopRingWidgetWebrtc(camId);
+        }
+        // HLS-Instanzen zerstören
+        for (const [camId, hls] of Object.entries(this._hlsInstances)) {
+            try {
+                hls.destroy();
+            } catch (e) {}
+        }
+        this._hlsInstances = {};
+
+        // Streams auf Server stoppen
+        for (const camId of this._activeCameraStreams) {
+            try {
+                await fetch(`/api/cameras/${camId}/stop`, { method: 'POST' });
+                console.log(`Stream gestoppt: ${camId}`);
+            } catch (e) {
+                console.error(`Stream-Stop fehlgeschlagen: ${camId}`, e);
+            }
+        }
+        this._activeCameraStreams = [];
+    }
+
+    async _cleanupCameraWallStreams() {
+        console.log('Stoppe Camera-Wall-Streams...');
+        this._clearRtspSnapshotTimers();
+        this._clearRingSnapshotTimers();
+        const ringCamIds = Object.keys(this._ringWidgetConnections);
+        for (const camId of ringCamIds) {
+            await this._stopRingWidgetWebrtc(camId);
+        }
+        for (const [camId, hls] of Object.entries(this._cameraWallHls)) {
+            try {
+                hls.destroy();
+            } catch (e) {}
+        }
+        this._cameraWallHls = {};
+
+        for (const camId of this._cameraWallStreams) {
+            try {
+                await fetch(`/api/cameras/${camId}/stop`, { method: 'POST' });
+            } catch (e) {}
+        }
+        this._cameraWallStreams = [];
+    }
+
+    // ========================================================================
+    // FULLSCREEN OVERLAY
+    // ========================================================================
+
+    _loadFullscreenHls(videoEl, camId, attempt = 0, customHlsUrl = null) {
+        const maxAttempts = 5;
+        const hlsUrl = customHlsUrl || `/static/hls/${camId}.m3u8`;
+
+        // Erste Wartezeit: 3s, danach 2s bei Retries
+        const delay = attempt === 0 ? 3000 : 2000;
+
+        setTimeout(() => {
+            // Abbruch wenn Fullscreen schon geschlossen wurde
+            if (this._fullscreenCamId !== camId) return;
+
+            if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                // Alte Instanz aufraeumen
+                if (this._fullscreenHls) {
+                    try { this._fullscreenHls.destroy(); } catch (e) {}
+                    this._fullscreenHls = null;
+                }
+
+                const hls = new Hls({
+                    liveDurationInfinity: true,
+                    enableWorker: true,
+                    lowLatencyMode: true
+                });
+                hls.loadSource(hlsUrl);
+                hls.attachMedia(videoEl);
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    videoEl.play().catch(() => {});
+                });
+                hls.on(Hls.Events.ERROR, (event, data) => {
+                    if (data.fatal && attempt < maxAttempts) {
+                        console.warn(`Fullscreen HLS Fehler (Versuch ${attempt + 1}/${maxAttempts}), retry...`);
+                        hls.destroy();
+                        this._fullscreenHls = null;
+                        this._loadFullscreenHls(videoEl, camId, attempt + 1, customHlsUrl);
+                    }
+                });
+                this._fullscreenHls = hls;
+            } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+                videoEl.src = hlsUrl;
+                videoEl.play().catch(() => {});
+            }
+        }, delay);
+    }
+
+    async openCameraFullscreen(camId, camName, camType) {
+        const overlay = document.getElementById('camera-fullscreen-overlay');
+        const videoEl = document.getElementById('fullscreen-video');
+        const imageEl = document.getElementById('fullscreen-image');
+        const nameEl = document.getElementById('fullscreen-cam-name');
+        const closeBtn = document.getElementById('fullscreen-close');
+
+        if (!overlay || !videoEl || !imageEl) return;
+
+        this._fullscreenCamId = camId;
+        nameEl.textContent = camName || camId;
+        overlay.classList.remove('hidden');
+        videoEl.style.display = 'none';
+        imageEl.style.display = 'none';
+        if (this._fullscreenSnapshotTimer) {
+            clearInterval(this._fullscreenSnapshotTimer);
+            this._fullscreenSnapshotTimer = null;
+        }
+
+        if (camType === 'rtsp') {
+            videoEl.style.display = '';
+            // Widget-HLS-Instanz zerstoeren (verhindert Konflikte)
+            if (this._hlsInstances[camId]) {
+                try { this._hlsInstances[camId].destroy(); } catch (e) {}
+                delete this._hlsInstances[camId];
+            }
+
+            // Stoppe Widget-Stream, starte Full-Res
+            try {
+                await fetch(`/api/cameras/${camId}/stop`, { method: 'POST' });
+            } catch (e) {}
+            // Warte kurz
+            await new Promise(r => setTimeout(r, 1000));
+            // Starte MainStream ohne resolution = copy passthrough
+            try {
+                await fetch(`/api/cameras/${camId}/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+            } catch (e) {}
+
+            // Warte auf HLS-Segmente, dann lade mit Retry-Logik
+            this._loadFullscreenHls(videoEl, camId);
+        } else if (camType === 'ring') {
+            let ringStatus = { webrtc_available: false };
+            try {
+                const statusResp = await fetch('/api/ring/status');
+                if (statusResp.ok) {
+                    ringStatus = await statusResp.json();
+                }
+            } catch (e) {}
+
+            // Prefer backend bridge stream for fullscreen quality/latency.
+            try {
+                const bridgeResp = await fetch(`/api/cameras/${camId}/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const bridgeData = await bridgeResp.json();
+                if (bridgeResp.ok && bridgeData.success && bridgeData.hls_url) {
+                    imageEl.style.display = 'none';
+                    videoEl.style.display = '';
+                    this._loadFullscreenHls(videoEl, camId, 0, bridgeData.hls_url);
+                    return;
+                }
+            } catch (e) {
+                console.warn('Ring bridge start fehlgeschlagen, nutze Snapshot-Fallback:', e);
+            }
+
+            const preferWebrtc = !!ringStatus.webrtc_available && (localStorage.getItem('ringWebrtcPreferred') || '1') === '1';
+            if (preferWebrtc && window.RTCPeerConnection) {
+                videoEl.style.display = '';
+                try {
+                    await this._startRingWebrtc(camId, videoEl);
+                } catch (e) {
+                    console.warn('Ring WebRTC fehlgeschlagen, nutze Snapshot-Fallback:', e);
+                    videoEl.style.display = 'none';
+                    imageEl.style.display = '';
+                    await this._loadRingSnapshot(camId, 'fullscreen-image', 4500, 2, 1);
+                    this._fullscreenSnapshotTimer = setInterval(() => {
+                        this._loadRingSnapshot(camId, 'fullscreen-image', 4500, 2, 1);
+                    }, 2500);
+                }
+            } else {
+                imageEl.style.display = '';
+                await this._loadRingSnapshot(camId, 'fullscreen-image', 4500, 2, 1);
+                this._fullscreenSnapshotTimer = setInterval(() => {
+                    this._loadRingSnapshot(camId, 'fullscreen-image', 4500, 2, 1);
+                }, 2500);
+            }
+        } else {
+            imageEl.style.display = '';
+            const widgetImage = document.getElementById(`cam-image-${camId}`);
+            imageEl.src = widgetImage ? widgetImage.src : '';
+        }
+
+        // PTZ Controls initialisieren
+        this._initPTZControls(camId);
+
+        // Close-Button
+        const closeHandler = () => {
+            this.closeCameraFullscreen();
+            closeBtn.removeEventListener('click', closeHandler);
+        };
+        closeBtn.addEventListener('click', closeHandler);
+
+        // ESC zum Schliessen
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                this.closeCameraFullscreen();
+                document.removeEventListener('keydown', escHandler);
+            }
+        };
+        document.addEventListener('keydown', escHandler);
+    }
+
+    async closeCameraFullscreen() {
+        const overlay = document.getElementById('camera-fullscreen-overlay');
+        const videoEl = document.getElementById('fullscreen-video');
+        const imageEl = document.getElementById('fullscreen-image');
+
+        // PTZ Controls ausblenden und Listener entfernen
+        this._cleanupPTZControls();
+
+        if (overlay) overlay.classList.add('hidden');
+
+        const camId = this._fullscreenCamId;
+        await this._stopRingWebrtc(camId);
+
+        // Fullscreen-HLS zerstören
+        if (this._fullscreenHls) {
+            this._fullscreenHls.destroy();
+            this._fullscreenHls = null;
+        }
+        if (videoEl) videoEl.src = '';
+        if (imageEl) imageEl.src = '';
+        if (imageEl) imageEl.style.display = 'none';
+        if (videoEl) videoEl.style.display = '';
+        if (this._fullscreenSnapshotTimer) {
+            clearInterval(this._fullscreenSnapshotTimer);
+            this._fullscreenSnapshotTimer = null;
+        }
+
+        // Full-Res Stream stoppen und Widget-Stream wieder starten
+        if (camId) {
+            let camType = null;
+            const camCard = document.querySelector(`.camera-card[data-cam-id="${camId}"]`);
+            if (camCard) {
+                camType = camCard.getAttribute('data-cam-type');
+            }
+            if (camType === 'ring') {
+                try {
+                    await fetch(`/api/cameras/${camId}/stop`, { method: 'POST' });
+                } catch (e) {}
+                this._fullscreenCamId = null;
+                return;
+            }
+            if (camType !== 'rtsp') {
+                this._fullscreenCamId = null;
+                return;
+            }
+
+            try {
+                await fetch(`/api/cameras/${camId}/stop`, { method: 'POST' });
+            } catch (e) {}
+
+            // Widget-Stream wieder starten (SubStream)
+            await new Promise(r => setTimeout(r, 1000));
+            try {
+                await fetch(`/api/cameras/${camId}/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ use_substream: true })
+                });
+            } catch (e) {}
+
+            // HLS-Player im Widget neu laden
+            setTimeout(() => {
+                const widgetVideo = document.getElementById(`hls-video-${camId}`);
+                if (widgetVideo) {
+                    const hlsUrl = `/static/hls/${camId}.m3u8`;
+                    this._initHlsPlayer(widgetVideo, hlsUrl, camId);
+                }
+            }, 3000);
+
+            this._fullscreenCamId = null;
+        }
+    }
+
+    // ========================================================================
+    // GRID-LAYOUT TOGGLE
+    // ========================================================================
+
+    _applyGridLayout() {
+        const cols = localStorage.getItem('cameraGridCols') || '2';
+        const grid = document.getElementById('cameras-grid');
+        if (!grid) return;
+
+        // Entferne alte Grid-Klassen
+        grid.className = grid.className.replace(/grid-cols-\d+|md:grid-cols-\d+|lg:grid-cols-\d+/g, '').trim();
+
+        switch (cols) {
+            case '1':
+                grid.classList.add('grid-cols-1');
+                break;
+            case '2':
+                grid.classList.add('grid-cols-1', 'md:grid-cols-2');
+                break;
+            case '3':
+                grid.classList.add('grid-cols-1', 'md:grid-cols-2', 'lg:grid-cols-3');
+                break;
+        }
+        // Ensure base grid class
+        if (!grid.classList.contains('grid')) grid.classList.add('grid');
+        if (!grid.classList.contains('gap-4')) grid.classList.add('gap-4');
+
+        // Buttons aktualisieren
+        document.querySelectorAll('.grid-layout-btn').forEach(btn => {
+            const btnCols = btn.getAttribute('data-grid-cols');
+            if (btnCols === cols) {
+                btn.classList.add('bg-blue-500', 'text-white', 'border-blue-500');
+                btn.classList.remove('text-gray-700', 'dark:text-gray-300');
+            } else {
+                btn.classList.remove('bg-blue-500', 'text-white', 'border-blue-500');
+            }
+        });
+    }
+
+    _setupGridLayoutToggle() {
+        document.querySelectorAll('.grid-layout-btn').forEach(btn => {
+            if (btn.hasAttribute('data-listener-attached')) return;
+            btn.addEventListener('click', () => {
+                const cols = btn.getAttribute('data-grid-cols');
+                localStorage.setItem('cameraGridCols', cols);
+                this._applyGridLayout();
+            });
+            btn.setAttribute('data-listener-attached', 'true');
+        });
+    }
+
+    // ========================================================================
+    // CAMERA WALL PAGE
+    // ========================================================================
+
+    async loadCameraWallPage() {
+        console.log('Lade Kamera-Wand...');
+
+        let cameras = {};
+        try {
+            const resp = await fetch('/api/cameras');
+            const data = await resp.json();
+            cameras = data.cameras || {};
+        } catch (e) {
+            console.error('Fehler beim Laden der Kameras:', e);
+            return;
+        }
+
+        const camIds = Object.keys(cameras);
+
+        // Kamera-Auswahl Checkboxes
+        const checkboxContainer = document.getElementById('camera-wall-checkboxes');
+        if (checkboxContainer) {
+            if (camIds.length === 0) {
+                checkboxContainer.innerHTML = '<p class="text-sm text-gray-500">Keine Kameras konfiguriert</p>';
+            } else {
+                let html = '';
+                camIds.forEach(camId => {
+                    const cam = cameras[camId];
+                    html += `
+                        <label class="flex items-center space-x-2 px-3 py-2 bg-gray-50 dark:bg-gray-700 rounded-lg cursor-pointer">
+                            <input type="checkbox" class="wall-cam-checkbox rounded" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="${cam.type || 'rtsp'}" data-cam-url="${cam.url || ''}">
+                            <span class="text-sm text-gray-900 dark:text-white">${cam.name}</span>
+                        </label>
+                    `;
+                });
+                checkboxContainer.innerHTML = html;
+
+                // Checkbox Event-Listener
+                document.querySelectorAll('.wall-cam-checkbox').forEach(cb => {
+                    cb.addEventListener('change', () => {
+                        this._updateCameraWall();
+                    });
+                });
+            }
+        }
+
+        // Layout-Buttons
+        this._setupWallLayoutToggle();
+
+        // Vollbild-Button
+        const fsBtn = document.getElementById('wall-fullscreen-btn');
+        if (fsBtn && !fsBtn.hasAttribute('data-listener-attached')) {
+            fsBtn.addEventListener('click', () => {
+                const wallGrid = document.getElementById('camera-wall-grid');
+                if (wallGrid && wallGrid.requestFullscreen) {
+                    wallGrid.requestFullscreen().catch(() => {
+                        // Fallback: ganzes Dokument
+                        document.documentElement.requestFullscreen().catch(() => {});
+                    });
+                }
+            });
+            fsBtn.setAttribute('data-listener-attached', 'true');
+        }
+    }
+
+    _setupWallLayoutToggle() {
+        document.querySelectorAll('.wall-layout-btn').forEach(btn => {
+            if (btn.hasAttribute('data-listener-attached')) return;
+            btn.addEventListener('click', () => {
+                const layout = btn.getAttribute('data-wall-layout');
+                this._applyWallLayout(layout);
+
+                // Buttons aktualisieren
+                document.querySelectorAll('.wall-layout-btn').forEach(b => {
+                    b.classList.remove('bg-blue-500', 'text-white', 'border-blue-500');
+                });
+                btn.classList.add('bg-blue-500', 'text-white', 'border-blue-500');
+            });
+            btn.setAttribute('data-listener-attached', 'true');
+        });
+    }
+
+    _applyWallLayout(cols) {
+        const grid = document.getElementById('camera-wall-grid');
+        if (!grid) return;
+
+        grid.className = grid.className.replace(/grid-cols-\d+|md:grid-cols-\d+|lg:grid-cols-\d+/g, '').trim();
+
+        switch (cols) {
+            case '1':
+                grid.classList.add('grid-cols-1');
+                break;
+            case '2':
+                grid.classList.add('grid-cols-1', 'md:grid-cols-2');
+                break;
+            case '3':
+                grid.classList.add('grid-cols-1', 'md:grid-cols-2', 'lg:grid-cols-3');
+                break;
+        }
+        if (!grid.classList.contains('grid')) grid.classList.add('grid');
+        if (!grid.classList.contains('gap-4')) grid.classList.add('gap-4');
+    }
+
+    async _updateCameraWall() {
+        const grid = document.getElementById('camera-wall-grid');
+        if (!grid) return;
+
+        // Cleanup alte Streams
+        await this._cleanupCameraWallStreams();
+
+        // Ausgewählte Kameras ermitteln
+        const selected = [];
+        document.querySelectorAll('.wall-cam-checkbox:checked').forEach(cb => {
+            selected.push({
+                id: cb.getAttribute('data-cam-id'),
+                name: cb.getAttribute('data-cam-name'),
+                type: cb.getAttribute('data-cam-type'),
+                url: cb.getAttribute('data-cam-url') || ''
+            });
+        });
+
+        if (selected.length === 0) {
+            grid.innerHTML = '<p class="text-gray-500">Kameras auswählen um sie hier anzuzeigen...</p>';
+            return;
+        }
+
+        // Starte Streams und rendere Grid
+        let html = '';
+        for (const cam of selected) {
+            if (cam.type === 'rtsp') {
+                try {
+                    await fetch(`/api/cameras/${cam.id}/start`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ use_substream: true })
+                    });
+                    this._cameraWallStreams.push(cam.id);
+                } catch (e) {}
+            }
+
+            if (cam.type === 'rtsp') {
+                html += `
+                    <div class="bg-black rounded-lg overflow-hidden relative">
+                        <div class="aspect-video">
+                            <video id="wall-video-${cam.id}" class="w-full h-full object-contain" muted autoplay playsinline></video>
+                            <div id="wall-loading-${cam.id}" class="absolute inset-0 flex items-center justify-center text-white">
+                                <p class="text-sm">Lade ${cam.name}...</p>
+                            </div>
+                        </div>
+                        <div class="absolute bottom-2 left-2 text-white text-sm font-semibold bg-black bg-opacity-50 px-2 py-1 rounded">${cam.name}</div>
+                    </div>
+                `;
+            } else if (cam.type === 'ring') {
+                html += `
+                    <div class="bg-black rounded-lg overflow-hidden relative">
+                        <div class="aspect-video">
+                            <img id="wall-image-${cam.id}" src="/api/cameras/${cam.id}/snapshot?ts=${Date.now()}" class="w-full h-full object-contain" alt="${cam.name}">
+                        </div>
+                        <div class="absolute bottom-2 left-2 text-white text-sm font-semibold bg-black bg-opacity-50 px-2 py-1 rounded">${cam.name}</div>
+                    </div>
+                `;
+            } else {
+                html += `
+                    <div class="bg-black rounded-lg overflow-hidden relative">
+                        <div class="aspect-video">
+                            <img id="wall-image-${cam.id}" src="${cam.url}" class="w-full h-full object-contain" alt="${cam.name}">
+                        </div>
+                        <div class="absolute bottom-2 left-2 text-white text-sm font-semibold bg-black bg-opacity-50 px-2 py-1 rounded">${cam.name}</div>
+                    </div>
+                `;
+            }
+        }
+        grid.innerHTML = html;
+
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+
+        // HLS Player nach Verzögerung
+        setTimeout(() => {
+            for (const cam of selected) {
+                if (cam.type === 'rtsp') {
+                    const videoEl = document.getElementById(`wall-video-${cam.id}`);
+                    if (videoEl) {
+                        const hlsUrl = `/static/hls/${cam.id}.m3u8`;
+                        const hls = this._initWallHlsPlayer(videoEl, hlsUrl, cam.id);
+                        if (hls) this._cameraWallHls[cam.id] = hls;
+                    }
+                } else if (cam.type === 'ring') {
+                    this._startRingSnapshotRefresh(cam.id, `wall-image-${cam.id}`, 5000);
+                }
+            }
+        }, 3000);
+    }
+
+    _initWallHlsPlayer(videoEl, hlsUrl, camId) {
+        if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+            const hls = new Hls({
+                liveDurationInfinity: true,
+                enableWorker: true,
+                lowLatencyMode: true
+            });
+            hls.loadSource(hlsUrl);
+            hls.attachMedia(videoEl);
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                videoEl.play().catch(() => {});
+                const loading = document.getElementById(`wall-loading-${camId}`);
+                if (loading) loading.style.display = 'none';
+            });
+            hls.on(Hls.Events.ERROR, (event, data) => {
+                if (data.fatal) {
+                    setTimeout(() => {
+                        hls.destroy();
+                        delete this._cameraWallHls[camId];
+                        this._initWallHlsPlayer(videoEl, hlsUrl, camId);
+                    }, 3000);
+                }
+            });
+            return hls;
+        }
+        return null;
+    }
+
+    async removeCamera(cameraId) {
+        try {
+            await fetch(`/api/cameras/${cameraId}`, { method: 'DELETE' });
+            console.log(`Kamera entfernt: ${cameraId}`);
+        } catch (e) {
+            console.error('Fehler beim Entfernen der Kamera:', e);
+        }
         this.loadSavedCameras();
     }
 
@@ -3180,6 +4937,433 @@ class SmartHomeApp {
         } catch (error) {
             console.error(`❌ Toggle Error: ${widgetId}`, error);
         }
+    }
+
+    // ========================================================================
+    // PTZ STEUERUNG
+    // ========================================================================
+
+    async _initPTZControls(camId) {
+        const ptzControls = document.getElementById('ptz-controls');
+        if (!ptzControls) return;
+
+        // PTZ-Status von Kamera abfragen
+        try {
+            const resp = await fetch(`/api/cameras/${camId}/ptz/status`);
+            const data = await resp.json();
+
+            if (!data.has_ptz) {
+                ptzControls.classList.add('hidden');
+                return;
+            }
+
+            // PTZ verfuegbar -> Controls anzeigen
+            ptzControls.classList.remove('hidden');
+            this._ptzCamId = camId;
+
+            // Presets laden
+            this._loadPTZPresets(camId);
+
+            // Event-Listener fuer D-Pad Buttons
+            this._setupPTZButtonListeners();
+
+        } catch (e) {
+            console.warn('PTZ Status-Abfrage fehlgeschlagen:', e);
+            ptzControls.classList.add('hidden');
+        }
+    }
+
+    _setupPTZButtonListeners() {
+        // Alte Listener entfernen (falls vorhanden)
+        this._cleanupPTZListeners();
+
+        this._ptzListeners = [];
+
+        const speedMap = {
+            'up':       { pan: 0.0, tilt: 0.18, zoom: 0.0 },
+            'down':     { pan: 0.0, tilt: -0.18, zoom: 0.0 },
+            'left':     { pan: -0.18, tilt: 0.0, zoom: 0.0 },
+            'right':    { pan: 0.18, tilt: 0.0, zoom: 0.0 },
+            'zoom-in':  { pan: 0.0, tilt: 0.0, zoom: 0.16 },
+            'zoom-out': { pan: 0.0, tilt: 0.0, zoom: -0.16 }
+        };
+
+        // D-Pad + Zoom Buttons: mousedown/touchstart -> move, mouseup/touchend -> stop
+        document.querySelectorAll('.ptz-btn[data-ptz]').forEach(btn => {
+            const action = btn.getAttribute('data-ptz');
+
+            if (action === 'home') {
+                // Home-Button: einfacher Click
+                const handler = (e) => {
+                    e.preventDefault();
+                    this._ptzHome();
+                };
+                btn.addEventListener('click', handler);
+                this._ptzListeners.push({ el: btn, event: 'click', handler });
+                return;
+            }
+
+            const speed = speedMap[action];
+            if (!speed) return;
+
+            // Move starten
+            const startHandler = (e) => {
+                e.preventDefault();
+                this._ptzMove(speed.pan, speed.tilt, speed.zoom);
+            };
+            // Move stoppen
+            const stopHandler = (e) => {
+                e.preventDefault();
+                this._ptzStop();
+            };
+
+            // Mouse events
+            btn.addEventListener('mousedown', startHandler);
+            btn.addEventListener('mouseup', stopHandler);
+            btn.addEventListener('mouseleave', stopHandler);
+            this._ptzListeners.push({ el: btn, event: 'mousedown', handler: startHandler });
+            this._ptzListeners.push({ el: btn, event: 'mouseup', handler: stopHandler });
+            this._ptzListeners.push({ el: btn, event: 'mouseleave', handler: stopHandler });
+
+            // Touch events (Mobile)
+            btn.addEventListener('touchstart', startHandler, { passive: false });
+            btn.addEventListener('touchend', stopHandler, { passive: false });
+            btn.addEventListener('touchcancel', stopHandler, { passive: false });
+            this._ptzListeners.push({ el: btn, event: 'touchstart', handler: startHandler });
+            this._ptzListeners.push({ el: btn, event: 'touchend', handler: stopHandler });
+            this._ptzListeners.push({ el: btn, event: 'touchcancel', handler: stopHandler });
+        });
+
+        // Preset Go-Button
+        const goBtn = document.getElementById('ptz-preset-go');
+        if (goBtn) {
+            const goHandler = () => this._ptzGotoPreset();
+            goBtn.addEventListener('click', goHandler);
+            this._ptzListeners.push({ el: goBtn, event: 'click', handler: goHandler });
+        }
+
+        // Preset Save-Button
+        const saveBtn = document.getElementById('ptz-preset-save');
+        if (saveBtn) {
+            const saveHandler = () => this._ptzSavePreset();
+            saveBtn.addEventListener('click', saveHandler);
+            this._ptzListeners.push({ el: saveBtn, event: 'click', handler: saveHandler });
+        }
+    }
+
+    _cleanupPTZListeners() {
+        if (this._ptzListeners) {
+            this._ptzListeners.forEach(({ el, event, handler }) => {
+                el.removeEventListener(event, handler);
+            });
+            this._ptzListeners = [];
+        }
+    }
+
+    _cleanupPTZControls() {
+        this._cleanupPTZListeners();
+        const ptzControls = document.getElementById('ptz-controls');
+        if (ptzControls) ptzControls.classList.add('hidden');
+        this._ptzCamId = null;
+    }
+
+    async _ptzMove(pan, tilt, zoom) {
+        if (!this._ptzCamId) return;
+        try {
+            await fetch(`/api/cameras/${this._ptzCamId}/ptz/move`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pan, tilt, zoom, timeout_ms: 250 })
+            });
+        } catch (e) {
+            console.error('PTZ move Fehler:', e);
+        }
+    }
+
+    async _ptzStop() {
+        if (!this._ptzCamId) return;
+        try {
+            await fetch(`/api/cameras/${this._ptzCamId}/ptz/stop`, {
+                method: 'POST'
+            });
+        } catch (e) {
+            console.error('PTZ stop Fehler:', e);
+        }
+    }
+
+    async _ptzHome() {
+        if (!this._ptzCamId) return;
+        try {
+            await fetch(`/api/cameras/${this._ptzCamId}/ptz/home`, {
+                method: 'POST'
+            });
+        } catch (e) {
+            console.error('PTZ home Fehler:', e);
+        }
+    }
+
+    async _loadPTZPresets(camId) {
+        const select = document.getElementById('ptz-preset-select');
+        if (!select) return;
+
+        select.innerHTML = '<option value="">Presets...</option>';
+
+        try {
+            const resp = await fetch(`/api/cameras/${camId}/ptz/presets`);
+            const data = await resp.json();
+
+            if (data.presets && data.presets.length > 0) {
+                data.presets.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.token;
+                    opt.textContent = p.name;
+                    select.appendChild(opt);
+                });
+            }
+        } catch (e) {
+            console.warn('PTZ Presets laden fehlgeschlagen:', e);
+        }
+    }
+
+    async _ptzGotoPreset() {
+        if (!this._ptzCamId) return;
+        const select = document.getElementById('ptz-preset-select');
+        const token = select ? select.value : '';
+        if (!token) return;
+
+        try {
+            await fetch(`/api/cameras/${this._ptzCamId}/ptz/preset`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token })
+            });
+        } catch (e) {
+            console.error('PTZ goto preset Fehler:', e);
+        }
+    }
+
+    async _ptzSavePreset() {
+        if (!this._ptzCamId) return;
+        const name = prompt('Preset-Name:');
+        if (!name) return;
+
+        try {
+            const resp = await fetch(`/api/cameras/${this._ptzCamId}/ptz/preset/save`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                // Presets neu laden
+                this._loadPTZPresets(this._ptzCamId);
+            }
+        } catch (e) {
+            console.error('PTZ save preset Fehler:', e);
+        }
+    }
+
+    // ========================================================================
+    // WIDGET PTZ (Inline-Controls in der Kamera-Card)
+    // ========================================================================
+
+    async _checkWidgetPTZ(camId) {
+        // Prueft ob Kamera PTZ hat und blendet Toggle-Button ein
+        try {
+            const resp = await fetch(`/api/cameras/${camId}/ptz/status`);
+            const data = await resp.json();
+            if (data.has_ptz) {
+                const btn = document.querySelector(`.cam-ptz-toggle-btn[data-cam-id="${camId}"]`);
+                if (btn) btn.style.display = '';
+            }
+        } catch (e) {
+            // Kein PTZ oder ONVIF nicht konfiguriert - Button bleibt hidden
+        }
+    }
+
+    _toggleWidgetPTZ(camId) {
+        const panel = document.getElementById(`widget-ptz-${camId}`);
+        if (!panel) return;
+
+        if (panel.classList.contains('hidden')) {
+            // Panel oeffnen und Controls rendern
+            panel.classList.remove('hidden');
+            this._renderWidgetPTZ(camId, panel);
+        } else {
+            // Panel schliessen und Listener aufraeumen
+            panel.classList.add('hidden');
+            panel.innerHTML = '';
+            this._cleanupWidgetPTZListeners(camId);
+        }
+
+        // Toggle-Button Styling
+        const btn = document.querySelector(`.cam-ptz-toggle-btn[data-cam-id="${camId}"]`);
+        if (btn) {
+            if (panel.classList.contains('hidden')) {
+                btn.classList.remove('bg-red-600', 'hover:bg-red-500');
+                btn.classList.add('bg-blue-600', 'hover:bg-blue-500');
+                btn.querySelector('span').textContent = 'PTZ';
+            } else {
+                btn.classList.remove('bg-blue-600', 'hover:bg-blue-500');
+                btn.classList.add('bg-red-600', 'hover:bg-red-500');
+                btn.querySelector('span').textContent = 'PTZ aus';
+            }
+        }
+    }
+
+    _renderWidgetPTZ(camId, panel) {
+        panel.innerHTML = `
+            <div class="flex items-start space-x-3">
+                <!-- D-Pad -->
+                <div class="grid grid-cols-3 gap-0.5" style="width:100px;">
+                    <div></div>
+                    <button data-wptz="${camId}" data-dir="up" class="wptz-btn w-8 h-8 bg-gray-300 dark:bg-gray-600 text-gray-800 dark:text-white rounded flex items-center justify-center hover:bg-blue-500 hover:text-white active:bg-blue-600 text-xs font-bold">&#9650;</button>
+                    <div></div>
+                    <button data-wptz="${camId}" data-dir="left" class="wptz-btn w-8 h-8 bg-gray-300 dark:bg-gray-600 text-gray-800 dark:text-white rounded flex items-center justify-center hover:bg-blue-500 hover:text-white active:bg-blue-600 text-xs font-bold">&#9664;</button>
+                    <button data-wptz="${camId}" data-dir="home" class="wptz-btn w-8 h-8 bg-gray-300 dark:bg-gray-600 text-gray-800 dark:text-white rounded flex items-center justify-center hover:bg-blue-500 hover:text-white active:bg-blue-600 text-xs">&#8962;</button>
+                    <button data-wptz="${camId}" data-dir="right" class="wptz-btn w-8 h-8 bg-gray-300 dark:bg-gray-600 text-gray-800 dark:text-white rounded flex items-center justify-center hover:bg-blue-500 hover:text-white active:bg-blue-600 text-xs font-bold">&#9654;</button>
+                    <div></div>
+                    <button data-wptz="${camId}" data-dir="down" class="wptz-btn w-8 h-8 bg-gray-300 dark:bg-gray-600 text-gray-800 dark:text-white rounded flex items-center justify-center hover:bg-blue-500 hover:text-white active:bg-blue-600 text-xs font-bold">&#9660;</button>
+                    <div></div>
+                </div>
+                <!-- Zoom + Presets -->
+                <div class="flex flex-col space-y-1">
+                    <div class="flex space-x-0.5">
+                        <button data-wptz="${camId}" data-dir="zoom-in" class="wptz-btn flex-1 h-8 px-3 bg-gray-300 dark:bg-gray-600 text-gray-800 dark:text-white rounded flex items-center justify-center hover:bg-blue-500 hover:text-white active:bg-blue-600 text-sm font-bold">+</button>
+                        <button data-wptz="${camId}" data-dir="zoom-out" class="wptz-btn flex-1 h-8 px-3 bg-gray-300 dark:bg-gray-600 text-gray-800 dark:text-white rounded flex items-center justify-center hover:bg-blue-500 hover:text-white active:bg-blue-600 text-sm font-bold">&minus;</button>
+                    </div>
+                    <div class="flex space-x-0.5">
+                        <select id="wptz-presets-${camId}" class="flex-1 h-7 text-xs bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded border border-gray-300 dark:border-gray-600 px-1">
+                            <option value="">Presets...</option>
+                        </select>
+                        <button data-wptz-go="${camId}" class="h-7 px-2 bg-gray-300 dark:bg-gray-600 text-gray-800 dark:text-white rounded text-xs hover:bg-blue-500 hover:text-white">Go</button>
+                        <button data-wptz-save="${camId}" class="h-7 px-2 bg-gray-300 dark:bg-gray-600 text-gray-800 dark:text-white rounded text-xs hover:bg-green-500 hover:text-white">Save</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Presets laden
+        this._loadWidgetPTZPresets(camId);
+
+        // Event-Listener binden
+        this._setupWidgetPTZListeners(camId);
+    }
+
+    _setupWidgetPTZListeners(camId) {
+        if (!this._widgetPtzListeners) this._widgetPtzListeners = {};
+        this._widgetPtzListeners[camId] = [];
+
+        const speedMap = {
+            'up':       { pan: 0.0, tilt: 0.18, zoom: 0.0 },
+            'down':     { pan: 0.0, tilt: -0.18, zoom: 0.0 },
+            'left':     { pan: -0.18, tilt: 0.0, zoom: 0.0 },
+            'right':    { pan: 0.18, tilt: 0.0, zoom: 0.0 },
+            'zoom-in':  { pan: 0.0, tilt: 0.0, zoom: 0.16 },
+            'zoom-out': { pan: 0.0, tilt: 0.0, zoom: -0.16 }
+        };
+
+        const addListener = (el, event, handler, opts) => {
+            el.addEventListener(event, handler, opts);
+            this._widgetPtzListeners[camId].push({ el, event, handler });
+        };
+
+        document.querySelectorAll(`[data-wptz="${camId}"]`).forEach(btn => {
+            const dir = btn.getAttribute('data-dir');
+
+            if (dir === 'home') {
+                addListener(btn, 'click', (e) => {
+                    e.preventDefault();
+                    fetch(`/api/cameras/${camId}/ptz/home`, { method: 'POST' }).catch(() => {});
+                });
+                return;
+            }
+
+            const speed = speedMap[dir];
+            if (!speed) return;
+
+            const startMove = (e) => {
+                e.preventDefault();
+                fetch(`/api/cameras/${camId}/ptz/move`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...speed, timeout_ms: 250 })
+                }).catch(() => {});
+            };
+            const stopMove = (e) => {
+                e.preventDefault();
+                fetch(`/api/cameras/${camId}/ptz/stop`, { method: 'POST' }).catch(() => {});
+            };
+
+            addListener(btn, 'mousedown', startMove);
+            addListener(btn, 'mouseup', stopMove);
+            addListener(btn, 'mouseleave', stopMove);
+            addListener(btn, 'touchstart', startMove, { passive: false });
+            addListener(btn, 'touchend', stopMove, { passive: false });
+            addListener(btn, 'touchcancel', stopMove, { passive: false });
+        });
+
+        // Go-Button
+        const goBtn = document.querySelector(`[data-wptz-go="${camId}"]`);
+        if (goBtn) {
+            addListener(goBtn, 'click', () => {
+                const select = document.getElementById(`wptz-presets-${camId}`);
+                const token = select ? select.value : '';
+                if (!token) return;
+                fetch(`/api/cameras/${camId}/ptz/preset`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token })
+                }).catch(() => {});
+            });
+        }
+
+        // Save-Button
+        const saveBtn = document.querySelector(`[data-wptz-save="${camId}"]`);
+        if (saveBtn) {
+            addListener(saveBtn, 'click', async () => {
+                const name = prompt('Preset-Name:');
+                if (!name) return;
+                try {
+                    const resp = await fetch(`/api/cameras/${camId}/ptz/preset/save`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name })
+                    });
+                    const data = await resp.json();
+                    if (data.success) {
+                        this._loadWidgetPTZPresets(camId);
+                    }
+                } catch (e) {}
+            });
+        }
+    }
+
+    _cleanupWidgetPTZListeners(camId) {
+        if (this._widgetPtzListeners && this._widgetPtzListeners[camId]) {
+            this._widgetPtzListeners[camId].forEach(({ el, event, handler }) => {
+                el.removeEventListener(event, handler);
+            });
+            delete this._widgetPtzListeners[camId];
+        }
+    }
+
+    async _loadWidgetPTZPresets(camId) {
+        const select = document.getElementById(`wptz-presets-${camId}`);
+        if (!select) return;
+
+        try {
+            const resp = await fetch(`/api/cameras/${camId}/ptz/presets`);
+            const data = await resp.json();
+            if (data.presets && data.presets.length > 0) {
+                data.presets.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.token;
+                    opt.textContent = p.name;
+                    select.appendChild(opt);
+                });
+            }
+        } catch (e) {}
     }
 }
 

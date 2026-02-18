@@ -149,23 +149,7 @@ def main():
         print()
         print("Info: PLC-Kommunikation verfügbar (Auto-Connect wird versucht)")
         
-        # Optional: Register provided RTSP camera (if module available)
-        rtsp_integ = app.module_manager.get_module('rtsp_integration')
-        if rtsp_integ:
-            try:
-                cam_id = 'cam_01'
-                cam_url = 'rtsp://192.168.2.89:554/1/h264major'
-                rtsp_integ.add_camera(cam_id, cam_url, name='Camera-01')
-                print(f"  ✓ RTSP-Kamera registriert: {cam_url}")
-            
-                # Test: versuche ein einzelnes Frame zu holen
-                frame = rtsp_integ.get_frame(cam_id)
-                if frame is not None:
-                    print("  ✓ RTSP-Frame erhalten - Stream scheint erreichbar")
-                else:
-                    print("  ⚠️  RTSP-Frame nicht erhalten (Prüfe URL/Netzwerk)")
-            except Exception as e:
-                print(f"  ⚠️  RTSP-Registrierung/Check fehlgeschlagen: {e}")
+    # Kamera-Streams starten on-demand vom Frontend (kein Auto-Start)
 
     print()
     print("=" * 60)
