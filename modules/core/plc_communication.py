@@ -72,7 +72,7 @@ class PLCCommunication(BaseModule):
         config_mgr = app_context.module_manager.get_module('config_manager')
         if config_mgr:
             saved_ams_id = config_mgr.get_config_value('plc_ams_net_id')
-            saved_port = config_mgr.get_config_value('plc_ams_port', 851)
+            saved_port = config_mgr.get_config_value('plc_ams_port', pyads.PORT_TC2PLC1)
             saved_ip = config_mgr.get_config_value('plc_ip_address')
 
             if saved_ams_id:
@@ -100,51 +100,27 @@ class PLCCommunication(BaseModule):
             self.connected = False
             return False
 
-        configured_port = int(self.config['port'])
-        ports_to_try = [configured_port]
-        for candidate in (851, 801):
-            if candidate not in ports_to_try:
-                ports_to_try.append(candidate)
+        try:
+            if self.plc:
+                self.plc.close()
 
-        last_error = None
-        for port in ports_to_try:
-            try:
-                if self.plc:
-                    self.plc.close()
+            self.plc = pyads.Connection(
+                self.config['ams_net_id'],
+                int(self.config['port'])
+            )
+            self.plc.open()
+            self.connected = True
+            self.consecutive_errors = 0
 
-                self.plc = pyads.Connection(
-                    self.config['ams_net_id'],
-                    port
-                )
-                self.plc.open()
-                self.connected = True
-                self.consecutive_errors = 0
-                self.config['port'] = port
-
-                # Persistiere funktionierenden Port, um spätere Neustarts zu beschleunigen.
-                if port != configured_port:
-                    try:
-                        cfg = self.app_context.module_manager.get_module('config_manager') if self.app_context else None
-                        if cfg:
-                            cfg.set_config_value('plc_ams_port', port)
-                            print(f"  ℹ️  PLC-Port automatisch angepasst: {configured_port} -> {port}")
-                    except Exception:
-                        pass
-
-                print(f"  ✓ PLC verbunden: {self.config['ams_net_id']} (Port {port})")
-                return True
-            except Exception as e:
-                last_error = e
-                err_text = str(e).lower()
-                # Bei Port-Fehler weiterprobieren, sonst direkt abbrechen.
-                if ('target port not found' in err_text or 'ads server not started' in err_text or 'adserror: 6' in err_text):
-                    continue
-                break
-
-        print(f"  ✗ PLC-Verbindung fehlgeschlagen: {last_error}")
-        print(f"     AMS NetID: {self.config['ams_net_id']}, Ports versucht: {ports_to_try}")
-        self.connected = False
-        return False
+            print(f"  ✓ PLC verbunden: {self.config['ams_net_id']} (Port {self.config['port']})")
+            return True
+        except Exception as e:
+            print(f"  ✗ PLC-Verbindung fehlgeschlagen: {e}")
+            print(f"     AMS NetID: {self.config['ams_net_id']}, Port: {self.config['port']}")
+            if "Target port not found" in str(e):
+                print("     Hinweis: Bitte TwinCAT-Runtime-Port in Setup korrekt setzen (z. B. TC2=801, TC3=851).")
+            self.connected = False
+            return False
     
     def disconnect(self):
         """Trennt PLC-Verbindung"""
