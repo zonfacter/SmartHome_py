@@ -1396,6 +1396,40 @@ class WebManager(BaseModule):
                 logger.error(f"Fehler beim Laden der Logs: {e}", exc_info=True)
                 return jsonify({'error': str(e)}), 500
 
+        @self.app.route('/api/admin/logs/clear', methods=['POST'])
+        def clear_system_logs():
+            """Löscht alte Logs mit Schutz für Audit-relevante Einträge."""
+            try:
+                from modules.core.database_logger import DatabaseLogger
+
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                db_path = os.path.join(project_root, 'config', 'system_logs.db')
+
+                data = request.get_json(silent=True) or {}
+                keep_count = int(data.get('keep_count', 100))
+                keep_count = max(10, min(keep_count, 5000))
+
+                deleted = DatabaseLogger.clear_logs_with_audit_protection(
+                    db_path=db_path,
+                    keep_count=keep_count
+                )
+
+                logger.warning(
+                    "Admin logs clear executed: deleted=%s keep_count=%s remote=%s",
+                    deleted,
+                    keep_count,
+                    request.remote_addr
+                )
+
+                return jsonify({
+                    'success': True,
+                    'deleted': deleted,
+                    'keep_count': keep_count
+                })
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/admin/logs/clear: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
         @self.app.route('/api/admin/service/info')
         def get_service_info():
             """Service-Informationen"""
