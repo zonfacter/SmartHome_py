@@ -1375,7 +1375,21 @@ class WebManager(BaseModule):
                 db_path = os.path.join(project_root, 'config', 'system_logs.db')
 
                 limit = request.args.get('limit', 100, type=int)
-                logs = DatabaseLogger.get_recent_logs(db_path, limit=limit)
+                limit = max(1, min(limit, 500))
+                filter_mode = str(request.args.get('filter', 'all') or 'all').strip().lower()
+
+                if filter_mode == 'restart':
+                    # Restart-Events sind häufig nur Teilmenge: größeren Suchraum laden
+                    # und anschließend serverseitig filtern.
+                    search_limit = min(limit * 10, 5000)
+                    logs = DatabaseLogger.get_recent_logs(db_path, limit=search_limit)
+                    keywords = ('restart', 'neustart')
+                    logs = [
+                        log for log in logs
+                        if any(k in str(log.get('message', '')).lower() for k in keywords)
+                    ][:limit]
+                else:
+                    logs = DatabaseLogger.get_recent_logs(db_path, limit=limit)
 
                 return jsonify(logs)
             except Exception as e:
