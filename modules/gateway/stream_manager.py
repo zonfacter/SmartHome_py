@@ -218,17 +218,9 @@ class StreamManager(BaseModule):
                 # Kurz prüfen, ob FFmpeg sofort wieder beendet wurde.
                 time.sleep(0.4)
                 if process.poll() is not None:
-                    err_text = ""
-                    try:
-                        _, err = process.communicate(timeout=1)
-                        err_text = (err or b"").decode("utf-8", errors="ignore")
-                    except Exception:
-                        pass
                     del self.streams[camera_id]
                     self._cleanup_hls_files(camera_id)
                     print(f"  ✗ Stream '{camera_id}' direkt beendet")
-                    if err_text:
-                        print(f"    FFmpeg: {err_text.splitlines()[:1][0]}")
                     return False
 
                 return True

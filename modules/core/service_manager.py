@@ -16,6 +16,7 @@ import subprocess
 import platform
 import logging
 import time
+import threading
 from typing import Tuple
 
 
@@ -140,7 +141,6 @@ class ServiceManager:
             return False, f"Control-Script nicht gefunden: {script_path}"
 
         delay = max(0, min(int(delay_seconds), 30))
-        import threading
 
         def delayed_restart():
             logger = logging.getLogger("ServiceManager")
