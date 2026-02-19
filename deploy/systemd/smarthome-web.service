@@ -12,6 +12,22 @@ Group=hytale
 WorkingDirectory=/opt/Smarthome-Web
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-/opt/Smarthome-Web/.env
+# Least-Privilege Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectClock=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/opt/Smarthome-Web/config /opt/Smarthome-Web/plc_data /opt/Smarthome-Web/web/static/hls /var/log
 ExecStartPre=/bin/bash -lc 'pids=$(/usr/bin/pgrep -u hytale -f "[s]tart_web_hmi.py --host 0.0.0.0 --port 5000" || true); [ -n "$pids" ] && /bin/kill $pids || true'
 ExecStart=/opt/Smarthome-Web/venv/bin/python /opt/Smarthome-Web/start_web_hmi.py --host 0.0.0.0 --port 5000
 Restart=always
