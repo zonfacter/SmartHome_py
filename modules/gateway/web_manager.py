@@ -17,10 +17,11 @@ import traceback
 import hmac
 import secrets
 from collections import deque
+from urllib.parse import urlparse
 
 # Flask & SocketIO (lazy import)
 try:
-    from flask import Flask, render_template, jsonify, request, send_file
+    from flask import Flask, render_template, jsonify, request, send_file, has_request_context
     from flask_socketio import SocketIO, emit
     import io
     FLASK_AVAILABLE = True
@@ -231,6 +232,12 @@ class WebManager(BaseModule):
                          template_folder=template_dir,
                          static_folder=static_dir)
 
+        same_site = str(os.getenv('SMARTHOME_SESSION_COOKIE_SAMESITE', 'Lax') or 'Lax').strip().title()
+        if same_site not in ('Lax', 'Strict', 'None'):
+            same_site = 'Lax'
+        secure_cookie = str(os.getenv('SMARTHOME_SESSION_COOKIE_SECURE', 'false')).strip().lower() in (
+            '1', 'true', 'yes', 'on'
+        )
         secret_key = str(os.getenv('SECRET_KEY', '') or '').strip()
         if secret_key:
             self.app.config['SECRET_KEY'] = secret_key
@@ -239,8 +246,17 @@ class WebManager(BaseModule):
             # hartkodierten Shared-Secrets in produktiven Deployments.
             self.app.config['SECRET_KEY'] = secrets.token_hex(32)
             logger.warning("SECRET_KEY nicht gesetzt: ephemerer Key wurde generiert")
+        self.app.config['SESSION_COOKIE_HTTPONLY'] = True
+        self.app.config['SESSION_COOKIE_SAMESITE'] = same_site
+        self.app.config['SESSION_COOKIE_SECURE'] = secure_cookie
+
         # async_mode='threading' ist stabiler für Windows-Hosts
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='threading')
+        cors_allowed_origins = self._get_allowed_origins()
+        self.socketio = SocketIO(
+            self.app,
+            cors_allowed_origins=cors_allowed_origins if cors_allowed_origins else None,
+            async_mode='threading'
+        )
 
         @self.app.after_request
         def _disable_hls_cache(response):
@@ -262,6 +278,21 @@ class WebManager(BaseModule):
             """Schützt kritische Steuer-Endpunkte gegen unautorisierte Aufrufe."""
             if not self._is_protected_control_request():
                 return None
+
+            origin_ok, origin_reason = self._is_control_request_origin_allowed()
+            if not origin_ok:
+                logger.warning(
+                    "Control API origin denied: method=%s path=%s remote=%s reason=%s",
+                    request.method,
+                    request.path,
+                    request.remote_addr,
+                    origin_reason
+                )
+                return jsonify({
+                    'success': False,
+                    'error': 'forbidden_origin',
+                    'message': origin_reason
+                }), 403
 
             allowed, retry_after = self._check_control_rate_limit()
             if not allowed:
@@ -445,6 +476,53 @@ class WebManager(BaseModule):
                     self._control_rate_limit.pop(stale_key, None)
 
         return True, 0
+
+    def _get_allowed_origins(self) -> List[str]:
+        """
+        Ermittelt erlaubte Browser-Origin(s) für Control Requests/Socket.
+        """
+        raw = str(os.getenv('SMARTHOME_ALLOWED_ORIGINS', '') or '').strip()
+        if raw:
+            parts = [p.strip().rstrip('/') for p in raw.split(',') if p.strip()]
+            return sorted(set(parts))
+
+        host = str(request.host_url).strip() if has_request_context() else ''
+        if host:
+            return [host.rstrip('/')]
+        return []
+
+    def _is_control_request_origin_allowed(self):
+        """
+        Browser-Origin Check (CSRF-Härtung) für kritische Endpunkte.
+        """
+        if str(request.method or 'GET').upper() in ('GET', 'HEAD', 'OPTIONS'):
+            return True, ''
+
+        origin = str(request.headers.get('Origin') or '').strip()
+        referer = str(request.headers.get('Referer') or '').strip()
+        if not origin and not referer:
+            # Non-browser Clients (curl/service-to-service) haben oft keinen Origin.
+            return True, ''
+
+        allowed_origins = self._get_allowed_origins()
+        if not allowed_origins:
+            return True, ''
+
+        allowed = set(allowed_origins)
+        if origin:
+            if origin.rstrip('/') in allowed:
+                return True, ''
+            return False, f'Origin nicht erlaubt: {origin}'
+
+        # Fallback: Referer-Origin gegen erlaubte Origins prüfen.
+        try:
+            parsed = urlparse(referer)
+            ref_origin = f"{parsed.scheme}://{parsed.netloc}".rstrip('/')
+        except Exception:
+            ref_origin = ''
+        if ref_origin and ref_origin in allowed:
+            return True, ''
+        return False, f'Referer nicht erlaubt: {referer}'
 
     def _register_routes(self):
         """Registriert API-Routen mit Fehler-Handling für None-Objekte."""
