@@ -1,0 +1,14 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "sentry-dsn"
+description = "Sentry DSN"
+regex = '''SENTRY_DSN\s*=\s*["']?https://[A-Za-z0-9._%-]+@o[0-9]+\.ingest\.[A-Za-z0-9.-]+/[0-9]+'''
+tags = ["key", "sentry", "secret"]
+
+[[rules]]
+id = "sentry-token-prefix"
+description = "Sentry token prefix"
+regex = '''sntrys_[A-Za-z0-9]{20,}|sntryu_[A-Za-z0-9]{20,}|sntryp_[A-Za-z0-9]{20,}'''
+tags = ["key", "sentry", "secret"]
