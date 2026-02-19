@@ -27,10 +27,12 @@ class SmartHomeApp {
 
         // Camera Stream State
         this._hlsInstances = {};
+        this._hlsRetryTimers = {};
         this._fullscreenHls = null;
         this._fullscreenCamId = null;
         this._activeCameraStreams = [];
         this._cameraWallHls = {};
+        this._cameraWallRetryTimers = {};
         this._cameraWallStreams = [];
         this._rtspSnapshotTimers = {};
         this._rtspSnapshotInFlight = {};
@@ -62,6 +64,7 @@ class SmartHomeApp {
 
     init() {
         console.log('🚀 SmartHome App startet...');
+        this.setupApiAuthHeaderInjection();
 
         // Theme anwenden
         this.applyTheme(this.theme);
@@ -82,6 +85,68 @@ class SmartHomeApp {
         this.loadSystemStatus();
 
         console.log('✅ SmartHome App bereit');
+    }
+
+    setupApiAuthHeaderInjection() {
+        if (window.__smarthomeFetchAuthWrapped) {
+            return;
+        }
+
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = async (input, init = {}) => {
+            try {
+                const path = this._extractApiPath(input);
+                if (this._isProtectedApiPath(path)) {
+                    const adminKey =
+                        localStorage.getItem('smarthome_admin_api_key') ||
+                        localStorage.getItem('admin_api_key') ||
+                        '';
+
+                    if (adminKey) {
+                        const headers = new Headers((init && init.headers) || {});
+                        if (!headers.has('X-API-Key') && !headers.has('Authorization')) {
+                            headers.set('X-API-Key', adminKey);
+                        }
+                        init = Object.assign({}, init, { headers });
+                    }
+                }
+            } catch (e) {
+                console.warn('API-Key Injection übersprungen:', e);
+            }
+            return originalFetch(input, init);
+        };
+
+        window.__smarthomeFetchAuthWrapped = true;
+    }
+
+    _extractApiPath(input) {
+        try {
+            const raw = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+            if (!raw) return '';
+            const u = new URL(raw, window.location.origin);
+            return u.pathname || '';
+        } catch (e) {
+            return '';
+        }
+    }
+
+    _isProtectedApiPath(path) {
+        if (!path || !path.startsWith('/api/')) return false;
+        if (path.startsWith('/api/admin')) return true;
+        if (path.startsWith('/api/cameras/')) return true;
+        if (path === '/api/cameras') return true;
+        if (path.startsWith('/api/camera-triggers')) return true;
+        if (path === '/api/plc/connect') return true;
+        if (path === '/api/plc/disconnect') return true;
+        if (path.startsWith('/api/plc/ads/route/')) return true;
+        if (path === '/api/plc/config') return true;
+        if (path === '/api/plc/symbols/upload') return true;
+        if (path === '/api/plc/symbols/live') return true;
+        if (path === '/api/ring/auth') return true;
+        if (path === '/api/ring/cameras/import') return true;
+        if (path === '/api/routing/config') return true;
+        if (path === '/api/variables/write') return true;
+        return false;
     }
 
     // ========================================================================
@@ -1357,7 +1422,16 @@ class SmartHomeApp {
         }
 
         const camIds = Object.keys(cameras);
+        this._clearRtspSnapshotTimers();
         this._clearRingSnapshotTimers();
+        for (const timer of Object.values(this._hlsRetryTimers)) {
+            clearTimeout(timer);
+        }
+        this._hlsRetryTimers = {};
+        for (const [camId, hls] of Object.entries(this._hlsInstances)) {
+            try { hls.destroy(); } catch (e) {}
+        }
+        this._hlsInstances = {};
         if (camIds.length === 0) {
             cameraListContainer.innerHTML = '<p class="text-sm text-gray-500">Keine Kameras konfiguriert</p>';
             camerasGridContainer.innerHTML = '<p class="text-gray-500">Kameras werden nach Konfiguration hier angezeigt...</p>';
@@ -1773,6 +1847,10 @@ class SmartHomeApp {
     _initHlsPlayer(videoEl, hlsUrl, camId) {
         const cacheBustedHlsUrl = `${hlsUrl}${hlsUrl.includes('?') ? '&' : '?'}ts=${Date.now()}`;
         if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+            if (camId && this._hlsInstances[camId]) {
+                try { this._hlsInstances[camId].destroy(); } catch (e) {}
+                delete this._hlsInstances[camId];
+            }
             const hls = new Hls({
                 enableWorker: true,
                 lowLatencyMode: true,
@@ -1796,20 +1874,23 @@ class SmartHomeApp {
             });
             hls.on(Hls.Events.ERROR, (event, data) => {
                 if (data.fatal) {
+                    if (camId && this._hlsRetryTimers[camId]) return;
                     console.warn('HLS fatal error, retrying in 3s...', data.type);
                     const imageEl = camId ? document.getElementById(`cam-image-${camId}`) : null;
                     if (imageEl) imageEl.style.display = '';
                     if (videoEl) videoEl.style.display = 'none';
                     if (camId) this._startRtspSnapshotRefresh(camId, `cam-image-${camId}`, 3000);
-                    setTimeout(async () => {
+                    const retryTimer = setTimeout(async () => {
                         hls.destroy();
                         if (camId) {
                             delete this._hlsInstances[camId];
                             await this._restartRtspStream(camId);
                             await this._loadRtspSnapshot(camId, `cam-image-${camId}`, 4500);
+                            delete this._hlsRetryTimers[camId];
                         }
                         this._initHlsPlayer(videoEl, hlsUrl, camId);
                     }, 3000);
+                    if (camId) this._hlsRetryTimers[camId] = retryTimer;
                 }
             });
             // Speichere HLS-Instanz für Cleanup
@@ -2330,6 +2411,14 @@ class SmartHomeApp {
         console.log('Stoppe Camera-Widget-Streams...');
         this._clearRtspSnapshotTimers();
         this._clearRingSnapshotTimers();
+        for (const timer of Object.values(this._hlsRetryTimers)) {
+            clearTimeout(timer);
+        }
+        this._hlsRetryTimers = {};
+        for (const timer of Object.values(this._cameraWallRetryTimers)) {
+            clearTimeout(timer);
+        }
+        this._cameraWallRetryTimers = {};
         const ringCamIds = Object.keys(this._ringWidgetConnections);
         for (const camId of ringCamIds) {
             await this._stopRingWidgetWebrtc(camId);
@@ -2363,6 +2452,14 @@ class SmartHomeApp {
         console.log('Stoppe Camera-Wall-Streams...');
         this._clearRtspSnapshotTimers();
         this._clearRingSnapshotTimers();
+        for (const timer of Object.values(this._hlsRetryTimers)) {
+            clearTimeout(timer);
+        }
+        this._hlsRetryTimers = {};
+        for (const timer of Object.values(this._cameraWallRetryTimers)) {
+            clearTimeout(timer);
+        }
+        this._cameraWallRetryTimers = {};
         const ringCamIds = Object.keys(this._ringWidgetConnections);
         for (const camId of ringCamIds) {
             await this._stopRingWidgetWebrtc(camId);
@@ -2913,6 +3010,10 @@ class SmartHomeApp {
 
     _initWallHlsPlayer(videoEl, hlsUrl, camId) {
         if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+            if (camId && this._cameraWallHls[camId]) {
+                try { this._cameraWallHls[camId].destroy(); } catch (e) {}
+                delete this._cameraWallHls[camId];
+            }
             const hls = new Hls({
                 liveDurationInfinity: true,
                 enableWorker: true,
@@ -2927,11 +3028,14 @@ class SmartHomeApp {
             });
             hls.on(Hls.Events.ERROR, (event, data) => {
                 if (data.fatal) {
-                    setTimeout(() => {
+                    if (camId && this._cameraWallRetryTimers[camId]) return;
+                    const retryTimer = setTimeout(() => {
                         hls.destroy();
                         delete this._cameraWallHls[camId];
+                        if (camId) delete this._cameraWallRetryTimers[camId];
                         this._initWallHlsPlayer(videoEl, hlsUrl, camId);
                     }, 3000);
+                    if (camId) this._cameraWallRetryTimers[camId] = retryTimer;
                 }
             });
             return hls;
@@ -4677,6 +4781,7 @@ class SmartHomeApp {
         const refreshLogsBtn = document.getElementById('refresh-logs-btn');
         const clearLogsBtn = document.getElementById('clear-logs-btn');
         const restartServiceBtn = document.getElementById('restart-service-btn');
+        const restartDaemonBtn = document.getElementById('restart-daemon-btn');
 
         if (addPlcBtn) {
             addPlcBtn.addEventListener('click', () => this.addPLC());
@@ -4696,6 +4801,9 @@ class SmartHomeApp {
 
         if (restartServiceBtn) {
             restartServiceBtn.addEventListener('click', () => this.restartService());
+        }
+        if (restartDaemonBtn) {
+            restartDaemonBtn.addEventListener('click', () => this.restartDaemonService());
         }
     }
 
@@ -4830,6 +4938,38 @@ class SmartHomeApp {
 
         } catch (error) {
             console.error('❌ Restart fehlgeschlagen:', error);
+            alert(`❌ Fehler: ${error.message}`);
+        }
+    }
+
+    async restartDaemonService() {
+        if (!confirm('🔄 Dienst wirklich neu starten?\n\nDies führt scripts/web_server_ctl.sh restart aus. Die Verbindung wird kurz unterbrochen.')) return;
+
+        try {
+            const response = await fetch('/api/admin/service/restart-daemon', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ delay: 1 })
+            });
+
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'Dienst-Restart fehlgeschlagen');
+            }
+
+            alert(`✅ ${data.message}\n\nSeite lädt automatisch neu...`);
+
+            let countdown = 5;
+            const interval = setInterval(() => {
+                countdown--;
+                console.log(`Dienst-Restart in ${countdown}s...`);
+                if (countdown === 0) {
+                    clearInterval(interval);
+                    location.reload();
+                }
+            }, 1000);
+        } catch (error) {
+            console.error('❌ Dienst-Restart fehlgeschlagen:', error);
             alert(`❌ Fehler: ${error.message}`);
         }
     }
