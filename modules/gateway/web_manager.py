@@ -276,6 +276,21 @@ class WebManager(BaseModule):
         @self.app.before_request
         def _control_api_auth_gate():
             """Schützt kritische Steuer-Endpunkte gegen unautorisierte Aufrufe."""
+            payload_ok, payload_error, payload_status = self._validate_api_payload()
+            if not payload_ok:
+                logger.warning(
+                    "API payload rejected: method=%s path=%s remote=%s reason=%s",
+                    request.method,
+                    request.path,
+                    request.remote_addr,
+                    payload_error
+                )
+                return jsonify({
+                    'success': False,
+                    'error': 'invalid_payload',
+                    'message': payload_error
+                }), payload_status
+
             if not self._is_protected_control_request():
                 return None
 
@@ -523,6 +538,48 @@ class WebManager(BaseModule):
         if ref_origin and ref_origin in allowed:
             return True, ''
         return False, f'Referer nicht erlaubt: {referer}'
+
+    def _validate_api_payload(self):
+        """
+        Basale Payload-Validierung für mutierende API-Requests.
+        """
+        method = str(request.method or 'GET').upper()
+        path = str(request.path or '')
+        if method not in ('POST', 'PUT', 'PATCH', 'DELETE'):
+            return True, '', 200
+        if not path.startswith('/api/'):
+            return True, '', 200
+
+        max_bytes_raw = str(os.getenv('SMARTHOME_MAX_API_BODY_BYTES', '1048576')).strip()
+        max_keys_raw = str(os.getenv('SMARTHOME_MAX_API_JSON_KEYS', '200')).strip()
+        try:
+            max_bytes = max(1024, int(max_bytes_raw))
+        except Exception:
+            max_bytes = 1048576
+        try:
+            max_keys = max(10, int(max_keys_raw))
+        except Exception:
+            max_keys = 200
+
+        content_length = request.content_length or 0
+        if content_length > max_bytes:
+            return False, f'Payload zu groß ({content_length}>{max_bytes} bytes)', 413
+
+        # Upload-Endpunkte (multipart/form-data) separat behandeln.
+        if path in ('/api/plc/symbols/upload', '/api/camera-triggers/import'):
+            return True, '', 200
+
+        mimetype = str(request.mimetype or '').lower()
+        if mimetype.startswith('application/json'):
+            data = request.get_json(silent=True)
+            if data is None:
+                return False, 'JSON-Body ungültig oder leer', 400
+            if not isinstance(data, dict):
+                return False, 'JSON-Body muss ein Objekt sein', 400
+            if len(data) > max_keys:
+                return False, f'Zu viele JSON-Felder ({len(data)}>{max_keys})', 400
+
+        return True, '', 200
 
     def _register_routes(self):
         """Registriert API-Routen mit Fehler-Handling für None-Objekte."""
