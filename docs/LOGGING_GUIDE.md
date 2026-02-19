@@ -19,7 +19,7 @@ Das System verwendet ein **Multi-Layer Logging-System**:
 Die `.env.example` enthält bereits einen konfigurierten Sentry DSN:
 
 ```bash
-SENTRY_DSN="https://df84f77f4768c3b6ed8224089e930008@o4510659601891328.ingest.de.sentry.io/4510659620831312"
+SENTRY_DSN=""
 ENVIRONMENT=development
 ```
 

@@ -15,10 +15,14 @@ import json
 import logging
 import traceback
 import hmac
+import secrets
+from collections import deque
+from urllib.parse import urlparse
+import uuid
 
 # Flask & SocketIO (lazy import)
 try:
-    from flask import Flask, render_template, jsonify, request, send_file
+    from flask import Flask, render_template, jsonify, request, send_file, has_request_context, g
     from flask_socketio import SocketIO, emit
     import io
     FLASK_AVAILABLE = True
@@ -87,6 +91,8 @@ class WebManager(BaseModule):
         self._camera_trigger_state = {}
         self._camera_trigger_last_fired = {}
         self._trigger_store = None
+        self._control_rate_limit = {}
+        self._control_rate_limit_lock = threading.Lock()
 
     def initialize(self, app_context: Any):
         """Initialisiert das Modul und erzwingt absolute Pfade für alle Manager."""
@@ -227,12 +233,36 @@ class WebManager(BaseModule):
                          template_folder=template_dir,
                          static_folder=static_dir)
 
-        self.app.config['SECRET_KEY'] = 'smarthome-v5-secret'
+        same_site = str(os.getenv('SMARTHOME_SESSION_COOKIE_SAMESITE', 'Lax') or 'Lax').strip().title()
+        if same_site not in ('Lax', 'Strict', 'None'):
+            same_site = 'Lax'
+        secure_cookie = str(os.getenv('SMARTHOME_SESSION_COOKIE_SECURE', 'false')).strip().lower() in (
+            '1', 'true', 'yes', 'on'
+        )
+        secret_key = str(os.getenv('SECRET_KEY', '') or '').strip()
+        if secret_key:
+            self.app.config['SECRET_KEY'] = secret_key
+        else:
+            # Fallback nur für Entwicklungs-/Notbetrieb: reduziert Risiko eines
+            # hartkodierten Shared-Secrets in produktiven Deployments.
+            self.app.config['SECRET_KEY'] = secrets.token_hex(32)
+            logger.warning("SECRET_KEY nicht gesetzt: ephemerer Key wurde generiert")
+        self.app.config['SESSION_COOKIE_HTTPONLY'] = True
+        self.app.config['SESSION_COOKIE_SAMESITE'] = same_site
+        self.app.config['SESSION_COOKIE_SECURE'] = secure_cookie
+
         # async_mode='threading' ist stabiler für Windows-Hosts
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='threading')
+        cors_allowed_origins = self._get_allowed_origins()
+        self.socketio = SocketIO(
+            self.app,
+            cors_allowed_origins=cors_allowed_origins if cors_allowed_origins else None,
+            async_mode='threading'
+        )
 
         @self.app.after_request
         def _disable_hls_cache(response):
+            req_id = self._get_request_id()
+            response.headers['X-Request-ID'] = req_id
             # HLS manifests/segments must not be cached, otherwise stale playlists
             # can reference already deleted TS fragments and trigger endless 404 loops.
             if request.path.startswith('/static/hls/'):
@@ -249,15 +279,70 @@ class WebManager(BaseModule):
         @self.app.before_request
         def _control_api_auth_gate():
             """Schützt kritische Steuer-Endpunkte gegen unautorisierte Aufrufe."""
+            incoming_req_id = str(request.headers.get('X-Request-ID') or '').strip()
+            g.request_id = incoming_req_id or uuid.uuid4().hex
+
+            payload_ok, payload_error, payload_status = self._validate_api_payload()
+            if not payload_ok:
+                logger.warning(
+                    "API payload rejected: req_id=%s method=%s path=%s remote=%s reason=%s",
+                    self._get_request_id(),
+                    request.method,
+                    request.path,
+                    request.remote_addr,
+                    payload_error
+                )
+                return jsonify({
+                    'success': False,
+                    'error': 'invalid_payload',
+                    'message': payload_error
+                }), payload_status
+
             if not self._is_protected_control_request():
                 return None
+
+            origin_ok, origin_reason = self._is_control_request_origin_allowed()
+            if not origin_ok:
+                logger.warning(
+                    "Control API origin denied: req_id=%s method=%s path=%s remote=%s reason=%s",
+                    self._get_request_id(),
+                    request.method,
+                    request.path,
+                    request.remote_addr,
+                    origin_reason
+                )
+                return jsonify({
+                    'success': False,
+                    'error': 'forbidden_origin',
+                    'message': origin_reason
+                }), 403
+
+            allowed, retry_after = self._check_control_rate_limit()
+            if not allowed:
+                logger.warning(
+                    "Control API rate limit exceeded: req_id=%s method=%s path=%s remote=%s retry_after=%ss",
+                    self._get_request_id(),
+                    request.method,
+                    request.path,
+                    request.remote_addr,
+                    retry_after
+                )
+                response = jsonify({
+                    'success': False,
+                    'error': 'rate_limited',
+                    'message': 'Zu viele Requests auf kritischen Endpunkten'
+                })
+                response.status_code = 429
+                response.headers['Retry-After'] = str(retry_after)
+                return response
 
             authorized, reason = self._is_authorized_control_request()
             if authorized:
                 return None
 
             logger.warning(
-                "Control API access denied: method=%s path=%s remote=%s reason=%s",
+                "Control API access denied: req_id=%s method=%s path=%s remote=%s reason=%s",
+                self._get_request_id(),
                 request.method,
                 request.path,
                 request.remote_addr,
@@ -360,6 +445,160 @@ class WebManager(BaseModule):
         """Erkennt lokale Zugriffe."""
         remote = str(request.remote_addr or '').strip().lower()
         return remote in ('127.0.0.1', '::1', 'localhost')
+
+    def _get_request_id(self) -> str:
+        """Liefert aktuelle Request-Korrelations-ID."""
+        if not has_request_context():
+            return "-"
+        req_id = getattr(g, 'request_id', '')
+        if req_id:
+            return str(req_id)
+        return "-"
+
+    def _check_control_rate_limit(self):
+        """
+        Prüft Rate-Limit für kritische Endpunkte.
+
+        Rückgabe:
+        - (True, 0) wenn erlaubt
+        - (False, retry_after_seconds) wenn limitiert
+        """
+        window_seconds_raw = os.getenv('SMARTHOME_CONTROL_RATE_LIMIT_WINDOW_SECONDS', '60').strip()
+        max_requests_raw = os.getenv('SMARTHOME_CONTROL_RATE_LIMIT_MAX_REQUESTS', '120').strip()
+
+        try:
+            window_seconds = max(1, int(window_seconds_raw))
+        except Exception:
+            window_seconds = 60
+        try:
+            max_requests = max(1, int(max_requests_raw))
+        except Exception:
+            max_requests = 120
+
+        exempt_loopback = os.getenv(
+            'SMARTHOME_CONTROL_RATE_LIMIT_EXEMPT_LOOPBACK',
+            'true'
+        ).strip().lower() in ('1', 'true', 'yes', 'on')
+        if exempt_loopback and self._is_loopback_request():
+            return True, 0
+
+        now = time.time()
+        ip = str(request.remote_addr or 'unknown')
+        path = str(request.path or '')
+        key = f"{ip}:{path}"
+
+        with self._control_rate_limit_lock:
+            bucket = self._control_rate_limit.get(key)
+            if bucket is None:
+                bucket = deque()
+                self._control_rate_limit[key] = bucket
+
+            cutoff = now - window_seconds
+            while bucket and bucket[0] < cutoff:
+                bucket.popleft()
+
+            if len(bucket) >= max_requests:
+                retry_after = int(max(1, window_seconds - (now - bucket[0])))
+                return False, retry_after
+
+            bucket.append(now)
+
+            # Opportunistisches Cleanup alter Buckets.
+            if len(self._control_rate_limit) > 5000:
+                stale_keys = [k for k, v in self._control_rate_limit.items() if not v or v[-1] < cutoff]
+                for stale_key in stale_keys[:1000]:
+                    self._control_rate_limit.pop(stale_key, None)
+
+        return True, 0
+
+    def _get_allowed_origins(self) -> List[str]:
+        """
+        Ermittelt erlaubte Browser-Origin(s) für Control Requests/Socket.
+        """
+        raw = str(os.getenv('SMARTHOME_ALLOWED_ORIGINS', '') or '').strip()
+        if raw:
+            parts = [p.strip().rstrip('/') for p in raw.split(',') if p.strip()]
+            return sorted(set(parts))
+
+        host = str(request.host_url).strip() if has_request_context() else ''
+        if host:
+            return [host.rstrip('/')]
+        return []
+
+    def _is_control_request_origin_allowed(self):
+        """
+        Browser-Origin Check (CSRF-Härtung) für kritische Endpunkte.
+        """
+        if str(request.method or 'GET').upper() in ('GET', 'HEAD', 'OPTIONS'):
+            return True, ''
+
+        origin = str(request.headers.get('Origin') or '').strip()
+        referer = str(request.headers.get('Referer') or '').strip()
+        if not origin and not referer:
+            # Non-browser Clients (curl/service-to-service) haben oft keinen Origin.
+            return True, ''
+
+        allowed_origins = self._get_allowed_origins()
+        if not allowed_origins:
+            return True, ''
+
+        allowed = set(allowed_origins)
+        if origin:
+            if origin.rstrip('/') in allowed:
+                return True, ''
+            return False, f'Origin nicht erlaubt: {origin}'
+
+        # Fallback: Referer-Origin gegen erlaubte Origins prüfen.
+        try:
+            parsed = urlparse(referer)
+            ref_origin = f"{parsed.scheme}://{parsed.netloc}".rstrip('/')
+        except Exception:
+            ref_origin = ''
+        if ref_origin and ref_origin in allowed:
+            return True, ''
+        return False, f'Referer nicht erlaubt: {referer}'
+
+    def _validate_api_payload(self):
+        """
+        Basale Payload-Validierung für mutierende API-Requests.
+        """
+        method = str(request.method or 'GET').upper()
+        path = str(request.path or '')
+        if method not in ('POST', 'PUT', 'PATCH', 'DELETE'):
+            return True, '', 200
+        if not path.startswith('/api/'):
+            return True, '', 200
+
+        max_bytes_raw = str(os.getenv('SMARTHOME_MAX_API_BODY_BYTES', '1048576')).strip()
+        max_keys_raw = str(os.getenv('SMARTHOME_MAX_API_JSON_KEYS', '200')).strip()
+        try:
+            max_bytes = max(1024, int(max_bytes_raw))
+        except Exception:
+            max_bytes = 1048576
+        try:
+            max_keys = max(10, int(max_keys_raw))
+        except Exception:
+            max_keys = 200
+
+        content_length = request.content_length or 0
+        if content_length > max_bytes:
+            return False, f'Payload zu groß ({content_length}>{max_bytes} bytes)', 413
+
+        # Upload-Endpunkte (multipart/form-data) separat behandeln.
+        if path in ('/api/plc/symbols/upload', '/api/camera-triggers/import'):
+            return True, '', 200
+
+        mimetype = str(request.mimetype or '').lower()
+        if mimetype.startswith('application/json'):
+            data = request.get_json(silent=True)
+            if data is None:
+                return False, 'JSON-Body ungültig oder leer', 400
+            if not isinstance(data, dict):
+                return False, 'JSON-Body muss ein Objekt sein', 400
+            if len(data) > max_keys:
+                return False, f'Zu viele JSON-Felder ({len(data)}>{max_keys})', 400
+
+        return True, '', 200
 
     def _register_routes(self):
         """Registriert API-Routen mit Fehler-Handling für None-Objekte."""
@@ -1155,12 +1394,61 @@ class WebManager(BaseModule):
                 db_path = os.path.join(project_root, 'config', 'system_logs.db')
 
                 limit = request.args.get('limit', 100, type=int)
-                logs = DatabaseLogger.get_recent_logs(db_path, limit=limit)
+                limit = max(1, min(limit, 500))
+                filter_mode = str(request.args.get('filter', 'all') or 'all').strip().lower()
+
+                if filter_mode == 'restart':
+                    # Restart-Events sind häufig nur Teilmenge: größeren Suchraum laden
+                    # und anschließend serverseitig filtern.
+                    search_limit = min(limit * 10, 5000)
+                    logs = DatabaseLogger.get_recent_logs(db_path, limit=search_limit)
+                    keywords = ('restart', 'neustart')
+                    logs = [
+                        log for log in logs
+                        if any(k in str(log.get('message', '')).lower() for k in keywords)
+                    ][:limit]
+                else:
+                    logs = DatabaseLogger.get_recent_logs(db_path, limit=limit)
 
                 return jsonify(logs)
             except Exception as e:
                 logger.error(f"Fehler beim Laden der Logs: {e}", exc_info=True)
                 return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/admin/logs/clear', methods=['POST'])
+        def clear_system_logs():
+            """Löscht alte Logs mit Schutz für Audit-relevante Einträge."""
+            try:
+                from modules.core.database_logger import DatabaseLogger
+
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                db_path = os.path.join(project_root, 'config', 'system_logs.db')
+
+                data = request.get_json(silent=True) or {}
+                keep_count = int(data.get('keep_count', 100))
+                keep_count = max(10, min(keep_count, 5000))
+
+                deleted = DatabaseLogger.clear_logs_with_audit_protection(
+                    db_path=db_path,
+                    keep_count=keep_count
+                )
+
+                logger.warning(
+                    "Admin logs clear executed: req_id=%s deleted=%s keep_count=%s remote=%s",
+                    self._get_request_id(),
+                    deleted,
+                    keep_count,
+                    request.remote_addr
+                )
+
+                return jsonify({
+                    'success': True,
+                    'deleted': deleted,
+                    'keep_count': keep_count
+                })
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/admin/logs/clear: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
 
         @self.app.route('/api/admin/service/info')
         def get_service_info():
@@ -1184,14 +1472,16 @@ class WebManager(BaseModule):
                     delay = 2
                 delay = max(1, min(delay, 30))
                 logger.warning(
-                    "Admin restart requested: type=app delay=%ss remote=%s ua=%s",
+                    "Admin restart requested: req_id=%s type=app delay=%ss remote=%s ua=%s",
+                    self._get_request_id(),
                     delay,
                     request.remote_addr,
                     request.headers.get('User-Agent', '-')
                 )
                 ServiceManager.schedule_restart(delay_seconds=delay)
                 logger.warning(
-                    "Admin restart scheduled: type=app delay=%ss remote=%s",
+                    "Admin restart scheduled: req_id=%s type=app delay=%ss remote=%s",
+                    self._get_request_id(),
                     delay,
                     request.remote_addr
                 )
@@ -1214,7 +1504,8 @@ class WebManager(BaseModule):
                 except Exception:
                     delay = 1
                 logger.warning(
-                    "Admin restart requested: type=daemon delay=%ss remote=%s ua=%s",
+                    "Admin restart requested: req_id=%s type=daemon delay=%ss remote=%s ua=%s",
+                    self._get_request_id(),
                     delay,
                     request.remote_addr,
                     request.headers.get('User-Agent', '-')
@@ -1222,13 +1513,15 @@ class WebManager(BaseModule):
                 ok, message = ServiceManager.schedule_ctl_restart(delay_seconds=delay)
                 if not ok:
                     logger.warning(
-                        "Admin restart rejected: type=daemon remote=%s reason=%s",
+                        "Admin restart rejected: req_id=%s type=daemon remote=%s reason=%s",
+                        self._get_request_id(),
                         request.remote_addr,
                         message
                     )
                     return jsonify({'success': False, 'error': message}), 400
                 logger.warning(
-                    "Admin restart scheduled: type=daemon delay=%ss remote=%s",
+                    "Admin restart scheduled: req_id=%s type=daemon delay=%ss remote=%s",
+                    self._get_request_id(),
                     delay,
                     request.remote_addr
                 )
