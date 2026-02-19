@@ -16,6 +16,7 @@ import logging
 import traceback
 import hmac
 import secrets
+from collections import deque
 
 # Flask & SocketIO (lazy import)
 try:
@@ -88,6 +89,8 @@ class WebManager(BaseModule):
         self._camera_trigger_state = {}
         self._camera_trigger_last_fired = {}
         self._trigger_store = None
+        self._control_rate_limit = {}
+        self._control_rate_limit_lock = threading.Lock()
 
     def initialize(self, app_context: Any):
         """Initialisiert das Modul und erzwingt absolute Pfade für alle Manager."""
@@ -260,6 +263,24 @@ class WebManager(BaseModule):
             if not self._is_protected_control_request():
                 return None
 
+            allowed, retry_after = self._check_control_rate_limit()
+            if not allowed:
+                logger.warning(
+                    "Control API rate limit exceeded: method=%s path=%s remote=%s retry_after=%ss",
+                    request.method,
+                    request.path,
+                    request.remote_addr,
+                    retry_after
+                )
+                response = jsonify({
+                    'success': False,
+                    'error': 'rate_limited',
+                    'message': 'Zu viele Requests auf kritischen Endpunkten'
+                })
+                response.status_code = 429
+                response.headers['Retry-After'] = str(retry_after)
+                return response
+
             authorized, reason = self._is_authorized_control_request()
             if authorized:
                 return None
@@ -368,6 +389,62 @@ class WebManager(BaseModule):
         """Erkennt lokale Zugriffe."""
         remote = str(request.remote_addr or '').strip().lower()
         return remote in ('127.0.0.1', '::1', 'localhost')
+
+    def _check_control_rate_limit(self):
+        """
+        Prüft Rate-Limit für kritische Endpunkte.
+
+        Rückgabe:
+        - (True, 0) wenn erlaubt
+        - (False, retry_after_seconds) wenn limitiert
+        """
+        window_seconds_raw = os.getenv('SMARTHOME_CONTROL_RATE_LIMIT_WINDOW_SECONDS', '60').strip()
+        max_requests_raw = os.getenv('SMARTHOME_CONTROL_RATE_LIMIT_MAX_REQUESTS', '120').strip()
+
+        try:
+            window_seconds = max(1, int(window_seconds_raw))
+        except Exception:
+            window_seconds = 60
+        try:
+            max_requests = max(1, int(max_requests_raw))
+        except Exception:
+            max_requests = 120
+
+        exempt_loopback = os.getenv(
+            'SMARTHOME_CONTROL_RATE_LIMIT_EXEMPT_LOOPBACK',
+            'true'
+        ).strip().lower() in ('1', 'true', 'yes', 'on')
+        if exempt_loopback and self._is_loopback_request():
+            return True, 0
+
+        now = time.time()
+        ip = str(request.remote_addr or 'unknown')
+        path = str(request.path or '')
+        key = f"{ip}:{path}"
+
+        with self._control_rate_limit_lock:
+            bucket = self._control_rate_limit.get(key)
+            if bucket is None:
+                bucket = deque()
+                self._control_rate_limit[key] = bucket
+
+            cutoff = now - window_seconds
+            while bucket and bucket[0] < cutoff:
+                bucket.popleft()
+
+            if len(bucket) >= max_requests:
+                retry_after = int(max(1, window_seconds - (now - bucket[0])))
+                return False, retry_after
+
+            bucket.append(now)
+
+            # Opportunistisches Cleanup alter Buckets.
+            if len(self._control_rate_limit) > 5000:
+                stale_keys = [k for k, v in self._control_rate_limit.items() if not v or v[-1] < cutoff]
+                for stale_key in stale_keys[:1000]:
+                    self._control_rate_limit.pop(stale_key, None)
+
+        return True, 0
 
     def _register_routes(self):
         """Registriert API-Routen mit Fehler-Handling für None-Objekte."""
