@@ -18,10 +18,11 @@ import hmac
 import secrets
 from collections import deque
 from urllib.parse import urlparse
+import uuid
 
 # Flask & SocketIO (lazy import)
 try:
-    from flask import Flask, render_template, jsonify, request, send_file, has_request_context
+    from flask import Flask, render_template, jsonify, request, send_file, has_request_context, g
     from flask_socketio import SocketIO, emit
     import io
     FLASK_AVAILABLE = True
@@ -260,6 +261,8 @@ class WebManager(BaseModule):
 
         @self.app.after_request
         def _disable_hls_cache(response):
+            req_id = self._get_request_id()
+            response.headers['X-Request-ID'] = req_id
             # HLS manifests/segments must not be cached, otherwise stale playlists
             # can reference already deleted TS fragments and trigger endless 404 loops.
             if request.path.startswith('/static/hls/'):
@@ -276,10 +279,14 @@ class WebManager(BaseModule):
         @self.app.before_request
         def _control_api_auth_gate():
             """Schützt kritische Steuer-Endpunkte gegen unautorisierte Aufrufe."""
+            incoming_req_id = str(request.headers.get('X-Request-ID') or '').strip()
+            g.request_id = incoming_req_id or uuid.uuid4().hex
+
             payload_ok, payload_error, payload_status = self._validate_api_payload()
             if not payload_ok:
                 logger.warning(
-                    "API payload rejected: method=%s path=%s remote=%s reason=%s",
+                    "API payload rejected: req_id=%s method=%s path=%s remote=%s reason=%s",
+                    self._get_request_id(),
                     request.method,
                     request.path,
                     request.remote_addr,
@@ -297,7 +304,8 @@ class WebManager(BaseModule):
             origin_ok, origin_reason = self._is_control_request_origin_allowed()
             if not origin_ok:
                 logger.warning(
-                    "Control API origin denied: method=%s path=%s remote=%s reason=%s",
+                    "Control API origin denied: req_id=%s method=%s path=%s remote=%s reason=%s",
+                    self._get_request_id(),
                     request.method,
                     request.path,
                     request.remote_addr,
@@ -312,7 +320,8 @@ class WebManager(BaseModule):
             allowed, retry_after = self._check_control_rate_limit()
             if not allowed:
                 logger.warning(
-                    "Control API rate limit exceeded: method=%s path=%s remote=%s retry_after=%ss",
+                    "Control API rate limit exceeded: req_id=%s method=%s path=%s remote=%s retry_after=%ss",
+                    self._get_request_id(),
                     request.method,
                     request.path,
                     request.remote_addr,
@@ -332,7 +341,8 @@ class WebManager(BaseModule):
                 return None
 
             logger.warning(
-                "Control API access denied: method=%s path=%s remote=%s reason=%s",
+                "Control API access denied: req_id=%s method=%s path=%s remote=%s reason=%s",
+                self._get_request_id(),
                 request.method,
                 request.path,
                 request.remote_addr,
@@ -435,6 +445,15 @@ class WebManager(BaseModule):
         """Erkennt lokale Zugriffe."""
         remote = str(request.remote_addr or '').strip().lower()
         return remote in ('127.0.0.1', '::1', 'localhost')
+
+    def _get_request_id(self) -> str:
+        """Liefert aktuelle Request-Korrelations-ID."""
+        if not has_request_context():
+            return "-"
+        req_id = getattr(g, 'request_id', '')
+        if req_id:
+            return str(req_id)
+        return "-"
 
     def _check_control_rate_limit(self):
         """
@@ -1415,7 +1434,8 @@ class WebManager(BaseModule):
                 )
 
                 logger.warning(
-                    "Admin logs clear executed: deleted=%s keep_count=%s remote=%s",
+                    "Admin logs clear executed: req_id=%s deleted=%s keep_count=%s remote=%s",
+                    self._get_request_id(),
                     deleted,
                     keep_count,
                     request.remote_addr
@@ -1452,14 +1472,16 @@ class WebManager(BaseModule):
                     delay = 2
                 delay = max(1, min(delay, 30))
                 logger.warning(
-                    "Admin restart requested: type=app delay=%ss remote=%s ua=%s",
+                    "Admin restart requested: req_id=%s type=app delay=%ss remote=%s ua=%s",
+                    self._get_request_id(),
                     delay,
                     request.remote_addr,
                     request.headers.get('User-Agent', '-')
                 )
                 ServiceManager.schedule_restart(delay_seconds=delay)
                 logger.warning(
-                    "Admin restart scheduled: type=app delay=%ss remote=%s",
+                    "Admin restart scheduled: req_id=%s type=app delay=%ss remote=%s",
+                    self._get_request_id(),
                     delay,
                     request.remote_addr
                 )
@@ -1482,7 +1504,8 @@ class WebManager(BaseModule):
                 except Exception:
                     delay = 1
                 logger.warning(
-                    "Admin restart requested: type=daemon delay=%ss remote=%s ua=%s",
+                    "Admin restart requested: req_id=%s type=daemon delay=%ss remote=%s ua=%s",
+                    self._get_request_id(),
                     delay,
                     request.remote_addr,
                     request.headers.get('User-Agent', '-')
@@ -1490,13 +1513,15 @@ class WebManager(BaseModule):
                 ok, message = ServiceManager.schedule_ctl_restart(delay_seconds=delay)
                 if not ok:
                     logger.warning(
-                        "Admin restart rejected: type=daemon remote=%s reason=%s",
+                        "Admin restart rejected: req_id=%s type=daemon remote=%s reason=%s",
+                        self._get_request_id(),
                         request.remote_addr,
                         message
                     )
                     return jsonify({'success': False, 'error': message}), 400
                 logger.warning(
-                    "Admin restart scheduled: type=daemon delay=%ss remote=%s",
+                    "Admin restart scheduled: req_id=%s type=daemon delay=%ss remote=%s",
+                    self._get_request_id(),
                     delay,
                     request.remote_addr
                 )
