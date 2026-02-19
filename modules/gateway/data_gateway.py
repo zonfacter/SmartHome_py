@@ -22,6 +22,8 @@ import time
 import platform
 import os
 import json
+import re
+import math
 from collections import OrderedDict, defaultdict
 from datetime import datetime
 
@@ -61,6 +63,13 @@ class DataGateway(BaseModule):
     # Spam-Protection Limits
     DEFAULT_MAX_PPS = 500  # Max Packets Per Second pro Source
     SPAM_CHECK_WINDOW = 1.0  # Zeitfenster in Sekunden
+    MAX_SOURCE_ID_LEN = 128
+    MAX_TAG_LEN = 256
+    MAX_STRING_VALUE_LEN = 4096
+    MAX_LIST_ITEMS = 128
+    MAX_DICT_ITEMS = 64
+    MAX_METADATA_KEYS = 32
+    MAX_VALUE_DEPTH = 5
 
     def __init__(self):
         super().__init__()
@@ -103,7 +112,8 @@ class DataGateway(BaseModule):
             'telemetry_updates': 0,
             'routes_processed': 0,
             'routes_blocked': 0,
-            'spam_events': 0
+            'spam_events': 0,
+            'validation_rejects': 0
         }
 
         # Missing-symbol protection: track missing symbol warnings to avoid log spam
@@ -331,6 +341,14 @@ class DataGateway(BaseModule):
             # Von Bluetooth BMS:
             gateway.route_data("bt.bms_001", "voltage", 52.3, {"rssi": -45})
         """
+        valid, reason, source_id, tag, value, metadata = self._validate_ingress_datapoint(
+            source_id, tag, value, metadata
+        )
+        if not valid:
+            self.stats['validation_rejects'] += 1
+            print(f"  🚫 INVALID INPUT: {reason}")
+            return False
+
         with self.lock:
             # 1. Spam-Protection Check
             if not self._check_spam_protection(source_id):
@@ -358,6 +376,108 @@ class DataGateway(BaseModule):
 
             self.stats['routes_processed'] += 1
             return True
+
+    def _validate_ingress_datapoint(self, source_id: Any, tag: Any, value: Any, metadata: Any):
+        """
+        Validiert und normalisiert externe Datenpunkte vor der Verarbeitung.
+        """
+        source_id = str(source_id or '').strip()
+        tag = str(tag or '').strip()
+
+        if not source_id:
+            return False, "source_id fehlt", source_id, tag, value, metadata
+        if not tag:
+            return False, "tag fehlt", source_id, tag, value, metadata
+        if len(source_id) > self.MAX_SOURCE_ID_LEN:
+            return False, f"source_id zu lang ({len(source_id)}>{self.MAX_SOURCE_ID_LEN})", source_id, tag, value, metadata
+        if len(tag) > self.MAX_TAG_LEN:
+            return False, f"tag zu lang ({len(tag)}>{self.MAX_TAG_LEN})", source_id, tag, value, metadata
+
+        # Defensiv: nur bekannte Zeichen für IDs/Tags.
+        if not re.fullmatch(r"[A-Za-z0-9_.:/-]+", source_id):
+            return False, "source_id enthält ungültige Zeichen", source_id, tag, value, metadata
+        if not re.fullmatch(r"[A-Za-z0-9_.:/\\-\\[\\]]+", tag):
+            return False, "tag enthält ungültige Zeichen", source_id, tag, value, metadata
+
+        value_ok, value = self._sanitize_ingress_value(value, depth=0)
+        if not value_ok:
+            return False, "value ungültig oder zu groß", source_id, tag, value, metadata
+
+        if metadata is None:
+            metadata = {}
+        elif not isinstance(metadata, dict):
+            return False, "metadata muss dict sein", source_id, tag, value, metadata
+        elif len(metadata) > self.MAX_METADATA_KEYS:
+            return False, f"metadata hat zu viele Keys ({len(metadata)}>{self.MAX_METADATA_KEYS})", source_id, tag, value, metadata
+
+        sanitized_meta = {}
+        for k, v in metadata.items():
+            key = str(k).strip()
+            if not key:
+                continue
+            if len(key) > 64:
+                key = key[:64]
+            ok, sv = self._sanitize_ingress_value(v, depth=0)
+            if not ok:
+                continue
+            sanitized_meta[key] = sv
+
+        return True, "", source_id, tag, value, sanitized_meta
+
+    def _sanitize_ingress_value(self, value: Any, depth: int):
+        """Begrenzt Typen/Struktur für externe Inputs."""
+        if depth > self.MAX_VALUE_DEPTH:
+            return False, None
+
+        if value is None or isinstance(value, bool):
+            return True, value
+
+        if isinstance(value, int):
+            return True, value
+
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                return False, None
+            return True, value
+
+        if isinstance(value, str):
+            if len(value) > self.MAX_STRING_VALUE_LEN:
+                return False, None
+            return True, value
+
+        if isinstance(value, list):
+            if len(value) > self.MAX_LIST_ITEMS:
+                return False, None
+            out = []
+            for item in value:
+                ok, sv = self._sanitize_ingress_value(item, depth + 1)
+                if not ok:
+                    return False, None
+                out.append(sv)
+            return True, out
+
+        if isinstance(value, dict):
+            if len(value) > self.MAX_DICT_ITEMS:
+                return False, None
+            out = {}
+            for k, v in value.items():
+                key = str(k)
+                if len(key) > 64:
+                    key = key[:64]
+                ok, sv = self._sanitize_ingress_value(v, depth + 1)
+                if not ok:
+                    return False, None
+                out[key] = sv
+            return True, out
+
+        # Fallback: unbekannte Typen als String serialisieren, aber begrenzt.
+        try:
+            sval = str(value)
+        except Exception:
+            return False, None
+        if len(sval) > self.MAX_STRING_VALUE_LEN:
+            return False, None
+        return True, sval
 
     def _check_spam_protection(self, source_id: str) -> bool:
         """
