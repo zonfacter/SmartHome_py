@@ -4765,6 +4765,9 @@ class SmartHomeApp {
 
     async loadAdminPage() {
         console.log('👑 Lade Admin...');
+        if (!this._adminLogFilter) {
+            this._adminLogFilter = 'all';
+        }
 
         // ⭐ v5.1.1: Lade Widgets für diese Page
         await this.loadAndRenderWidgets('admin');
@@ -4782,6 +4785,7 @@ class SmartHomeApp {
         const clearLogsBtn = document.getElementById('clear-logs-btn');
         const restartServiceBtn = document.getElementById('restart-service-btn');
         const restartDaemonBtn = document.getElementById('restart-daemon-btn');
+        const logsFilterSelect = document.getElementById('logs-filter-select');
 
         if (addPlcBtn) {
             addPlcBtn.addEventListener('click', () => this.addPLC());
@@ -4793,6 +4797,14 @@ class SmartHomeApp {
 
         if (refreshLogsBtn) {
             refreshLogsBtn.addEventListener('click', () => this.loadLogs());
+        }
+
+        if (logsFilterSelect) {
+            logsFilterSelect.value = this._adminLogFilter || 'all';
+            logsFilterSelect.addEventListener('change', () => {
+                this._adminLogFilter = logsFilterSelect.value || 'all';
+                this.loadLogs();
+            });
         }
 
         if (clearLogsBtn) {
@@ -4811,7 +4823,8 @@ class SmartHomeApp {
         console.log('📋 Lade System-Logs...');
 
         try {
-            const response = await fetch('/api/admin/logs?limit=50');
+            const filter = this._adminLogFilter || 'all';
+            const response = await fetch(`/api/admin/logs?limit=50&filter=${encodeURIComponent(filter)}`);
             if (!response.ok) throw new Error('Logs konnten nicht geladen werden');
 
             const logs = await response.json();
