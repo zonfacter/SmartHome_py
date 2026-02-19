@@ -135,7 +135,7 @@ $ python -m py_compile modules/gateway/plc_config_manager.py
 
 ```bash
 # .env Datei (bereits vorhanden)
-SENTRY_DSN="https://df84f77f4768c3b6ed8224089e930008@o4510659601891328.ingest.de.sentry.io/4510659620831312"
+SENTRY_DSN=""
 ENVIRONMENT=development
 ```
 
