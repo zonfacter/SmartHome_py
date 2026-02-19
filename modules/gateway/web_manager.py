@@ -15,6 +15,7 @@ import json
 import logging
 import traceback
 import hmac
+import secrets
 
 # Flask & SocketIO (lazy import)
 try:
@@ -227,7 +228,14 @@ class WebManager(BaseModule):
                          template_folder=template_dir,
                          static_folder=static_dir)
 
-        self.app.config['SECRET_KEY'] = 'smarthome-v5-secret'
+        secret_key = str(os.getenv('SECRET_KEY', '') or '').strip()
+        if secret_key:
+            self.app.config['SECRET_KEY'] = secret_key
+        else:
+            # Fallback nur für Entwicklungs-/Notbetrieb: reduziert Risiko eines
+            # hartkodierten Shared-Secrets in produktiven Deployments.
+            self.app.config['SECRET_KEY'] = secrets.token_hex(32)
+            logger.warning("SECRET_KEY nicht gesetzt: ephemerer Key wurde generiert")
         # async_mode='threading' ist stabiler für Windows-Hosts
         self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='threading')
 
