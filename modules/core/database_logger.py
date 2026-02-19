@@ -194,6 +194,51 @@ class DatabaseLogger:
         except Exception as e:
             logging.error(f"Fehler beim Löschen alter Logs: {e}")
 
+    @staticmethod
+    def clear_logs_with_audit_protection(
+        db_path: str,
+        keep_count: int = 100,
+        preserve_keywords: Optional[list] = None
+    ) -> int:
+        """
+        Löscht alte Log-Einträge, schützt aber Audit-relevante Meldungen.
+
+        Args:
+            db_path: Pfad zur Datenbank
+            keep_count: Anzahl neuester Logs, die unabhängig erhalten bleiben
+            preserve_keywords: Stichwörter, die im Message-Text immer erhalten bleiben
+
+        Returns:
+            Anzahl gelöschter Zeilen
+        """
+        if preserve_keywords is None:
+            preserve_keywords = ["restart", "neustart", "unauthorized", "forbidden", "rate limit"]
+
+        deleted_rows = 0
+        try:
+            if not os.path.exists(db_path):
+                return 0
+
+            keep_count = max(10, int(keep_count))
+            with sqlite3.connect(db_path) as conn:
+                where_keep = " OR ".join(["lower(message) LIKE ?"] * len(preserve_keywords))
+                params = tuple(f"%{kw.lower()}%" for kw in preserve_keywords)
+                query = f"""
+                    DELETE FROM system_logs
+                    WHERE id NOT IN (
+                        SELECT id FROM system_logs
+                        ORDER BY id DESC
+                        LIMIT ?
+                    )
+                    AND NOT ({where_keep})
+                """
+                cursor = conn.execute(query, (keep_count, *params))
+                deleted_rows = int(getattr(cursor, "rowcount", 0) or 0)
+        except Exception as e:
+            logging.error(f"Fehler bei clear_logs_with_audit_protection: {e}")
+
+        return deleted_rows
+
 
 # Beispiel-Usage
 if __name__ == '__main__':
