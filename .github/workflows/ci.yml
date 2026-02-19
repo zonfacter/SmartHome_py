@@ -32,4 +32,5 @@ jobs:
 
       - name: Run basic tests
         run: |
-          pytest -q test_web_manager_fix.py test_logging_system.py
+          python test_web_manager_fix.py
+          python test_logging_system.py
