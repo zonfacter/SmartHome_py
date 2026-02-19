@@ -14,6 +14,7 @@ import sys
 import json
 import logging
 import traceback
+import hmac
 
 # Flask & SocketIO (lazy import)
 try:
@@ -245,7 +246,120 @@ class WebManager(BaseModule):
                 response.headers['Expires'] = '0'
             return response
 
+        @self.app.before_request
+        def _control_api_auth_gate():
+            """Schützt kritische Steuer-Endpunkte gegen unautorisierte Aufrufe."""
+            if not self._is_protected_control_request():
+                return None
+
+            authorized, reason = self._is_authorized_control_request()
+            if authorized:
+                return None
+
+            logger.warning(
+                "Control API access denied: method=%s path=%s remote=%s reason=%s",
+                request.method,
+                request.path,
+                request.remote_addr,
+                reason
+            )
+            return jsonify({
+                'success': False,
+                'error': 'unauthorized',
+                'message': reason
+            }), 401
+
         self._register_routes()
+
+    def _is_protected_control_request(self) -> bool:
+        """Definiert, welche Endpunkte Authentifizierung erzwingen."""
+        path = str(getattr(request, 'path', '') or '')
+        method = str(getattr(request, 'method', 'GET') or 'GET').upper()
+
+        if path.startswith('/api/admin'):
+            return True
+
+        protected_exact = {
+            '/api/plc/connect',
+            '/api/plc/disconnect',
+            '/api/plc/ads/route/add',
+            '/api/plc/ads/route/test',
+            '/api/plc/config',
+            '/api/plc/symbols/upload',
+            '/api/plc/symbols/live',
+            '/api/ring/auth',
+            '/api/ring/cameras/import',
+            '/api/routing/config',
+            '/api/camera-triggers',
+            '/api/camera-triggers/import',
+            '/api/variables/write',
+            '/api/cameras',
+            '/api/cameras/alert',
+            '/api/cameras/scan',
+            '/api/cameras/diagnose',
+        }
+        if path in protected_exact and method in ('POST', 'PUT', 'DELETE'):
+            return True
+
+        if path.startswith('/api/cameras/'):
+            # Kamera-/PTZ-/Stream-Endpunkte sind im Betrieb steuerkritisch.
+            if method != 'GET':
+                return True
+            if '/ptz/' in path:
+                return True
+
+        return False
+
+    def _is_authorized_control_request(self):
+        """
+        Prüft Authentifizierung für Control-Requests.
+
+        Regeln:
+        - Mit gesetztem API-Key: Header/Token muss passen.
+        - Ohne gesetzten API-Key: nur Loopback-Zugriffe erlauben.
+        - Optionaler Kompatibilitätsmodus: Loopback ohne Key zulassen.
+        """
+        expected_key = (
+            os.getenv('SMARTHOME_ADMIN_API_KEY', '').strip()
+            or os.getenv('ADMIN_API_KEY', '').strip()
+        )
+        provided_key = self._extract_admin_api_key()
+        loopback = self._is_loopback_request()
+
+        if not expected_key:
+            if loopback:
+                return True, ''
+            return False, 'SMARTHOME_ADMIN_API_KEY ist nicht gesetzt (nur Loopback erlaubt)'
+
+        allow_loopback_without_key = os.getenv(
+            'SMARTHOME_ALLOW_LOOPBACK_WITHOUT_KEY',
+            'true'
+        ).strip().lower() in ('1', 'true', 'yes', 'on')
+
+        if provided_key and hmac.compare_digest(provided_key, expected_key):
+            return True, ''
+        if loopback and allow_loopback_without_key:
+            return True, ''
+        if not provided_key:
+            return False, 'API-Key fehlt (Header X-API-Key oder Authorization: Bearer ...)'
+        return False, 'API-Key ungültig'
+
+    def _extract_admin_api_key(self) -> str:
+        """Extrahiert Admin-API-Key aus Header/Query."""
+        key = (request.headers.get('X-API-Key') or '').strip()
+        if key:
+            return key
+
+        auth_header = (request.headers.get('Authorization') or '').strip()
+        if auth_header.lower().startswith('bearer '):
+            return auth_header[7:].strip()
+
+        return str(request.args.get('api_key', '') or '').strip()
+
+    def _is_loopback_request(self) -> bool:
+        """Erkennt lokale Zugriffe."""
+        remote = str(request.remote_addr or '').strip().lower()
+        return remote in ('127.0.0.1', '::1', 'localhost')
 
     def _register_routes(self):
         """Registriert API-Routen mit Fehler-Handling für None-Objekte."""
@@ -1069,13 +1183,58 @@ class WebManager(BaseModule):
                 except Exception:
                     delay = 2
                 delay = max(1, min(delay, 30))
+                logger.warning(
+                    "Admin restart requested: type=app delay=%ss remote=%s ua=%s",
+                    delay,
+                    request.remote_addr,
+                    request.headers.get('User-Agent', '-')
+                )
                 ServiceManager.schedule_restart(delay_seconds=delay)
+                logger.warning(
+                    "Admin restart scheduled: type=app delay=%ss remote=%s",
+                    delay,
+                    request.remote_addr
+                )
                 return jsonify({
                     'success': True,
                     'message': f'Service-Neustart in {delay}s geplant'
                 })
             except Exception as e:
                 logger.error(f"Fehler bei POST /api/admin/service/restart: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/admin/service/restart-daemon', methods=['POST'])
+        def restart_daemon_service():
+            """Plant einen Dienst-Neustart ueber scripts/web_server_ctl.sh restart."""
+            try:
+                from modules.core.service_manager import ServiceManager
+                data = request.get_json(silent=True) or {}
+                try:
+                    delay = int(data.get('delay', 1))
+                except Exception:
+                    delay = 1
+                logger.warning(
+                    "Admin restart requested: type=daemon delay=%ss remote=%s ua=%s",
+                    delay,
+                    request.remote_addr,
+                    request.headers.get('User-Agent', '-')
+                )
+                ok, message = ServiceManager.schedule_ctl_restart(delay_seconds=delay)
+                if not ok:
+                    logger.warning(
+                        "Admin restart rejected: type=daemon remote=%s reason=%s",
+                        request.remote_addr,
+                        message
+                    )
+                    return jsonify({'success': False, 'error': message}), 400
+                logger.warning(
+                    "Admin restart scheduled: type=daemon delay=%ss remote=%s",
+                    delay,
+                    request.remote_addr
+                )
+                return jsonify({'success': True, 'message': message})
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/admin/service/restart-daemon: {e}", exc_info=True)
                 return jsonify({'success': False, 'error': str(e)}), 500
 
         @self.app.route('/api/monitor/dataflow')
