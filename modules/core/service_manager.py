@@ -16,6 +16,7 @@ import subprocess
 import platform
 import logging
 import time
+from typing import Tuple
 
 
 class ServiceManager:
@@ -119,6 +120,47 @@ class ServiceManager:
         restart_thread.start()
 
         return True
+
+    @staticmethod
+    def _ctl_script_path() -> str:
+        """Absoluter Pfad zum lokalen Service-Control-Script."""
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        return os.path.join(project_root, 'scripts', 'web_server_ctl.sh')
+
+    @staticmethod
+    def schedule_ctl_restart(delay_seconds: int = 1) -> Tuple[bool, str]:
+        """
+        Plant einen Neustart über scripts/web_server_ctl.sh restart.
+
+        Returns:
+            (success, message)
+        """
+        script_path = ServiceManager._ctl_script_path()
+        if not os.path.exists(script_path):
+            return False, f"Control-Script nicht gefunden: {script_path}"
+
+        delay = max(0, min(int(delay_seconds), 30))
+        import threading
+
+        def delayed_restart():
+            logger = logging.getLogger("ServiceManager")
+            logger.warning(f"🔄 SERVICE CTL RESTART geplant in {delay}s via {script_path}")
+            time.sleep(delay)
+            try:
+                subprocess.Popen(
+                    ['bash', script_path, 'restart'],
+                    cwd=os.path.dirname(script_path),
+                    start_new_session=True,
+                    close_fds=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception as e:
+                logger.error(f"CTL-Restart konnte nicht gestartet werden: {e}", exc_info=True)
+
+        restart_thread = threading.Thread(target=delayed_restart, daemon=True)
+        restart_thread.start()
+        return True, f"Dienst-Neustart via Script in {delay}s geplant"
 
 
 # Test-Code
