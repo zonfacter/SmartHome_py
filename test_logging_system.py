@@ -18,6 +18,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _result(ok: bool):
+    """
+    Script-Modus: bool für Zusammenfassung zurückgeben.
+    Pytest-Modus: bei Fehler fehlschlagen, sonst None zurückgeben.
+    """
+    if __name__ == "__main__":
+        return ok
+    assert ok
+
+
 def test_sentry_integration():
     """Test 1: Sentry Integration"""
     print("=" * 60)
@@ -38,7 +48,7 @@ def test_sentry_integration():
             print("  [INFO] SENTRY_DSN nicht gesetzt - Sentry deaktiviert")
             print("  [INFO] Setze SENTRY_DSN in .env um Sentry zu aktivieren")
             print("\n✅ TEST 1 ÜBERSPRUNGEN (Sentry optional)\n")
-            return True
+            return _result(True)
 
         # Initialisiere Sentry
         success = sentry.initialize(
@@ -84,16 +94,16 @@ def test_sentry_integration():
             print("\n✅ TEST 1 BESTANDEN")
             print("  → Prüfe Sentry Dashboard: https://sentry.io")
             print("  → Suche nach Events mit 'testing' Environment\n")
-            return True
+            return _result(True)
         else:
             print("  ✗ Sentry-Initialisierung fehlgeschlagen")
-            return False
+            return _result(False)
 
     except Exception as e:
         print(f"\n❌ TEST 1 FEHLGESCHLAGEN: {e}\n")
         import traceback
         traceback.print_exc()
-        return False
+        return _result(False)
 
 
 def test_database_logger():
@@ -136,13 +146,13 @@ def test_database_logger():
             print("  ⚠️  Keine Logs gefunden (DB eventuell leer)")
 
         print("\n✅ TEST 2 BESTANDEN\n")
-        return True
+        return _result(True)
 
     except Exception as e:
         print(f"\n❌ TEST 2 FEHLGESCHLAGEN: {e}\n")
         import traceback
         traceback.print_exc()
-        return False
+        return _result(False)
 
 
 def test_web_manager_logging():
@@ -165,7 +175,7 @@ def test_web_manager_logging():
             print(f"  ✓ sentry Attribut vorhanden")
         else:
             print(f"  ✗ sentry Attribut fehlt!")
-            return False
+            return _result(False)
 
         # Prüfe Logging-Imports
         import logging
@@ -177,13 +187,13 @@ def test_web_manager_logging():
         print(f"  ✓ Test-Log ausgegeben")
 
         print("\n✅ TEST 3 BESTANDEN\n")
-        return True
+        return _result(True)
 
     except Exception as e:
         print(f"\n❌ TEST 3 FEHLGESCHLAGEN: {e}\n")
         import traceback
         traceback.print_exc()
-        return False
+        return _result(False)
 
 
 def test_plc_config_manager_logging():
@@ -213,7 +223,7 @@ def test_plc_config_manager_logging():
         # Verifiziere Pfade
         if manager.config_file is None:
             print(f"  ✗ config_file ist None!")
-            return False
+            return _result(False)
 
         print(f"  ✓ config_file gesetzt: {manager.config_file}")
 
@@ -225,16 +235,16 @@ def test_plc_config_manager_logging():
             print(f"  ✓ save() erfolgreich")
         else:
             print(f"  ✗ save() fehlgeschlagen")
-            return False
+            return _result(False)
 
         print("\n✅ TEST 4 BESTANDEN\n")
-        return True
+        return _result(True)
 
     except Exception as e:
         print(f"\n❌ TEST 4 FEHLGESCHLAGEN: {e}\n")
         import traceback
         traceback.print_exc()
-        return False
+        return _result(False)
 
 
 def main():

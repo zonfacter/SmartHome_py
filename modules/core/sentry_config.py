@@ -145,7 +145,7 @@ class SentryManager:
         if not self.initialized:
             return
 
-        with sentry_sdk.push_scope() as scope:
+        with sentry_sdk.new_scope() as scope:
             # Füge zusätzlichen Kontext hinzu
             for key, value in kwargs.items():
                 scope.set_extra(key, value)
@@ -164,7 +164,7 @@ class SentryManager:
         if not self.initialized:
             return
 
-        with sentry_sdk.push_scope() as scope:
+        with sentry_sdk.new_scope() as scope:
             for key, value in kwargs.items():
                 scope.set_extra(key, value)
 
