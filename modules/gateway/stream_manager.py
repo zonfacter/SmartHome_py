@@ -195,8 +195,8 @@ class StreamManager(BaseModule):
                 # Starte FFmpeg-Prozess
                 process = subprocess.Popen(
                     cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                     stdin=subprocess.DEVNULL
                 )
 
@@ -353,7 +353,7 @@ class StreamManager(BaseModule):
                     cmd,
                     env=env,
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
                     stdin=subprocess.DEVNULL
                 )
 
@@ -489,6 +489,7 @@ class StreamManager(BaseModule):
             FFmpeg-Kommando als Liste
         """
         cmd = ['ffmpeg']
+        cmd.extend(['-hide_banner', '-loglevel', 'warning'])
 
         # Hardware-Beschleunigung (Input) - nur wenn kein Scaling nötig
         if use_hw_accel and not resolution and self.hw_accel_mode == 'qsv':
