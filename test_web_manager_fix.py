@@ -9,6 +9,16 @@ import sys
 # Projekt-Root zum Path hinzufügen
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+
+def _result(ok: bool):
+    """
+    Script-Modus: bool für Zusammenfassung zurückgeben.
+    Pytest-Modus: bei Fehler fehlschlagen, sonst None zurückgeben.
+    """
+    if __name__ == "__main__":
+        return ok
+    assert ok
+
 def test_plc_config_manager():
     """Test 1: PLCConfigManager Pfad-Initialisierung"""
     print("=" * 60)
@@ -50,7 +60,7 @@ def test_plc_config_manager():
             print(f"  ✓ save() erfolgreich: {result}")
         except Exception as e:
             print(f"  ✗ save() Fehler: {e}")
-            return False
+            return _result(False)
 
         # Teste get_widgets() Methode
         try:
@@ -58,16 +68,16 @@ def test_plc_config_manager():
             print(f"  ✓ get_widgets() erfolgreich: {len(widgets) if widgets else 0} Widgets")
         except Exception as e:
             print(f"  ✗ get_widgets() Fehler: {e}")
-            return False
+            return _result(False)
 
         print("\n✅ TEST 1 BESTANDEN\n")
-        return True
+        return _result(True)
 
     except Exception as e:
         print(f"\n❌ TEST 1 FEHLGESCHLAGEN: {e}\n")
         import traceback
         traceback.print_exc()
-        return False
+        return _result(False)
 
 
 def test_web_manager_imports():
@@ -85,20 +95,20 @@ def test_web_manager_imports():
 
         if not FLASK_AVAILABLE:
             print("  ⚠️  Flask nicht verfügbar - Web-Server kann nicht starten")
-            return False
+            return _result(False)
 
         if not MANAGERS_AVAILABLE:
             print("  ⚠️  Manager-Module nicht verfügbar")
-            return False
+            return _result(False)
 
         print("\n✅ TEST 2 BESTANDEN\n")
-        return True
+        return _result(True)
 
     except Exception as e:
         print(f"\n❌ TEST 2 FEHLGESCHLAGEN: {e}\n")
         import traceback
         traceback.print_exc()
-        return False
+        return _result(False)
 
 
 def test_web_manager_initialization():
@@ -126,13 +136,13 @@ def test_web_manager_initialization():
         print(f"  ✓ Alle Attribute vorhanden")
 
         print("\n✅ TEST 3 BESTANDEN\n")
-        return True
+        return _result(True)
 
     except Exception as e:
         print(f"\n❌ TEST 3 FEHLGESCHLAGEN: {e}\n")
         import traceback
         traceback.print_exc()
-        return False
+        return _result(False)
 
 
 def test_api_route_handlers():
@@ -156,7 +166,7 @@ def test_api_route_handlers():
 
         if manager is None:
             print("  ✗ Manager ist None - würde Fehler 500 zurückgeben")
-            return False
+            return _result(False)
 
         try:
             # Dies ist die kritische Zeile aus der Route
@@ -164,7 +174,7 @@ def test_api_route_handlers():
             print(f"  ✓ manager.save() erfolgreich: {result}")
         except Exception as e:
             print(f"  ✗ manager.save() Fehler: {e}")
-            return False
+            return _result(False)
 
         # Simuliere GET /api/widgets
         print("  Simuliere: GET /api/widgets")
@@ -174,16 +184,16 @@ def test_api_route_handlers():
             print(f"  ✓ manager.get_widgets() erfolgreich: {len(widgets_result)} Widgets")
         except Exception as e:
             print(f"  ✗ manager.get_widgets() Fehler: {e}")
-            return False
+            return _result(False)
 
         print("\n✅ TEST 4 BESTANDEN\n")
-        return True
+        return _result(True)
 
     except Exception as e:
         print(f"\n❌ TEST 4 FEHLGESCHLAGEN: {e}\n")
         import traceback
         traceback.print_exc()
-        return False
+        return _result(False)
 
 
 def main():
