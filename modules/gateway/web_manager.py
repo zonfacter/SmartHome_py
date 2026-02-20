@@ -19,6 +19,7 @@ import secrets
 from collections import deque
 from urllib.parse import urlparse
 import uuid
+import hashlib
 
 # Flask & SocketIO (lazy import)
 try:
@@ -95,6 +96,8 @@ class WebManager(BaseModule):
         self._control_rate_limit_lock = threading.Lock()
         self._stream_viewers = {}
         self._stream_viewers_lock = threading.Lock()
+        self._idempotency_results = {}
+        self._idempotency_lock = threading.Lock()
 
     def initialize(self, app_context: Any):
         """Initialisiert das Modul und erzwingt absolute Pfade für alle Manager."""
@@ -649,6 +652,130 @@ class WebManager(BaseModule):
                 return False, f'Zu viele JSON-Felder ({len(data)}>{max_keys})', 400
 
         return True, '', 200
+
+    def _get_idempotency_key(self) -> str:
+        """Liest Idempotency-Key aus Request-Headern."""
+        key = str(request.headers.get('Idempotency-Key') or '').strip()
+        if not key:
+            key = str(request.headers.get('X-Idempotency-Key') or '').strip()
+        if not key:
+            return ''
+
+        max_len_raw = str(os.getenv('SMARTHOME_IDEMPOTENCY_KEY_MAX_LENGTH', '128')).strip()
+        try:
+            max_len = max(16, int(max_len_raw))
+        except Exception:
+            max_len = 128
+        return key[:max_len]
+
+    def _idempotency_request_fingerprint(self, payload: Any) -> str:
+        """Erzeugt Fingerprint aus Methode+Pfad+Payload."""
+        try:
+            canonical = json.dumps(payload if payload is not None else {}, sort_keys=True, separators=(',', ':'))
+        except Exception:
+            canonical = str(payload)
+        base = f"{request.method}:{request.path}:{canonical}"
+        return hashlib.sha256(base.encode('utf-8')).hexdigest()
+
+    def _prune_idempotency_cache(self, now: float):
+        """Entfernt abgelaufene/alte Idempotency-Einträge."""
+        max_entries_raw = str(os.getenv('SMARTHOME_IDEMPOTENCY_CACHE_MAX_ENTRIES', '5000')).strip()
+        try:
+            max_entries = max(100, int(max_entries_raw))
+        except Exception:
+            max_entries = 5000
+
+        stale_keys = [k for k, v in self._idempotency_results.items() if float(v.get('expires_at', 0.0)) <= now]
+        for key in stale_keys:
+            self._idempotency_results.pop(key, None)
+
+        if len(self._idempotency_results) > max_entries:
+            by_created = sorted(
+                self._idempotency_results.items(),
+                key=lambda item: float(item[1].get('created_at', 0.0))
+            )
+            overflow = len(self._idempotency_results) - max_entries
+            for key, _ in by_created[:overflow]:
+                self._idempotency_results.pop(key, None)
+
+    def _idempotency_precheck(self, payload: Any):
+        """
+        Prüft, ob ein identischer Request bereits verarbeitet wurde.
+        """
+        idem_key = self._get_idempotency_key()
+        if not idem_key:
+            return None
+
+        cache_key = f"{request.method}:{request.path}:{idem_key}"
+        fingerprint = self._idempotency_request_fingerprint(payload)
+        now = time.time()
+
+        with self._idempotency_lock:
+            self._prune_idempotency_cache(now)
+            existing = self._idempotency_results.get(cache_key)
+            if not existing:
+                return None
+
+            if str(existing.get('fingerprint', '')) != fingerprint:
+                response = jsonify({
+                    'success': False,
+                    'error': 'idempotency_key_reused_with_different_payload',
+                    'message': 'Idempotency-Key wurde bereits mit anderem Payload verwendet'
+                })
+                response.status_code = 409
+                response.headers['Idempotency-Key'] = idem_key
+                response.headers['X-Idempotency-Replayed'] = 'false'
+                return response
+
+            response = jsonify(existing.get('body', {}))
+            response.status_code = int(existing.get('status_code', 200))
+            response.headers['Idempotency-Key'] = idem_key
+            response.headers['X-Idempotency-Replayed'] = 'true'
+            logger.info(
+                "Idempotent replay served: req_id=%s path=%s key=%s",
+                self._get_request_id(),
+                request.path,
+                idem_key
+            )
+            return response
+
+    def _idempotency_store(self, payload: Any, body: Dict[str, Any], status_code: int):
+        """Speichert Response für Wiederholungs-Requests mit Idempotency-Key."""
+        idem_key = self._get_idempotency_key()
+        if not idem_key:
+            return
+        if int(status_code) >= 500:
+            return
+
+        ttl_raw = str(os.getenv('SMARTHOME_IDEMPOTENCY_WINDOW_SECONDS', '30')).strip()
+        try:
+            ttl_seconds = max(1, int(ttl_raw))
+        except Exception:
+            ttl_seconds = 30
+
+        now = time.time()
+        cache_key = f"{request.method}:{request.path}:{idem_key}"
+        entry = {
+            'fingerprint': self._idempotency_request_fingerprint(payload),
+            'body': body,
+            'status_code': int(status_code),
+            'created_at': now,
+            'expires_at': now + ttl_seconds
+        }
+        with self._idempotency_lock:
+            self._prune_idempotency_cache(now)
+            self._idempotency_results[cache_key] = entry
+
+    def _build_idempotent_json_response(self, payload: Any, body: Dict[str, Any], status_code: int = 200):
+        """Erstellt JSON-Response und persistiert sie optional für Idempotency-Key."""
+        self._idempotency_store(payload, body, status_code)
+        response = jsonify(body)
+        response.status_code = int(status_code)
+        idem_key = self._get_idempotency_key()
+        if idem_key:
+            response.headers['Idempotency-Key'] = idem_key
+            response.headers['X-Idempotency-Replayed'] = 'false'
+        return response
 
     def _register_routes(self):
         """Registriert API-Routen mit Fehler-Handling für None-Objekte."""
@@ -1475,6 +1602,9 @@ class WebManager(BaseModule):
                 db_path = os.path.join(project_root, 'config', 'system_logs.db')
 
                 data = request.get_json(silent=True) or {}
+                replay = self._idempotency_precheck(data)
+                if replay is not None:
+                    return replay
                 keep_count = int(data.get('keep_count', 100))
                 keep_count = max(10, min(keep_count, 5000))
 
@@ -1491,11 +1621,11 @@ class WebManager(BaseModule):
                     request.remote_addr
                 )
 
-                return jsonify({
+                return self._build_idempotent_json_response(data, {
                     'success': True,
                     'deleted': deleted,
                     'keep_count': keep_count
-                })
+                }, 200)
             except Exception as e:
                 logger.error(f"Fehler bei POST /api/admin/logs/clear: {e}", exc_info=True)
                 return jsonify({'success': False, 'error': str(e)}), 500
@@ -1516,6 +1646,9 @@ class WebManager(BaseModule):
             try:
                 from modules.core.service_manager import ServiceManager
                 data = request.get_json(silent=True) or {}
+                replay = self._idempotency_precheck(data)
+                if replay is not None:
+                    return replay
                 try:
                     delay = int(data.get('delay', 2))
                 except Exception:
@@ -1535,10 +1668,10 @@ class WebManager(BaseModule):
                     delay,
                     request.remote_addr
                 )
-                return jsonify({
+                return self._build_idempotent_json_response(data, {
                     'success': True,
                     'message': f'Service-Neustart in {delay}s geplant'
-                })
+                }, 200)
             except Exception as e:
                 logger.error(f"Fehler bei POST /api/admin/service/restart: {e}", exc_info=True)
                 return jsonify({'success': False, 'error': str(e)}), 500
@@ -1549,6 +1682,9 @@ class WebManager(BaseModule):
             try:
                 from modules.core.service_manager import ServiceManager
                 data = request.get_json(silent=True) or {}
+                replay = self._idempotency_precheck(data)
+                if replay is not None:
+                    return replay
                 try:
                     delay = int(data.get('delay', 1))
                 except Exception:
@@ -1568,14 +1704,22 @@ class WebManager(BaseModule):
                         request.remote_addr,
                         message
                     )
-                    return jsonify({'success': False, 'error': message}), 400
+                    return self._build_idempotent_json_response(
+                        data,
+                        {'success': False, 'error': message},
+                        400
+                    )
                 logger.warning(
                     "Admin restart scheduled: req_id=%s type=daemon delay=%ss remote=%s",
                     self._get_request_id(),
                     delay,
                     request.remote_addr
                 )
-                return jsonify({'success': True, 'message': message})
+                return self._build_idempotent_json_response(
+                    data,
+                    {'success': True, 'message': message},
+                    200
+                )
             except Exception as e:
                 logger.error(f"Fehler bei POST /api/admin/service/restart-daemon: {e}", exc_info=True)
                 return jsonify({'success': False, 'error': str(e)}), 500
@@ -2559,38 +2703,45 @@ class WebManager(BaseModule):
                 return jsonify({'status': 'error', 'message': 'Variable Manager nicht verfügbar'}), 503
 
             try:
-                data = request.json
+                data = request.get_json(silent=True) or {}
+                replay = self._idempotency_precheck(data)
+                if replay is not None:
+                    return replay
                 plc_id = data.get('plc_id', 'plc_001')
                 variable = data.get('variable')
                 value = data.get('value')
 
                 if not variable:
-                    return jsonify({'status': 'error', 'message': 'Variable fehlt'}), 400
+                    return self._build_idempotent_json_response(
+                        data,
+                        {'status': 'error', 'message': 'Variable fehlt'},
+                        400
+                    )
 
                 # Gateway-interne Variablen (nicht-PLC) direkt in Telemetrie schreiben
                 if variable.startswith('GATEWAY.') and self.data_gateway:
                     self.data_gateway.update_telemetry(variable, value)
                     logger.info(f"✍️  Gateway-Variable geschrieben: {variable} = {value}")
-                    return jsonify({
+                    return self._build_idempotent_json_response(data, {
                         'status': 'success',
                         'message': 'Gateway-Variable geschrieben',
                         'variable': variable,
                         'value': value,
                         'plc_id': plc_id
-                    })
+                    }, 200)
 
                 # Schreibe über Data Gateway
                 success = self.data_gateway.write_variable(variable, value, plc_id)
 
                 if success:
                     logger.info(f"✍️  Variable geschrieben: {plc_id}/{variable} = {value}")
-                    return jsonify({
+                    return self._build_idempotent_json_response(data, {
                         'status': 'success',
                         'message': 'Variable geschrieben',
                         'variable': variable,
                         'value': value,
                         'plc_id': plc_id
-                    })
+                    }, 200)
                 else:
                     return jsonify({'status': 'error', 'message': 'Schreiben fehlgeschlagen'}), 500
 
