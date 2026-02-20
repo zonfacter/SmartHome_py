@@ -25,8 +25,13 @@ import json
 import re
 import math
 import uuid
+import logging
 from collections import OrderedDict, defaultdict
 from datetime import datetime, timezone
+from modules.core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitBreakerOpenError
+
+
+logger = logging.getLogger(__name__)
 
 
 class DataGateway(BaseModule):
@@ -112,6 +117,20 @@ class DataGateway(BaseModule):
             5,
             min_value=1
         )
+        self.cb_failure_threshold = self._get_env_int(
+            'SMARTHOME_CB_FAILURE_THRESHOLD',
+            5,
+            min_value=1
+        )
+        self.cb_recovery_seconds = max(
+            1.0,
+            float(os.getenv('SMARTHOME_CB_RECOVERY_SECONDS', '30') or 30)
+        )
+        self.cb_half_open_max_calls = self._get_env_int(
+            'SMARTHOME_CB_HALF_OPEN_MAX_CALLS',
+            1,
+            min_value=1
+        )
         self._poll_window_cursor = 0
 
         # Caches
@@ -160,6 +179,7 @@ class DataGateway(BaseModule):
         # Missing-symbol protection: track missing symbol warnings to avoid log spam
         # key -> {'count': int, 'last_log': float, 'suspended_until': float}
         self.missing_symbol_stats = {}
+        self._circuit_breakers: Dict[str, CircuitBreaker] = {}
 
     def set_correlation_id(self, correlation_id: str):
         self._request_context.correlation_id = str(correlation_id or '').strip()
@@ -335,6 +355,26 @@ class DataGateway(BaseModule):
         if max_value is not None:
             value = min(int(max_value), value)
         return value
+
+    def _get_circuit_breaker(self, key: str) -> CircuitBreaker:
+        name = str(key or 'unknown')
+        breaker = self._circuit_breakers.get(name)
+        if breaker:
+            return breaker
+        cfg = CircuitBreakerConfig(
+            failure_threshold=self.cb_failure_threshold,
+            recovery_timeout_seconds=self.cb_recovery_seconds,
+            half_open_max_calls=self.cb_half_open_max_calls
+        )
+        breaker = CircuitBreaker(name=name, config=cfg)
+        self._circuit_breakers[name] = breaker
+        return breaker
+
+    def get_circuit_breaker_stats(self) -> Dict[str, Any]:
+        return {
+            key: breaker.snapshot()
+            for key, breaker in self._circuit_breakers.items()
+        }
 
     def _detect_capabilities(self) -> Dict[str, Any]:
         """Erkennt System-Capabilities"""
@@ -753,11 +793,22 @@ class DataGateway(BaseModule):
 
         # PLC Target
         elif target.startswith("plc"):
-            self._route_to_plc(target, datapoint, route)
+            plc_id = target.split('.', 1)[0]
+            breaker = self._get_circuit_breaker(f"plc:{plc_id}:route")
+            try:
+                breaker.call(lambda: self._route_to_plc(target, datapoint, route))
+            except CircuitBreakerOpenError as cb_open:
+                raise RuntimeError(str(cb_open))
 
         # MQTT Target
         elif target.startswith("mqtt"):
-            self._route_to_mqtt(target, datapoint, route)
+            parts = target.split('.', 2)
+            broker_id = parts[1] if len(parts) > 1 else "default"
+            breaker = self._get_circuit_breaker(f"mqtt:{broker_id}:route")
+            try:
+                breaker.call(lambda: self._route_to_mqtt(target, datapoint, route))
+            except CircuitBreakerOpenError as cb_open:
+                raise RuntimeError(str(cb_open))
 
         # Log Target
         elif target.startswith("log"):
@@ -838,45 +889,56 @@ class DataGateway(BaseModule):
         # Format: "plc_001.MAIN.variable"
         parts = target.split('.', 1)
         if len(parts) < 2:
-            return
+            raise ValueError(f"Ungueltiges PLC-Ziel: {target}")
 
         plc_id = parts[0]
         symbol = parts[1]
 
         # TODO: Multi-PLC Support (Phase 2)
         # Aktuell: Nutze self.plc (einzelne PLC)
-        if self.plc and self.plc.connected:
-            try:
-                # Auto-detect PLC type
-                value = datapoint['value']
-                self.plc.write_by_name(symbol, value)
-            except Exception as e:
-                print(f"  ⚠️  PLC-Write Fehler ({symbol}): {e}")
+        if not (self.plc and self.plc.connected):
+            raise ConnectionError(f"PLC nicht verbunden: {plc_id}")
+
+        try:
+            value = datapoint['value']
+            ok = self.plc.write_by_name(symbol, value)
+            if ok is False:
+                raise RuntimeError(f"PLC-Write fehlgeschlagen: {symbol}")
+            return True
+        except Exception as e:
+            raise RuntimeError(f"PLC-Write Fehler ({symbol}): {e}") from e
 
     def _route_to_mqtt(self, target: str, datapoint: Dict, route: Dict):
         """Routet Daten zu MQTT"""
         # Format: "mqtt.broker_local.topic/path"
         parts = target.split('.', 2)
         if len(parts) < 3:
-            return
+            raise ValueError(f"Ungueltiges MQTT-Ziel: {target}")
 
         broker_id = parts[1]
         topic = parts[2]
 
         # TODO: Multi-MQTT Support (Phase 2)
         # Aktuell: Nutze self.mqtt (einzelner Broker)
-        if self.mqtt:
-            try:
-                import json
-                payload = json.dumps({
-                    'value': datapoint['value'],
-                    'timestamp': datapoint['timestamp'],
-                    'timestamp_utc': datapoint.get('timestamp_utc'),
-                    'source': datapoint['source_id']
-                })
-                # self.mqtt.publish(topic, payload)  # TODO: Implementierung in mqtt_module
-            except Exception as e:
-                print(f"  ⚠️  MQTT-Publish Fehler ({topic}): {e}")
+        if not self.mqtt:
+            raise ConnectionError(f"MQTT-Modul nicht verfuegbar: {broker_id}")
+        if not getattr(self.mqtt, 'connected', False):
+            raise ConnectionError(f"MQTT nicht verbunden: {broker_id}")
+
+        try:
+            import json
+            payload = json.dumps({
+                'value': datapoint['value'],
+                'timestamp': datapoint['timestamp'],
+                'timestamp_utc': datapoint.get('timestamp_utc'),
+                'source': datapoint['source_id']
+            })
+            ok = self.mqtt.publish(topic, payload)
+            if ok is False:
+                raise RuntimeError(f"MQTT publish fehlgeschlagen: {topic}")
+            return True
+        except Exception as e:
+            raise RuntimeError(f"MQTT-Publish Fehler ({topic}): {e}") from e
 
     def _route_to_log(self, target: str, datapoint: Dict, route: Dict):
         """Routet Daten zum Logging-System"""
@@ -971,6 +1033,7 @@ class DataGateway(BaseModule):
             'routes_processed': self.stats['routes_processed'],
             'routes_blocked': self.stats['routes_blocked'],
             'spam_events': self.stats['spam_events'],
+            'circuit_breakers': self.get_circuit_breaker_stats(),
             'dead_letter': {
                 'queued': len(self.dead_letter_queue),
                 'enqueued_total': self.stats['dlq_enqueued'],
@@ -1420,6 +1483,7 @@ class DataGateway(BaseModule):
             'telemetry_count': len(self.telemetry_cache),
             'telemetry_evictions': self.stats['telemetry_evictions'],
             'polling_backpressure_skips': self.stats['polling_backpressure_skips'],
+            'circuit_breakers': self.get_circuit_breaker_stats(),
             'dead_letter': self.get_dead_letter_stats(),
             'timestamp_utc': self._utc_iso(),
             'uptime': time.time() - getattr(self, '_start_time', time.time())
@@ -1652,8 +1716,14 @@ class DataGateway(BaseModule):
         Returns:
             True bei Erfolg, False bei Fehler
         """
-        import logging
-        logger = logging.getLogger(__name__)
+        breaker = self._get_circuit_breaker(f"plc:{plc_id}:write")
+        if not breaker.allow_request():
+            logger.warning(
+                "Circuit breaker open, PLC write skipped: plc_id=%s variable=%s",
+                plc_id,
+                variable_name
+            )
+            return False
 
         try:
             # Hole Symbol-Info
@@ -1686,9 +1756,11 @@ class DataGateway(BaseModule):
 
                 # Fallback: wenn plc_type None, lasse PLC-Connection auto-detect verwenden
                 if plc_type is None:
-                    self.plc.write_by_name(variable_name, value)
+                    write_ok = self.plc.write_by_name(variable_name, value)
                 else:
-                    self.plc.write_by_name(variable_name, value, plc_type)
+                    write_ok = self.plc.write_by_name(variable_name, value, plc_type)
+                if write_ok is False:
+                    raise RuntimeError("PLC write returned False")
 
                 # Update Cache
                 self.variable_manager.update_value(variable_name, value, plc_id)
@@ -1716,9 +1788,14 @@ class DataGateway(BaseModule):
                         logger.debug(f"Broadcast temporär nicht möglich: {e}") 
 
                 logger.info(f"✍️  {plc_id}/{variable_name} = {value}")
+                breaker.record_success()
                 return True
 
+            breaker.record_failure("plc_not_connected")
+            return False
+
         except Exception as e:
+            breaker.record_failure(str(e))
             logger.error(f"❌ Fehler beim Schreiben von {plc_id}/{variable_name}: {e}", exc_info=True)
             return False
 

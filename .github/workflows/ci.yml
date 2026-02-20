@@ -50,3 +50,4 @@ jobs:
           pytest -q test_backup_manager.py
           pytest -q test_integration_core_flows.py
           pytest -q test_control_auth_security.py
+          pytest -q test_circuit_breakers.py
