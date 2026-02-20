@@ -871,7 +871,11 @@ source venv/bin/activate
 
 # Pakete installieren
 pip install -r requirements.txt
+# Für reproduzierbare Builds (CI/Release):
+pip install --require-hashes -r requirements.lock.txt
 ```
+
+Details zu Lockfiles, CI-Checks und Update-Prozess: `docs/REPRODUCIBLE_BUILDS.md`
 
 ### **1b. Linux-Setup (ADS-Route zu Beckhoff PLC)**
 
