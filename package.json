@@ -1,4 +1,5 @@
 {
+  "name": "Smarthome-Web",
   "devDependencies": {
     "tailwindcss": "4.1.18"
   },
