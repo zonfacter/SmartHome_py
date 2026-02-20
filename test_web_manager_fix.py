@@ -5,6 +5,7 @@ Prüft ob die Race-Condition behoben ist
 
 import os
 import sys
+import traceback
 
 # Projekt-Root zum Path hinzufügen
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -50,7 +51,7 @@ def test_plc_config_manager():
             print(f"  ✓ save() erfolgreich: {result}")
         except Exception as e:
             print(f"  ✗ save() Fehler: {e}")
-            return False
+            raise AssertionError(f"save() Fehler: {e}") from e
 
         # Teste get_widgets() Methode
         try:
@@ -58,16 +59,13 @@ def test_plc_config_manager():
             print(f"  ✓ get_widgets() erfolgreich: {len(widgets) if widgets else 0} Widgets")
         except Exception as e:
             print(f"  ✗ get_widgets() Fehler: {e}")
-            return False
+            raise AssertionError(f"get_widgets() Fehler: {e}") from e
 
         print("\n✅ TEST 1 BESTANDEN\n")
-        return True
 
     except Exception as e:
         print(f"\n❌ TEST 1 FEHLGESCHLAGEN: {e}\n")
-        import traceback
-        traceback.print_exc()
-        return False
+        raise AssertionError(f"TEST 1 FEHLGESCHLAGEN: {e}") from e
 
 
 def test_web_manager_imports():
@@ -85,20 +83,17 @@ def test_web_manager_imports():
 
         if not FLASK_AVAILABLE:
             print("  ⚠️  Flask nicht verfügbar - Web-Server kann nicht starten")
-            return False
+            assert FLASK_AVAILABLE, "Flask nicht verfügbar"
 
         if not MANAGERS_AVAILABLE:
             print("  ⚠️  Manager-Module nicht verfügbar")
-            return False
+            assert MANAGERS_AVAILABLE, "Manager-Module nicht verfügbar"
 
         print("\n✅ TEST 2 BESTANDEN\n")
-        return True
 
     except Exception as e:
         print(f"\n❌ TEST 2 FEHLGESCHLAGEN: {e}\n")
-        import traceback
-        traceback.print_exc()
-        return False
+        raise AssertionError(f"TEST 2 FEHLGESCHLAGEN: {e}") from e
 
 
 def test_web_manager_initialization():
@@ -126,13 +121,10 @@ def test_web_manager_initialization():
         print(f"  ✓ Alle Attribute vorhanden")
 
         print("\n✅ TEST 3 BESTANDEN\n")
-        return True
 
     except Exception as e:
         print(f"\n❌ TEST 3 FEHLGESCHLAGEN: {e}\n")
-        import traceback
-        traceback.print_exc()
-        return False
+        raise AssertionError(f"TEST 3 FEHLGESCHLAGEN: {e}") from e
 
 
 def test_api_route_handlers():
@@ -154,9 +146,7 @@ def test_api_route_handlers():
         # Simuliere POST Request Logic
         print("  Simuliere: POST /api/plc/config")
 
-        if manager is None:
-            print("  ✗ Manager ist None - würde Fehler 500 zurückgeben")
-            return False
+        assert manager is not None, "Manager ist None - würde Fehler 500 zurückgeben"
 
         try:
             # Dies ist die kritische Zeile aus der Route
@@ -164,7 +154,7 @@ def test_api_route_handlers():
             print(f"  ✓ manager.save() erfolgreich: {result}")
         except Exception as e:
             print(f"  ✗ manager.save() Fehler: {e}")
-            return False
+            raise AssertionError(f"manager.save() Fehler: {e}") from e
 
         # Simuliere GET /api/widgets
         print("  Simuliere: GET /api/widgets")
@@ -174,14 +164,21 @@ def test_api_route_handlers():
             print(f"  ✓ manager.get_widgets() erfolgreich: {len(widgets_result)} Widgets")
         except Exception as e:
             print(f"  ✗ manager.get_widgets() Fehler: {e}")
-            return False
+            raise AssertionError(f"manager.get_widgets() Fehler: {e}") from e
 
         print("\n✅ TEST 4 BESTANDEN\n")
-        return True
 
     except Exception as e:
         print(f"\n❌ TEST 4 FEHLGESCHLAGEN: {e}\n")
-        import traceback
+        raise AssertionError(f"TEST 4 FEHLGESCHLAGEN: {e}") from e
+
+
+def _run_test_case(test_func):
+    """CLI-Helfer für boolesche Zusammenfassung außerhalb von pytest."""
+    try:
+        test_func()
+        return True
+    except Exception:
         traceback.print_exc()
         return False
 
@@ -195,16 +192,16 @@ def main():
     results = []
 
     # Test 1: PLCConfigManager
-    results.append(("PLCConfigManager Pfad-Init", test_plc_config_manager()))
+    results.append(("PLCConfigManager Pfad-Init", _run_test_case(test_plc_config_manager)))
 
     # Test 2: Imports
-    results.append(("Web Manager Imports", test_web_manager_imports()))
+    results.append(("Web Manager Imports", _run_test_case(test_web_manager_imports)))
 
     # Test 3: Initialisierung
-    results.append(("Web Manager Initialisierung", test_web_manager_initialization()))
+    results.append(("Web Manager Initialisierung", _run_test_case(test_web_manager_initialization)))
 
     # Test 4: API Route Logic
-    results.append(("API Route Handler Logic", test_api_route_handlers()))
+    results.append(("API Route Handler Logic", _run_test_case(test_api_route_handlers)))
 
     # Zusammenfassung
     print("=" * 60)

@@ -6,6 +6,7 @@ Testet alle Logging-Komponenten des v5.1.0 Fixes
 import os
 import sys
 import logging
+import traceback
 
 # Projekt-Root zum Path hinzufügen
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -38,7 +39,7 @@ def test_sentry_integration():
             print("  [INFO] SENTRY_DSN nicht gesetzt - Sentry deaktiviert")
             print("  [INFO] Setze SENTRY_DSN in .env um Sentry zu aktivieren")
             print("\n✅ TEST 1 ÜBERSPRUNGEN (Sentry optional)\n")
-            return True
+            return
 
         # Initialisiere Sentry
         success = sentry.initialize(
@@ -84,16 +85,13 @@ def test_sentry_integration():
             print("\n✅ TEST 1 BESTANDEN")
             print("  → Prüfe Sentry Dashboard: https://sentry.io")
             print("  → Suche nach Events mit 'testing' Environment\n")
-            return True
+            return
         else:
-            print("  ✗ Sentry-Initialisierung fehlgeschlagen")
-            return False
+            raise AssertionError("Sentry-Initialisierung fehlgeschlagen")
 
     except Exception as e:
         print(f"\n❌ TEST 1 FEHLGESCHLAGEN: {e}\n")
-        import traceback
-        traceback.print_exc()
-        return False
+        raise AssertionError(f"TEST 1 FEHLGESCHLAGEN: {e}") from e
 
 
 def test_database_logger():
@@ -136,13 +134,10 @@ def test_database_logger():
             print("  ⚠️  Keine Logs gefunden (DB eventuell leer)")
 
         print("\n✅ TEST 2 BESTANDEN\n")
-        return True
 
     except Exception as e:
         print(f"\n❌ TEST 2 FEHLGESCHLAGEN: {e}\n")
-        import traceback
-        traceback.print_exc()
-        return False
+        raise AssertionError(f"TEST 2 FEHLGESCHLAGEN: {e}") from e
 
 
 def test_web_manager_logging():
@@ -164,8 +159,7 @@ def test_web_manager_logging():
         if hasattr(web_mgr, 'sentry'):
             print(f"  ✓ sentry Attribut vorhanden")
         else:
-            print(f"  ✗ sentry Attribut fehlt!")
-            return False
+            raise AssertionError("sentry Attribut fehlt")
 
         # Prüfe Logging-Imports
         import logging
@@ -177,13 +171,10 @@ def test_web_manager_logging():
         print(f"  ✓ Test-Log ausgegeben")
 
         print("\n✅ TEST 3 BESTANDEN\n")
-        return True
 
     except Exception as e:
         print(f"\n❌ TEST 3 FEHLGESCHLAGEN: {e}\n")
-        import traceback
-        traceback.print_exc()
-        return False
+        raise AssertionError(f"TEST 3 FEHLGESCHLAGEN: {e}") from e
 
 
 def test_plc_config_manager_logging():
@@ -212,8 +203,7 @@ def test_plc_config_manager_logging():
 
         # Verifiziere Pfade
         if manager.config_file is None:
-            print(f"  ✗ config_file ist None!")
-            return False
+            raise AssertionError("config_file ist None")
 
         print(f"  ✓ config_file gesetzt: {manager.config_file}")
 
@@ -224,15 +214,21 @@ def test_plc_config_manager_logging():
         if result:
             print(f"  ✓ save() erfolgreich")
         else:
-            print(f"  ✗ save() fehlgeschlagen")
-            return False
+            raise AssertionError("save() fehlgeschlagen")
 
         print("\n✅ TEST 4 BESTANDEN\n")
-        return True
 
     except Exception as e:
         print(f"\n❌ TEST 4 FEHLGESCHLAGEN: {e}\n")
-        import traceback
+        raise AssertionError(f"TEST 4 FEHLGESCHLAGEN: {e}") from e
+
+
+def _run_test_case(test_func):
+    """CLI-Helfer für boolesche Zusammenfassung außerhalb von pytest."""
+    try:
+        test_func()
+        return True
+    except Exception:
         traceback.print_exc()
         return False
 
@@ -246,16 +242,16 @@ def main():
     results = []
 
     # Test 1: Sentry
-    results.append(("Sentry Integration", test_sentry_integration()))
+    results.append(("Sentry Integration", _run_test_case(test_sentry_integration)))
 
     # Test 2: Database Logger
-    results.append(("SQLite Database Logger", test_database_logger()))
+    results.append(("SQLite Database Logger", _run_test_case(test_database_logger)))
 
     # Test 3: Web Manager Logging
-    results.append(("Web Manager Logging", test_web_manager_logging()))
+    results.append(("Web Manager Logging", _run_test_case(test_web_manager_logging)))
 
     # Test 4: PLCConfigManager Logging
-    results.append(("PLCConfigManager Logging", test_plc_config_manager_logging()))
+    results.append(("PLCConfigManager Logging", _run_test_case(test_plc_config_manager_logging)))
 
     # Zusammenfassung
     print("=" * 60)

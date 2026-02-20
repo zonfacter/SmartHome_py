@@ -8,6 +8,7 @@ Zentrale Sentry-Integration für Error Tracking
 import os
 import sys
 import platform
+from contextlib import contextmanager
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
 from sentry_sdk.integrations.threading import ThreadingIntegration
@@ -145,7 +146,7 @@ class SentryManager:
         if not self.initialized:
             return
 
-        with sentry_sdk.push_scope() as scope:
+        with self._scope_context() as scope:
             # Füge zusätzlichen Kontext hinzu
             for key, value in kwargs.items():
                 scope.set_extra(key, value)
@@ -164,11 +165,25 @@ class SentryManager:
         if not self.initialized:
             return
 
-        with sentry_sdk.push_scope() as scope:
+        with self._scope_context() as scope:
             for key, value in kwargs.items():
                 scope.set_extra(key, value)
 
             sentry_sdk.capture_message(message, level=level)
+
+    @contextmanager
+    def _scope_context(self):
+        """
+        Nutzt neue Scope-API (Sentry 2.x) und fällt kompatibel auf push_scope zurück.
+        """
+        scope_factory = getattr(sentry_sdk, 'new_scope', None)
+        if callable(scope_factory):
+            with scope_factory() as scope:
+                yield scope
+            return
+
+        with sentry_sdk.push_scope() as scope:
+            yield scope
 
     def set_user(self, user_id: Optional[str] = None, **kwargs):
         """
