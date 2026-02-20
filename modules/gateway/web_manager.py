@@ -20,6 +20,7 @@ from collections import deque
 from urllib.parse import urlparse
 import uuid
 import hashlib
+from datetime import datetime, timezone
 
 # Flask & SocketIO (lazy import)
 try:
@@ -473,6 +474,10 @@ class WebManager(BaseModule):
         if req_id:
             return str(req_id)
         return "-"
+
+    def _utc_iso(self, epoch: float = None) -> str:
+        ts = time.time() if epoch is None else float(epoch)
+        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace('+00:00', 'Z')
 
     def _check_control_rate_limit(self):
         """
@@ -1821,6 +1826,7 @@ class WebManager(BaseModule):
                 'total_throughput': 0,
                 'active_connections': 0,
                 'timestamp': time.time(),
+                'timestamp_utc': self._utc_iso(),
                 'hardware': {}
             }
 
@@ -1869,6 +1875,7 @@ class WebManager(BaseModule):
             """Latenz-Messung für Monitoring"""
             return jsonify({
                 'timestamp': time.time(),
+                'timestamp_utc': self._utc_iso(),
                 'latency_ms': 0.5  # Stub - echte Messung würde über PLC gehen
             })
 
@@ -2097,6 +2104,7 @@ class WebManager(BaseModule):
                     'format': 'camera_trigger_rules',
                     'version': self._camera_trigger_schema_version(),
                     'exported_at': int(time.time()),
+                    'exported_at_utc': self._utc_iso(),
                     'rules': self._camera_trigger_rules
                 }
                 resp = jsonify(payload)
@@ -2216,7 +2224,8 @@ class WebManager(BaseModule):
                     'name': data.get('name') or cam_cfg.get('name') or cam_id,
                     'type': data.get('type') or cam_cfg.get('type') or 'ring',
                     'source': data.get('source', 'gateway'),
-                    'timestamp': int(time.time())
+                    'timestamp': int(time.time()),
+                    'timestamp_utc': self._utc_iso()
                 }
                 self.broadcast_event('camera_alert', payload)
                 return jsonify({'success': True, 'event': payload})
@@ -2874,6 +2883,7 @@ class WebManager(BaseModule):
                         'variable': variable,
                         'value': value,
                         'timestamp': timestamp,
+                        'timestamp_utc': self._utc_iso(timestamp),
                         'plc_id': plc_id,
                         'source': 'gateway'
                     })
@@ -2888,6 +2898,7 @@ class WebManager(BaseModule):
                             'variable': variable,
                             'value': value,
                             'timestamp': timestamp,
+                            'timestamp_utc': self._utc_iso(timestamp),
                             'plc_id': plc_id,
                             'source': 'cache'
                         })
@@ -2913,6 +2924,7 @@ class WebManager(BaseModule):
                     'variable': variable,
                     'value': value,
                     'timestamp': timestamp,
+                    'timestamp_utc': self._utc_iso(timestamp),
                     'plc_id': plc_id,
                     'source': 'plc'
                 })
@@ -3466,7 +3478,8 @@ class WebManager(BaseModule):
                     'trigger_rule_id': rule_id,
                     'trigger_variable': key,
                     'duration_seconds': max(5, min(duration, 120)),
-                    'timestamp': int(time.time())
+                    'timestamp': int(time.time()),
+                    'timestamp_utc': self._utc_iso()
                 })
 
     def _set_ring_doorbell_state(self, cam_id: str, cam_name: str, event_id: str, ding_ts: Any, active: bool):
@@ -3500,7 +3513,8 @@ class WebManager(BaseModule):
                 'type': 'ring',
                 'source': 'ring_doorbell',
                 'event_id': event_id,
-                'timestamp': int(time.time())
+                'timestamp': int(time.time()),
+                'timestamp_utc': self._utc_iso()
             })
 
     def _ring_event_loop(self):
@@ -3592,6 +3606,7 @@ class WebManager(BaseModule):
             'key': key,
             'value': value,
             'timestamp': time.time(),
+            'timestamp_utc': self._utc_iso(),
             'correlation_id': correlation_id or self._get_request_id()
         })
         logger.debug("Socket telemetry_update: key=%s cid=%s", key, correlation_id or self._get_request_id())
@@ -3609,6 +3624,11 @@ class WebManager(BaseModule):
 
         payload = dict(data or {})
         payload.setdefault('correlation_id', self._get_request_id())
+        if 'timestamp' in payload and 'timestamp_utc' not in payload:
+            try:
+                payload['timestamp_utc'] = self._utc_iso(float(payload.get('timestamp')))
+            except Exception:
+                payload['timestamp_utc'] = self._utc_iso()
         self.socketio.emit(event_type, payload)
         logger.info("Socket event emitted: type=%s cid=%s", event_type, payload.get('correlation_id'))
 

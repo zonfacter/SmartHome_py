@@ -25,7 +25,7 @@ import json
 import re
 import math
 from collections import OrderedDict, defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class DataGateway(BaseModule):
@@ -152,6 +152,45 @@ class DataGateway(BaseModule):
         if cid:
             return cid
         return f"gw-{int(time.time() * 1000)}-{threading.get_ident()}"
+
+    def _utc_iso(self, epoch: float = None) -> str:
+        ts = time.time() if epoch is None else float(epoch)
+        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace('+00:00', 'Z')
+
+    def _normalize_timestamp(self, raw_ts: Any):
+        """
+        Normalisiert Zeitstempel aus Legacy/Neuformat:
+        - Epoch (int/float/zahl-string)
+        - ISO8601 UTC/String
+        Rückgabe: (epoch_float, utc_iso_string)
+        """
+        if raw_ts in (None, ''):
+            now = time.time()
+            return now, self._utc_iso(now)
+
+        if isinstance(raw_ts, (int, float)):
+            ts = float(raw_ts)
+            return ts, self._utc_iso(ts)
+
+        raw = str(raw_ts).strip()
+        try:
+            ts = float(raw)
+            return ts, self._utc_iso(ts)
+        except Exception:
+            pass
+
+        try:
+            candidate = raw
+            if raw.endswith('Z'):
+                candidate = raw[:-1] + '+00:00'
+            parsed = datetime.fromisoformat(candidate)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            ts = parsed.timestamp()
+            return ts, datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace('+00:00', 'Z')
+        except Exception:
+            now = time.time()
+            return now, self._utc_iso(now)
 
     def initialize(self, app_context: Any):
         """Initialisiert Data Gateway"""
@@ -604,11 +643,13 @@ class DataGateway(BaseModule):
                 'metadata': dict
             }
         """
+        ts_epoch, ts_utc = self._normalize_timestamp((metadata or {}).get('timestamp'))
         return {
             'source_id': source_id,
             'tag': tag,
             'value': value,
-            'timestamp': metadata.get('timestamp', time.time()) if metadata else time.time(),
+            'timestamp': ts_epoch,
+            'timestamp_utc': ts_utc,
             'quality': metadata.get('quality', 'good') if metadata else 'good',
             'correlation_id': (metadata or {}).get('correlation_id') or self.get_correlation_id(),
             'metadata': metadata or {}
@@ -739,6 +780,7 @@ class DataGateway(BaseModule):
                 payload = json.dumps({
                     'value': datapoint['value'],
                     'timestamp': datapoint['timestamp'],
+                    'timestamp_utc': datapoint.get('timestamp_utc'),
                     'source': datapoint['source_id']
                 })
                 # self.mqtt.publish(topic, payload)  # TODO: Implementierung in mqtt_module
@@ -750,6 +792,7 @@ class DataGateway(BaseModule):
         print(
             f"  📝 LOG [{datapoint['source_id']}] "
             f"cid={datapoint.get('correlation_id', '-')}: "
+            f"ts={datapoint.get('timestamp_utc', '-')}: "
             f"{datapoint['tag']} = {datapoint['value']}"
         )
 
@@ -1202,6 +1245,7 @@ class DataGateway(BaseModule):
             'telemetry_count': len(self.telemetry_cache),
             'telemetry_evictions': self.stats['telemetry_evictions'],
             'polling_backpressure_skips': self.stats['polling_backpressure_skips'],
+            'timestamp_utc': self._utc_iso(),
             'uptime': time.time() - getattr(self, '_start_time', time.time())
         }
 
@@ -1406,6 +1450,7 @@ class DataGateway(BaseModule):
                             updates[plc_id][var_name] = {
                                 'value': value,
                                 'timestamp': time.time(),
+                                'timestamp_utc': self._utc_iso(),
                                 'type': symbol_info.symbol_type,
                                 'plc_id': plc_id,
                                 'correlation_id': self.get_correlation_id()
@@ -1483,6 +1528,7 @@ class DataGateway(BaseModule):
                                 variable_name: {
                                     'value': value,
                                     'timestamp': time.time(),
+                                    'timestamp_utc': self._utc_iso(),
                                     'type': symbol_info.symbol_type,
                                     'plc_id': plc_id,
                                     'correlation_id': self.get_correlation_id()

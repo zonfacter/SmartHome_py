@@ -21,6 +21,7 @@ import time
 import json
 import os
 import logging
+from datetime import datetime, timezone
 
 
 logger = logging.getLogger(__name__)
@@ -241,9 +242,11 @@ class MqttIntegration(BaseModule):
                 return
 
         # Cache Wert
+        now = time.time()
         self.values[topic] = {
             'value': value,
-            'timestamp': time.time()
+            'timestamp': now,
+            'timestamp_utc': datetime.fromtimestamp(now, tz=timezone.utc).isoformat().replace('+00:00', 'Z')
         }
         while len(self.values) > self._max_cached_topics:
             oldest_topic = next(iter(self.values))
