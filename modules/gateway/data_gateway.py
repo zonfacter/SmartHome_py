@@ -74,6 +74,7 @@ class DataGateway(BaseModule):
     def __init__(self):
         super().__init__()
         self.lock = threading.RLock()
+        self._request_context = threading.local()
 
         # Environment Detection
         self.platform = platform.system().lower()
@@ -138,6 +139,19 @@ class DataGateway(BaseModule):
         # Missing-symbol protection: track missing symbol warnings to avoid log spam
         # key -> {'count': int, 'last_log': float, 'suspended_until': float}
         self.missing_symbol_stats = {}
+
+    def set_correlation_id(self, correlation_id: str):
+        self._request_context.correlation_id = str(correlation_id or '').strip()
+
+    def clear_correlation_id(self):
+        if hasattr(self._request_context, 'correlation_id'):
+            self._request_context.correlation_id = ''
+
+    def get_correlation_id(self) -> str:
+        cid = str(getattr(self._request_context, 'correlation_id', '') or '').strip()
+        if cid:
+            return cid
+        return f"gw-{int(time.time() * 1000)}-{threading.get_ident()}"
 
     def initialize(self, app_context: Any):
         """Initialisiert Data Gateway"""
@@ -397,7 +411,7 @@ class DataGateway(BaseModule):
 
             # 3. Aktualisiere Telemetrie-Cache
             unified_key = f"{source_id}.{tag}"
-            self.update_telemetry(unified_key, value)
+            self.update_telemetry(unified_key, value, correlation_id=datapoint.get('correlation_id'))
 
             # 4. Route-Matching und Weiterleitung
             matched_routes = self._match_routes(datapoint)
@@ -596,6 +610,7 @@ class DataGateway(BaseModule):
             'value': value,
             'timestamp': metadata.get('timestamp', time.time()) if metadata else time.time(),
             'quality': metadata.get('quality', 'good') if metadata else 'good',
+            'correlation_id': (metadata or {}).get('correlation_id') or self.get_correlation_id(),
             'metadata': metadata or {}
         }
 
@@ -732,7 +747,11 @@ class DataGateway(BaseModule):
 
     def _route_to_log(self, target: str, datapoint: Dict, route: Dict):
         """Routet Daten zum Logging-System"""
-        print(f"  📝 LOG [{datapoint['source_id']}] {datapoint['tag']} = {datapoint['value']}")
+        print(
+            f"  📝 LOG [{datapoint['source_id']}] "
+            f"cid={datapoint.get('correlation_id', '-')}: "
+            f"{datapoint['tag']} = {datapoint['value']}"
+        )
 
     def _route_to_widgets(self, datapoint: Dict):
         """Broadcast Datenpunkt an alle WebSocket-Clients (Widgets)"""
@@ -910,7 +929,7 @@ class DataGateway(BaseModule):
     # TELEMETRIE-CACHE (für Echtzeit-Werte)
     # ========================================================================
 
-    def update_telemetry(self, key: str, value: Any):
+    def update_telemetry(self, key: str, value: Any, correlation_id: str = None):
         """
         Aktualisiert Telemetrie-Wert und broadcastet an WebSocket-Clients
 
@@ -931,7 +950,7 @@ class DataGateway(BaseModule):
                 self.stats['telemetry_evictions'] += len(keys_to_remove)
 
             # Broadcast Update
-            self._broadcast_telemetry_update(key, value)
+            self._broadcast_telemetry_update(key, value, correlation_id=correlation_id or self.get_correlation_id())
 
             # Optionaler Hook (z. B. Kamera-Trigger-Regeln im WebManager)
             if self.web_manager and hasattr(self.web_manager, 'handle_telemetry_update'):
@@ -1135,10 +1154,10 @@ class DataGateway(BaseModule):
     # WEBSOCKET BROADCASTING
     # ========================================================================
 
-    def _broadcast_telemetry_update(self, key: str, value: Any):
+    def _broadcast_telemetry_update(self, key: str, value: Any, correlation_id: str = None):
         """Sendet Telemetrie-Update an alle WebSocket-Clients"""
         if self.web_manager:
-            self.web_manager.broadcast_telemetry(key, value)
+            self.web_manager.broadcast_telemetry(key, value, correlation_id=correlation_id or self.get_correlation_id())
 
     def _broadcast_blob_update(self, key: str):
         """Sendet Blob-Update-Notification an alle WebSocket-Clients"""
@@ -1388,7 +1407,8 @@ class DataGateway(BaseModule):
                                 'value': value,
                                 'timestamp': time.time(),
                                 'type': symbol_info.symbol_type,
-                                'plc_id': plc_id
+                                'plc_id': plc_id,
+                                'correlation_id': self.get_correlation_id()
                             }
 
                             logger.debug(f"📊 {plc_id}/{var_name} = {value}")
@@ -1464,7 +1484,8 @@ class DataGateway(BaseModule):
                                     'value': value,
                                     'timestamp': time.time(),
                                     'type': symbol_info.symbol_type,
-                                    'plc_id': plc_id
+                                    'plc_id': plc_id,
+                                    'correlation_id': self.get_correlation_id()
                                 }
                             }
                         })
