@@ -25,11 +25,13 @@ Kopiere `.env.example` zu `.env` und konfiguriere:
 
 ```env
 # Sentry DSN (von sentry.io)
-SENTRY_DSN=https://your-key@o123456.ingest.sentry.io/1234567
+SENTRY_DSN=https://[your-key]@[org].ingest.sentry.io/[project-id]
 
 # Environment (production, staging, development)
 ENVIRONMENT=production
 ```
+
+Sicherheitsregel: Verwende nur Platzhalter in Dokumentation und niemals reale Secrets im Repository.
 
 ### 3. Automatische Initialisierung
 

@@ -170,7 +170,7 @@ def critical_operation(self):
 #### 9.3 Environment-Config (15min)
 **Datei:** `.env.example`
 ```env
-SENTRY_DSN=https://your-sentry-dsn@sentry.io/project-id
+SENTRY_DSN=https://[your-key]@[org].ingest.sentry.io/[project-id]
 ENVIRONMENT=production  # oder development/staging
 ```
 
