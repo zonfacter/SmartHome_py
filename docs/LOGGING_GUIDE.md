@@ -14,16 +14,16 @@ Das System verwendet ein **Multi-Layer Logging-System**:
 
 ### 1. Sentry Konfiguration (Optional, aber empfohlen)
 
-#### Option A: Verwende bestehenden Sentry DSN (aus .env)
+#### Option A: Placeholder aus `.env.example` übernehmen
 
-Die `.env.example` enthält bereits einen konfigurierten Sentry DSN:
+Die `.env.example` enthält bewusst **keinen echten DSN**, sondern nur einen leeren Placeholder:
 
 ```bash
 SENTRY_DSN=""
 ENVIRONMENT=development
 ```
 
-Kopiere einfach `.env.example` nach `.env` (falls noch nicht geschehen):
+Kopiere `.env.example` nach `.env` (falls noch nicht geschehen) und trage den echten DSN nur lokal ein:
 
 ```bash
 cp .env.example .env
@@ -40,6 +40,8 @@ cp .env.example .env
 SENTRY_DSN="https://[your-key]@[org].ingest.sentry.io/[project-id]"
 ENVIRONMENT=production
 ```
+
+Hinweis: Keine echten DSNs/Secrets in Doku, `.env.example` oder Commits eintragen.
 
 #### Sentry deaktivieren
 
