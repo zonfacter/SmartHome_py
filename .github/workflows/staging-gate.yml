@@ -1,0 +1,82 @@
+name: Staging Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_ref:
+        description: "Release ref/tag for staging validation"
+        required: false
+        default: "manual"
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  staging-smoke:
+    name: staging-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest python-dotenv
+
+      - name: Syntax check
+        run: |
+          python -m py_compile start_web_hmi.py module_manager.py import_tpy.py
+          python -m compileall -q modules
+
+      - name: Core smoke suite
+        run: |
+          pytest -q test_web_manager_fix.py
+          pytest -q test_logging_system.py
+          pytest -q test_api_contracts.py
+          pytest -q test_backup_manager.py
+          pytest -q test_integration_core_flows.py
+          pytest -q test_control_auth_security.py
+          pytest -q test_circuit_breakers.py
+
+  staging-canary:
+    name: staging-canary-go-no-go
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [staging-smoke]
+    environment: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install python-dotenv
+
+      - name: Run canary go/no-go checks
+        env:
+          SMARTHOME_ADMIN_API_KEY: staging-secret
+          ENVIRONMENT: staging
+        run: |
+          ./scripts/staging_canary_gate.py
+
+      - name: Upload staging gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-gate-report
+          path: artifacts/staging_gate_report.json
