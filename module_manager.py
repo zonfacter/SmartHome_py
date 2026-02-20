@@ -20,6 +20,7 @@ Changelog:
 import os
 import sys
 import importlib.util
+import threading
 from enum import Enum
 from typing import Dict, Any, Optional, List
 import json
@@ -382,13 +383,46 @@ class ModuleManager:
     def shutdown(self):
         """Shutdown-Hook für alle Module"""
         print("\n🛑 Shutdown Module...")
-        for name, info in self.modules.items():
+        step_timeout = max(1.0, float(os.getenv('SMARTHOME_SHUTDOWN_TIMEOUT_SECONDS', '8')))
+
+        # Reverse-Reihenfolge reduziert Abhängigkeitsprobleme beim Beenden.
+        for name, info in reversed(list(self.modules.items())):
             if info.instance and hasattr(info.instance, 'shutdown'):
-                try:
-                    info.instance.shutdown()
+                error_holder = {}
+
+                def _run_module_shutdown():
+                    try:
+                        info.instance.shutdown()
+                    except Exception as e:
+                        error_holder['error'] = e
+
+                worker = threading.Thread(target=_run_module_shutdown, daemon=True)
+                worker.start()
+                worker.join(timeout=step_timeout)
+
+                if worker.is_alive():
+                    print(f"  ⚠️  Timeout bei {name} shutdown nach {step_timeout:.1f}s")
+                elif 'error' in error_holder:
+                    print(f"  ⚠️  Fehler bei {name} shutdown: {error_holder['error']}")
+                else:
                     print(f"  ✓ {name} shutdown")
+
+        if self.resource_limiter:
+            limiter_error = {}
+
+            def _stop_limiter():
+                try:
+                    self.resource_limiter.stop_monitoring()
                 except Exception as e:
-                    print(f"  ⚠️  Fehler bei {name} shutdown: {e}")
+                    limiter_error['error'] = e
+
+            limiter_thread = threading.Thread(target=_stop_limiter, daemon=True)
+            limiter_thread.start()
+            limiter_thread.join(timeout=step_timeout)
+            if limiter_thread.is_alive():
+                print(f"  ⚠️  Timeout beim Stoppen des Resource Limiters nach {step_timeout:.1f}s")
+            elif 'error' in limiter_error:
+                print(f"  ⚠️  Fehler beim Stoppen des Resource Limiters: {limiter_error['error']}")
 
 
 class BaseModule:
