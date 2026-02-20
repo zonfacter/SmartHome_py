@@ -1706,39 +1706,124 @@ class WebManager(BaseModule):
                 logger.error(f"Fehler beim Laden der Logs: {e}", exc_info=True)
                 return jsonify({'error': str(e)}), 500
 
-        @self.app.route('/api/admin/logs/clear', methods=['POST'])
-        def clear_system_logs():
-            """Löscht alte Logs mit Schutz für Audit-relevante Einträge."""
+        @self.app.route('/api/admin/logs/verify')
+        def verify_system_logs():
+            """Prüft die manipulationserschwerende Hash-Kette der Logs."""
             try:
                 from modules.core.database_logger import DatabaseLogger
-
                 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
                 db_path = os.path.join(project_root, 'config', 'system_logs.db')
+                limit = request.args.get('limit', None, type=int)
+                result = DatabaseLogger.verify_chain(db_path, limit=limit)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Fehler bei GET /api/admin/logs/verify: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
 
+        @self.app.route('/api/admin/logs/export')
+        def export_system_logs():
+            """Exportiert Logs für Nachvollziehbarkeit (json/csv)."""
+            try:
+                from modules.core.database_logger import DatabaseLogger
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                db_path = os.path.join(project_root, 'config', 'system_logs.db')
+                limit = request.args.get('limit', 1000, type=int)
+                export_format = (request.args.get('format') or 'json').strip().lower()
+                logs = DatabaseLogger.export_logs(db_path, limit=limit)
+
+                actor = request.headers.get('X-Admin-User') or request.remote_addr or 'unknown'
+                DatabaseLogger.audit_event(
+                    db_path=db_path,
+                    action='logs_export',
+                    actor=str(actor),
+                    details={
+                        'format': export_format,
+                        'limit': limit,
+                        'request_id': self._get_request_id()
+                    }
+                )
+
+                if export_format == 'csv':
+                    import csv
+                    buffer = io.StringIO()
+                    writer = csv.DictWriter(
+                        buffer,
+                        fieldnames=['id', 'timestamp', 'level', 'module', 'message', 'prev_hash', 'entry_hash', 'created_at']
+                    )
+                    writer.writeheader()
+                    for row in logs:
+                        writer.writerow(row)
+                    out = io.BytesIO(buffer.getvalue().encode('utf-8'))
+                    out.seek(0)
+                    return send_file(
+                        out,
+                        as_attachment=True,
+                        download_name='system_logs_export.csv',
+                        mimetype='text/csv'
+                    )
+
+                payload = {
+                    'exported_at': self._utc_iso(),
+                    'count': len(logs),
+                    'logs': logs
+                }
+                return jsonify(payload)
+            except Exception as e:
+                logger.error(f"Fehler bei GET /api/admin/logs/export: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/admin/logs/clear', methods=['POST'])
+        def clear_system_logs():
+            """Retention-basiertes Cleanup der Logs."""
+            try:
+                from modules.core.database_logger import DatabaseLogger
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                db_path = os.path.join(project_root, 'config', 'system_logs.db')
                 data = request.get_json(silent=True) or {}
                 replay = self._idempotency_precheck(data)
                 if replay is not None:
                     return replay
-                keep_count = int(data.get('keep_count', 100))
-                keep_count = max(10, min(keep_count, 5000))
+                keep_count = int(data.get('keep_count', 5000))
+                max_age_days = int(data.get('max_age_days', int(os.getenv('SMARTHOME_AUDIT_RETENTION_DAYS', '90'))))
+                keep_count = max(100, min(keep_count, 50000))
+                max_age_days = max(1, min(max_age_days, 3650))
 
-                deleted = DatabaseLogger.clear_logs_with_audit_protection(
+                actor = request.headers.get('X-Admin-User') or request.remote_addr or 'unknown'
+                DatabaseLogger.audit_event(
                     db_path=db_path,
-                    keep_count=keep_count
+                    action='logs_retention_cleanup_requested',
+                    actor=str(actor),
+                    details={
+                        'keep_count': keep_count,
+                        'max_age_days': max_age_days,
+                        'request_id': self._get_request_id()
+                    }
                 )
 
-                logger.warning(
-                    "Admin logs clear executed: req_id=%s deleted=%s keep_count=%s remote=%s",
-                    self._get_request_id(),
-                    deleted,
-                    keep_count,
-                    request.remote_addr
+                result = DatabaseLogger.enforce_retention(
+                    db_path=db_path,
+                    max_entries=keep_count,
+                    max_age_days=max_age_days
+                )
+
+                DatabaseLogger.audit_event(
+                    db_path=db_path,
+                    action='logs_retention_cleanup_completed',
+                    actor=str(actor),
+                    details={
+                        'deleted_age': result.get('deleted_age', 0),
+                        'deleted_count': result.get('deleted_count', 0),
+                        'request_id': self._get_request_id()
+                    }
                 )
 
                 return self._build_idempotent_json_response(data, {
                     'success': True,
-                    'deleted': deleted,
-                    'keep_count': keep_count
+                    'retention': {
+                        'keep_count': keep_count,
+                        'max_age_days': max_age_days
+                    },
+                    'result': result
                 }, 200)
             except Exception as e:
                 logger.error(f"Fehler bei POST /api/admin/logs/clear: {e}", exc_info=True)
@@ -1759,6 +1844,7 @@ class WebManager(BaseModule):
             """Plant einen verzögerten Service-Restart."""
             try:
                 from modules.core.service_manager import ServiceManager
+                from modules.core.database_logger import DatabaseLogger
                 data = request.get_json(silent=True) or {}
                 replay = self._idempotency_precheck(data)
                 if replay is not None:
@@ -1768,6 +1854,18 @@ class WebManager(BaseModule):
                 except Exception:
                     delay = 2
                 delay = max(1, min(delay, 30))
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                db_path = os.path.join(project_root, 'config', 'system_logs.db')
+                actor = request.headers.get('X-Admin-User') or request.remote_addr or 'unknown'
+                DatabaseLogger.audit_event(
+                    db_path=db_path,
+                    action='service_restart_scheduled',
+                    actor=str(actor),
+                    details={
+                        'delay_seconds': delay,
+                        'request_id': self._get_request_id()
+                    }
+                )
                 logger.warning(
                     "Admin restart requested: req_id=%s type=app delay=%ss remote=%s ua=%s",
                     self._get_request_id(),
@@ -1795,6 +1893,7 @@ class WebManager(BaseModule):
             """Plant einen Dienst-Neustart ueber scripts/web_server_ctl.sh restart."""
             try:
                 from modules.core.service_manager import ServiceManager
+                from modules.core.database_logger import DatabaseLogger
                 data = request.get_json(silent=True) or {}
                 replay = self._idempotency_precheck(data)
                 if replay is not None:
@@ -1803,6 +1902,18 @@ class WebManager(BaseModule):
                     delay = int(data.get('delay', 1))
                 except Exception:
                     delay = 1
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                db_path = os.path.join(project_root, 'config', 'system_logs.db')
+                actor = request.headers.get('X-Admin-User') or request.remote_addr or 'unknown'
+                DatabaseLogger.audit_event(
+                    db_path=db_path,
+                    action='daemon_restart_scheduled',
+                    actor=str(actor),
+                    details={
+                        'delay_seconds': delay,
+                        'request_id': self._get_request_id()
+                    }
+                )
                 logger.warning(
                     "Admin restart requested: req_id=%s type=daemon delay=%ss remote=%s ua=%s",
                     self._get_request_id(),
