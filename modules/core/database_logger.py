@@ -10,8 +10,11 @@ Speichert WARNING, ERROR und CRITICAL in SQLite-Datenbank.
 import sqlite3
 import logging
 import os
-from datetime import datetime
-from typing import Optional
+import threading
+import hashlib
+import json
+from datetime import datetime, timezone, timedelta
+from typing import Optional, Dict, Any, List
 
 
 class SQLiteHandler(logging.Handler):
@@ -37,36 +40,13 @@ class SQLiteHandler(logging.Handler):
     def _ensure_table(self):
         """Erstellt Tabelle falls nicht vorhanden"""
         try:
-            # Ordner erstellen falls nicht existent
-            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute('''
-                    CREATE TABLE IF NOT EXISTS system_logs (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        timestamp TEXT NOT NULL,
-                        level TEXT NOT NULL,
-                        module TEXT NOT NULL,
-                        message TEXT NOT NULL,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                ''')
-
-                # Index für Performance
-                conn.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_timestamp
-                    ON system_logs(timestamp DESC)
-                ''')
-
-                # Auto-Cleanup: Behalte nur die letzten 1000 Einträge
-                conn.execute("""
-                    DELETE FROM system_logs
-                    WHERE id NOT IN (
-                        SELECT id FROM system_logs
-                        ORDER BY id DESC
-                        LIMIT 1000
-                    )
-                """)
+            DatabaseLogger.ensure_schema(self.db_path)
+            policy = DatabaseLogger.get_retention_policy()
+            DatabaseLogger.enforce_retention(
+                self.db_path,
+                max_entries=policy['max_entries'],
+                max_age_days=policy['max_age_days']
+            )
 
         except Exception as e:
             print(f"!!! LOGGING DATABASE ERROR: {e}")
@@ -76,14 +56,15 @@ class SQLiteHandler(logging.Handler):
         # Nur WARNING und höher speichern
         if record.levelno >= logging.WARNING:
             try:
-                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                ts = DatabaseLogger._utc_timestamp()
                 msg = self.format(record)
-
-                with sqlite3.connect(self.db_path) as conn:
-                    conn.execute(
-                        "INSERT INTO system_logs (timestamp, level, module, message) VALUES (?, ?, ?, ?)",
-                        (ts, record.levelname, record.name, msg)
-                    )
+                DatabaseLogger._insert_log_entry(
+                    self.db_path,
+                    timestamp=ts,
+                    level=record.levelname,
+                    module=record.name,
+                    message=msg
+                )
 
             except Exception:
                 self.handleError(record)
@@ -96,6 +77,74 @@ class DatabaseLogger:
     Verwaltet SQLite-Handler für das Root-Logger.
     Wird einmal beim Start initialisiert.
     """
+
+    _db_lock = threading.Lock()
+
+    @staticmethod
+    def _utc_timestamp() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def get_retention_policy() -> Dict[str, int]:
+        max_entries = int(os.getenv('SMARTHOME_AUDIT_RETENTION_MAX_ENTRIES', '20000'))
+        max_age_days = int(os.getenv('SMARTHOME_AUDIT_RETENTION_DAYS', '90'))
+        return {
+            'max_entries': max(1000, max_entries),
+            'max_age_days': max(1, max_age_days)
+        }
+
+    @staticmethod
+    def ensure_schema(db_path: str):
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        with sqlite3.connect(db_path) as conn:
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS system_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    level TEXT NOT NULL,
+                    module TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    prev_hash TEXT,
+                    entry_hash TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            # Migration für ältere DBs
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(system_logs)")}
+            if 'prev_hash' not in columns:
+                conn.execute("ALTER TABLE system_logs ADD COLUMN prev_hash TEXT")
+            if 'entry_hash' not in columns:
+                conn.execute("ALTER TABLE system_logs ADD COLUMN entry_hash TEXT")
+
+            conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_timestamp
+                ON system_logs(timestamp DESC)
+            ''')
+            conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_entry_hash
+                ON system_logs(entry_hash)
+            ''')
+
+    @staticmethod
+    def _insert_log_entry(db_path: str, timestamp: str, level: str, module: str, message: str) -> int:
+        with DatabaseLogger._db_lock:
+            DatabaseLogger.ensure_schema(db_path)
+            with sqlite3.connect(db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                prev_hash_row = conn.execute(
+                    "SELECT entry_hash FROM system_logs ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                prev_hash = prev_hash_row['entry_hash'] if prev_hash_row and prev_hash_row['entry_hash'] else ''
+                payload = f"{timestamp}|{level}|{module}|{message}|{prev_hash}"
+                entry_hash = hashlib.sha256(payload.encode('utf-8')).hexdigest()
+                cursor = conn.execute(
+                    """
+                    INSERT INTO system_logs (timestamp, level, module, message, prev_hash, entry_hash)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (timestamp, level, module, message, prev_hash, entry_hash)
+                )
+                return int(cursor.lastrowid or 0)
 
     @staticmethod
     def setup(db_path: Optional[str] = None, console_level: int = logging.INFO):
@@ -110,6 +159,7 @@ class DatabaseLogger:
         if db_path is None:
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             db_path = os.path.join(project_root, 'config', 'system_logs.db')
+        DatabaseLogger.ensure_schema(db_path)
 
         # Root-Logger konfigurieren
         root_logger = logging.getLogger()
@@ -134,6 +184,13 @@ class DatabaseLogger:
         )
         db_handler.setFormatter(db_formatter)
         root_logger.addHandler(db_handler)
+
+        policy = DatabaseLogger.get_retention_policy()
+        DatabaseLogger.enforce_retention(
+            db_path,
+            max_entries=policy['max_entries'],
+            max_age_days=policy['max_age_days']
+        )
 
         # Bestätigung
         logging.info(f"Database Logger initialisiert: {db_path}")
@@ -193,6 +250,83 @@ class DatabaseLogger:
                         logging.info(f"Alte Logs gelöscht: {deleted.rowcount} Einträge")
         except Exception as e:
             logging.error(f"Fehler beim Löschen alter Logs: {e}")
+
+    @staticmethod
+    def enforce_retention(db_path: str, max_entries: int = 20000, max_age_days: int = 90) -> Dict[str, int]:
+        stats = {'deleted_age': 0, 'deleted_count': 0}
+        if not os.path.exists(db_path):
+            return stats
+
+        with DatabaseLogger._db_lock:
+            DatabaseLogger.ensure_schema(db_path)
+            with sqlite3.connect(db_path) as conn:
+                cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+                deleted_age = conn.execute(
+                    "DELETE FROM system_logs WHERE timestamp < ?",
+                    (cutoff,)
+                ).rowcount
+                deleted_count = conn.execute(
+                    """
+                    DELETE FROM system_logs
+                    WHERE id NOT IN (
+                        SELECT id FROM system_logs ORDER BY id DESC LIMIT ?
+                    )
+                    """,
+                    (max_entries,)
+                ).rowcount
+                stats['deleted_age'] = max(0, int(deleted_age or 0))
+                stats['deleted_count'] = max(0, int(deleted_count or 0))
+        return stats
+
+    @staticmethod
+    def audit_event(db_path: str, action: str, actor: str, details: Optional[Dict[str, Any]] = None) -> int:
+        payload = {
+            'action': action,
+            'actor': actor,
+            'details': details or {}
+        }
+        message = json.dumps(payload, ensure_ascii=True, sort_keys=True)
+        return DatabaseLogger._insert_log_entry(
+            db_path=db_path,
+            timestamp=DatabaseLogger._utc_timestamp(),
+            level='AUDIT',
+            module='audit',
+            message=message
+        )
+
+    @staticmethod
+    def verify_chain(db_path: str, limit: Optional[int] = None) -> Dict[str, Any]:
+        if not os.path.exists(db_path):
+            return {'ok': True, 'checked': 0, 'broken_at_id': None}
+
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            query = "SELECT id, timestamp, level, module, message, prev_hash, entry_hash FROM system_logs ORDER BY id ASC"
+            params: tuple = ()
+            if limit is not None:
+                query += " LIMIT ?"
+                params = (int(limit),)
+            rows: List[sqlite3.Row] = conn.execute(query, params).fetchall()
+
+        prev_hash = ''
+        checked = 0
+        for row in rows:
+            checked += 1
+            row_prev_hash = row['prev_hash'] or ''
+            row_entry_hash = row['entry_hash'] or ''
+            if not row_entry_hash:
+                continue
+            source = f"{row['timestamp']}|{row['level']}|{row['module']}|{row['message']}|{row_prev_hash}"
+            expected = hashlib.sha256(source.encode('utf-8')).hexdigest()
+            if row_prev_hash != prev_hash or row_entry_hash != expected:
+                return {'ok': False, 'checked': checked, 'broken_at_id': row['id']}
+            prev_hash = row_entry_hash
+        return {'ok': True, 'checked': checked, 'broken_at_id': None}
+
+    @staticmethod
+    def export_logs(db_path: str, limit: int = 1000) -> List[Dict[str, Any]]:
+        limit = max(1, min(int(limit), 50000))
+        return DatabaseLogger.get_recent_logs(db_path, limit=limit)
 
 
 # Beispiel-Usage
