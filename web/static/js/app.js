@@ -1684,29 +1684,14 @@ class SmartHomeApp {
 
         // HLS.js Player nach Verzögerung initialisieren (FFmpeg braucht Zeit)
         setTimeout(() => {
-            (async () => {
-                for (const camId of rtspCams) {
-                    const videoEl = document.getElementById(`hls-video-${camId}`);
-                    if (!videoEl) continue;
-
-                    let hlsUrl = null;
-                    try {
-                        const startResp = await fetch(`/api/cameras/${camId}/start`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' }
-                        });
-                        const startData = await startResp.json();
-                        if (startResp.ok && startData.success && startData.hls_url) {
-                            hlsUrl = startData.hls_url;
-                        }
-                    } catch (e) {}
-
-                    if (!hlsUrl) {
-                        hlsUrl = `/static/hls/${camId}.m3u8`;
-                    }
-                    this._initHlsPlayer(videoEl, hlsUrl, camId);
-                }
-            })();
+            for (const camId of rtspCams) {
+                const videoEl = document.getElementById(`hls-video-${camId}`);
+                if (!videoEl) continue;
+                // Stream wurde oben bereits gestartet (SubStream-Start).
+                // Hier nur noch den bekannten HLS-Pfad anhängen.
+                const hlsUrl = `/static/hls/${camId}.m3u8`;
+                this._initHlsPlayer(videoEl, hlsUrl, camId);
+            }
         }, 3000);
 
         let ringStatus = { available: false, configured: false };
@@ -5173,6 +5158,7 @@ class SmartHomeApp {
 
     async loadWidgetsPage() {
         console.log('🎨 Lade Widgets-Seite...');
+        const scope = 'page:widgets';
 
         // ⭐ v5.1.1: Lade Widgets für diese Page
         await this.loadAndRenderWidgets('widgets');
@@ -5188,28 +5174,30 @@ class SmartHomeApp {
         const browseBtn = document.getElementById('browse-symbols-btn');
 
         if (addBtn) {
-            addBtn.addEventListener('click', () => this.openWidgetEditor());
+            this._bindScopedListener(addBtn, 'click', () => this.openWidgetEditor(), { scope, key: 'widgets:add-open-editor' });
         }
 
         if (form) {
-            form.addEventListener('submit', (e) => {
+            this._bindScopedListener(form, 'submit', (e) => {
                 e.preventDefault();
                 this.saveWidget();
-            });
+            }, { scope, key: 'widgets:form-submit' });
         }
 
         if (closeBtn || cancelBtn) {
             [closeBtn, cancelBtn].forEach(btn => {
-                if (btn) btn.addEventListener('click', () => this.closeWidgetEditor());
+                if (!btn) return;
+                const key = btn.id ? `widgets:close:${btn.id}` : 'widgets:close:anon';
+                this._bindScopedListener(btn, 'click', () => this.closeWidgetEditor(), { scope, key });
             });
         }
 
         if (testBtn) {
-            testBtn.addEventListener('click', () => this.testVariableBinding());
+            this._bindScopedListener(testBtn, 'click', () => this.testVariableBinding(), { scope, key: 'widgets:test-binding' });
         }
 
         if (browseBtn) {
-            browseBtn.addEventListener('click', () => this.browseSymbols());
+            this._bindScopedListener(browseBtn, 'click', () => this.browseSymbols(), { scope, key: 'widgets:browse-symbols' });
         }
 
         // ⭐ v5.1.2: Widget-Type Change Handler (Switch-Config anzeigen/verstecken)
@@ -5217,10 +5205,10 @@ class SmartHomeApp {
         const switchConfigSection = document.getElementById('switch-config-section');
 
         if (widgetTypeSelect && switchConfigSection) {
-            widgetTypeSelect.addEventListener('change', () => {
+            this._bindScopedListener(widgetTypeSelect, 'change', () => {
                 const type = widgetTypeSelect.value;
                 switchConfigSection.style.display = (type === 'switch') ? 'block' : 'none';
-            });
+            }, { scope, key: 'widgets:type-change' });
         }
 
         // ⭐ v5.1.2: Switch-Mode Change Handler (Pulse-Duration anzeigen/verstecken)
@@ -5228,10 +5216,10 @@ class SmartHomeApp {
         const pulseDurationContainer = document.getElementById('pulse-duration-container');
 
         if (switchModeSelect && pulseDurationContainer) {
-            switchModeSelect.addEventListener('change', () => {
+            this._bindScopedListener(switchModeSelect, 'change', () => {
                 const mode = switchModeSelect.value;
                 pulseDurationContainer.style.display = (mode === 'pulse') ? 'block' : 'none';
-            });
+            }, { scope, key: 'widgets:switch-mode-change' });
         }
     }
 
@@ -5513,6 +5501,7 @@ class SmartHomeApp {
 
     async loadMonitorPage() {
         console.log('📊 Lade Monitor-Dashboard...');
+        const scope = 'page:monitor';
 
         // ⭐ v5.1.1: Lade Widgets für diese Page
         await this.loadAndRenderWidgets('monitor');
@@ -5521,7 +5510,7 @@ class SmartHomeApp {
         await this.loadMonitorData();
 
         // Setup event listeners
-        this.setupMonitorEventListeners();
+        this.setupMonitorEventListeners(scope);
 
         // Start auto-refresh if enabled
         const autoRefresh = document.getElementById('monitor-auto-refresh');
@@ -5530,40 +5519,40 @@ class SmartHomeApp {
         }
     }
 
-    setupMonitorEventListeners() {
+    setupMonitorEventListeners(scope = 'page:monitor') {
         // Auto-Refresh Toggle
         const autoRefreshToggle = document.getElementById('monitor-auto-refresh');
         if (autoRefreshToggle) {
-            autoRefreshToggle.addEventListener('change', (e) => {
+            this._bindScopedListener(autoRefreshToggle, 'change', (e) => {
                 if (e.target.checked) {
                     this.startMonitorAutoRefresh();
                 } else {
                     this.stopMonitorAutoRefresh();
                 }
-            });
+            }, { scope, key: 'monitor:auto-refresh-toggle' });
         }
 
         // Refresh Button
         const refreshBtn = document.getElementById('monitor-refresh-btn');
         if (refreshBtn) {
-            refreshBtn.addEventListener('click', () => this.loadMonitorData());
+            this._bindScopedListener(refreshBtn, 'click', () => this.loadMonitorData(), { scope, key: 'monitor:refresh' });
         }
 
         // Measure Latency Button
         const latencyBtn = document.getElementById('measure-latency-btn');
         if (latencyBtn) {
-            latencyBtn.addEventListener('click', () => this.measureLatency());
+            this._bindScopedListener(latencyBtn, 'click', () => this.measureLatency(), { scope, key: 'monitor:latency' });
         }
 
         // Export Buttons
         const exportJsonBtn = document.getElementById('export-json-btn');
         if (exportJsonBtn) {
-            exportJsonBtn.addEventListener('click', () => this.exportMonitorData('json'));
+            this._bindScopedListener(exportJsonBtn, 'click', () => this.exportMonitorData('json'), { scope, key: 'monitor:export-json' });
         }
 
         const exportCsvBtn = document.getElementById('export-csv-btn');
         if (exportCsvBtn) {
-            exportCsvBtn.addEventListener('click', () => this.exportMonitorData('csv'));
+            this._bindScopedListener(exportCsvBtn, 'click', () => this.exportMonitorData('csv'), { scope, key: 'monitor:export-csv' });
         }
     }
 
