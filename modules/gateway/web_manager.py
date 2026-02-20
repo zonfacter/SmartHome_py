@@ -402,6 +402,8 @@ class WebManager(BaseModule):
             '/api/cameras/alert',
             '/api/cameras/scan',
             '/api/cameras/diagnose',
+            '/api/monitor/dlq/reprocess',
+            '/api/monitor/dlq/clear',
         }
         if path in protected_exact and method in ('POST', 'PUT', 'DELETE'):
             return True
@@ -1863,6 +1865,7 @@ class WebManager(BaseModule):
                         'telemetry_count': gw_status.get('telemetry_count', 0),
                         'telemetry_evictions': gw_status.get('telemetry_evictions', 0),
                         'polling_backpressure_skips': gw_status.get('polling_backpressure_skips', 0),
+                        'dead_letter': gw_status.get('dead_letter', {}),
                         'limits': gw_status.get('limits', {})
                     }
                 except Exception:
@@ -1898,6 +1901,76 @@ class WebManager(BaseModule):
                 return jsonify(payload)
             except Exception as e:
                 logger.error(f"Fehler bei GET /api/monitor/streams: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/monitor/dlq', methods=['GET'])
+        def monitor_dead_letter_queue():
+            """Liefert Dead-Letter-Queue Einträge + Statistiken."""
+            gateway = self.app_context.module_manager.get_module('data_gateway')
+            if not gateway:
+                return jsonify({'success': False, 'error': 'data_gateway nicht verfügbar'}), 503
+
+            try:
+                limit = max(1, min(int(request.args.get('limit', 100)), 1000))
+                return jsonify({
+                    'success': True,
+                    'entries': gateway.get_dead_letters(limit=limit),
+                    'stats': gateway.get_dead_letter_stats()
+                })
+            except Exception as e:
+                logger.error(f"Fehler bei GET /api/monitor/dlq: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/monitor/dlq/reprocess', methods=['POST'])
+        def reprocess_dead_letter_queue():
+            """Versucht DLQ-Nachrichten erneut zu verarbeiten."""
+            gateway = self.app_context.module_manager.get_module('data_gateway')
+            if not gateway:
+                return jsonify({'success': False, 'error': 'data_gateway nicht verfügbar'}), 503
+
+            try:
+                data = request.get_json(silent=True) or {}
+                limit = max(1, min(int(data.get('limit', 50)), 500))
+                result = gateway.reprocess_dead_letters(limit=limit)
+                logger.info(
+                    "DLQ reprocess executed: req_id=%s processed=%s ok=%s requeued=%s dropped=%s",
+                    self._get_request_id(),
+                    result.get('processed'),
+                    result.get('reprocessed_ok'),
+                    result.get('requeued'),
+                    result.get('dropped')
+                )
+                return jsonify({
+                    'success': True,
+                    'result': result,
+                    'stats': gateway.get_dead_letter_stats()
+                })
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/monitor/dlq/reprocess: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/monitor/dlq/clear', methods=['POST'])
+        def clear_dead_letter_queue():
+            """Leert die DLQ vollständig."""
+            gateway = self.app_context.module_manager.get_module('data_gateway')
+            if not gateway:
+                return jsonify({'success': False, 'error': 'data_gateway nicht verfügbar'}), 503
+
+            try:
+                removed = gateway.clear_dead_letters()
+                logger.warning(
+                    "DLQ clear executed: req_id=%s removed=%s remote=%s",
+                    self._get_request_id(),
+                    removed,
+                    request.remote_addr
+                )
+                return jsonify({
+                    'success': True,
+                    'removed': removed,
+                    'stats': gateway.get_dead_letter_stats()
+                })
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/monitor/dlq/clear: {e}", exc_info=True)
                 return jsonify({'success': False, 'error': str(e)}), 500
 
         # ==========================================

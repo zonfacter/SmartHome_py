@@ -24,6 +24,7 @@ import os
 import json
 import re
 import math
+import uuid
 from collections import OrderedDict, defaultdict
 from datetime import datetime, timezone
 
@@ -96,6 +97,21 @@ class DataGateway(BaseModule):
             2000,
             min_value=100
         )
+        self.dead_letter_max_entries = self._get_env_int(
+            'SMARTHOME_DLQ_MAX_ENTRIES',
+            1000,
+            min_value=10
+        )
+        self.dead_letter_reprocess_batch = self._get_env_int(
+            'SMARTHOME_DLQ_REPROCESS_BATCH',
+            50,
+            min_value=1
+        )
+        self.dead_letter_max_attempts = self._get_env_int(
+            'SMARTHOME_DLQ_MAX_ATTEMPTS',
+            5,
+            min_value=1
+        )
         self._poll_window_cursor = 0
 
         # Caches
@@ -107,6 +123,7 @@ class DataGateway(BaseModule):
         self.routing_engine = None
         self.routes = []
         self.subscribers = defaultdict(list)  # pattern -> [callbacks]
+        self.dead_letter_queue = OrderedDict()  # dlq_id -> entry
 
         # ⭐ v5.0: Spam-Protection
         self.source_stats = defaultdict(lambda: {
@@ -133,7 +150,11 @@ class DataGateway(BaseModule):
             'routes_processed': 0,
             'routes_blocked': 0,
             'spam_events': 0,
-            'validation_rejects': 0
+            'validation_rejects': 0,
+            'dlq_enqueued': 0,
+            'dlq_reprocessed': 0,
+            'dlq_reprocess_failed': 0,
+            'dlq_dropped': 0
         }
 
         # Missing-symbol protection: track missing symbol warnings to avoid log spam
@@ -456,10 +477,7 @@ class DataGateway(BaseModule):
             matched_routes = self._match_routes(datapoint)
 
             for route in matched_routes:
-                try:
-                    self._execute_route(route, datapoint)
-                except Exception as e:
-                    print(f"  ⚠️  Routing-Fehler in Route '{route.get('id', 'unknown')}': {e}")
+                self._execute_route(route, datapoint)
 
             # 5. Notify Subscribers
             self._notify_subscribers(datapoint)
@@ -705,7 +723,17 @@ class DataGateway(BaseModule):
             targets = [targets]
 
         for target in targets:
-            self._send_to_target(target, datapoint, route)
+            try:
+                self._send_to_target(target, datapoint, route)
+            except Exception as e:
+                self._enqueue_dead_letter(
+                    datapoint=datapoint,
+                    route=route,
+                    target=target,
+                    error_class=self._classify_routing_error(e),
+                    error_message=str(e)
+                )
+                print(f"  ⚠️  Routing-Fehler in Route '{route.get('id', 'unknown')}' target='{target}': {e}")
 
     def _send_to_target(self, target: str, datapoint: Dict, route: Dict):
         """
@@ -740,7 +768,70 @@ class DataGateway(BaseModule):
             self._route_to_widgets(datapoint)
 
         else:
-            print(f"  ⚠️  Unbekanntes Routing-Ziel: {target}")
+            raise ValueError(f"Unbekanntes Routing-Ziel: {target}")
+
+    def _classify_routing_error(self, error: Exception) -> str:
+        msg = str(error or '').lower()
+        if isinstance(error, ValueError) and 'unbekanntes routing-ziel' in msg:
+            return 'invalid_target'
+        if 'timeout' in msg:
+            return 'timeout'
+        if 'connection' in msg or 'verbunden' in msg:
+            return 'connection_error'
+        return 'routing_error'
+
+    def _prune_dead_letter_queue(self):
+        while len(self.dead_letter_queue) > self.dead_letter_max_entries:
+            self.dead_letter_queue.popitem(last=False)
+            self.stats['dlq_dropped'] += 1
+
+    def _enqueue_dead_letter(
+        self,
+        datapoint: Dict[str, Any],
+        route: Dict[str, Any],
+        target: str,
+        error_class: str,
+        error_message: str,
+        attempts: int = 1
+    ):
+        now = time.time()
+        dlq_id = uuid.uuid4().hex
+        safe_datapoint = json.loads(json.dumps(datapoint, default=str))
+        safe_route = json.loads(json.dumps(route, default=str))
+        entry = {
+            'id': dlq_id,
+            'created_at': now,
+            'created_at_utc': self._utc_iso(now),
+            'last_failed_at': now,
+            'last_failed_at_utc': self._utc_iso(now),
+            'correlation_id': datapoint.get('correlation_id') or self.get_correlation_id(),
+            'source_id': datapoint.get('source_id', ''),
+            'tag': datapoint.get('tag', ''),
+            'target': str(target or ''),
+            'route_id': str(route.get('id') or 'unknown'),
+            'error_class': str(error_class or 'routing_error'),
+            'error_message': str(error_message or ''),
+            'attempts': int(attempts),
+            'datapoint': safe_datapoint,
+            'route': safe_route
+        }
+        self.dead_letter_queue[dlq_id] = entry
+        self.stats['dlq_enqueued'] += 1
+        self._prune_dead_letter_queue()
+
+        if self.web_manager:
+            try:
+                self.web_manager.broadcast_system_event({
+                    'type': 'dead_letter_enqueued',
+                    'dlq_id': dlq_id,
+                    'route_id': entry['route_id'],
+                    'target': entry['target'],
+                    'error_class': entry['error_class'],
+                    'timestamp': now,
+                    'timestamp_utc': entry['created_at_utc']
+                })
+            except Exception:
+                pass
 
     def _route_to_plc(self, target: str, datapoint: Dict, route: Dict):
         """Routet Daten zur PLC"""
@@ -880,6 +971,15 @@ class DataGateway(BaseModule):
             'routes_processed': self.stats['routes_processed'],
             'routes_blocked': self.stats['routes_blocked'],
             'spam_events': self.stats['spam_events'],
+            'dead_letter': {
+                'queued': len(self.dead_letter_queue),
+                'enqueued_total': self.stats['dlq_enqueued'],
+                'reprocessed_total': self.stats['dlq_reprocessed'],
+                'reprocess_failed_total': self.stats['dlq_reprocess_failed'],
+                'dropped_total': self.stats['dlq_dropped'],
+                'max_entries': self.dead_letter_max_entries,
+                'max_attempts': self.dead_letter_max_attempts
+            },
             'sources': {
                 source_id: {
                     'total_packets': stats['total_packets'],
@@ -888,6 +988,81 @@ class DataGateway(BaseModule):
                 }
                 for source_id, stats in self.source_stats.items()
             }
+        }
+
+    def get_dead_letter_stats(self) -> Dict[str, Any]:
+        return {
+            'queued': len(self.dead_letter_queue),
+            'enqueued_total': self.stats['dlq_enqueued'],
+            'reprocessed_total': self.stats['dlq_reprocessed'],
+            'reprocess_failed_total': self.stats['dlq_reprocess_failed'],
+            'dropped_total': self.stats['dlq_dropped'],
+            'limits': {
+                'max_entries': self.dead_letter_max_entries,
+                'reprocess_batch': self.dead_letter_reprocess_batch,
+                'max_attempts': self.dead_letter_max_attempts
+            }
+        }
+
+    def get_dead_letters(self, limit: int = 100) -> List[Dict[str, Any]]:
+        limit = max(1, min(int(limit), self.dead_letter_max_entries))
+        items = list(self.dead_letter_queue.values())
+        return items[-limit:]
+
+    def clear_dead_letters(self) -> int:
+        removed = len(self.dead_letter_queue)
+        self.dead_letter_queue.clear()
+        return removed
+
+    def reprocess_dead_letters(self, limit: int = None) -> Dict[str, int]:
+        if limit is None:
+            limit = self.dead_letter_reprocess_batch
+        limit = max(1, min(int(limit), self.dead_letter_max_entries))
+
+        processed = 0
+        reprocessed_ok = 0
+        requeued = 0
+        dropped = 0
+
+        keys = list(self.dead_letter_queue.keys())[:limit]
+        for key in keys:
+            entry = self.dead_letter_queue.pop(key, None)
+            if not entry:
+                continue
+            processed += 1
+
+            route = entry.get('route') or {}
+            datapoint = entry.get('datapoint') or {}
+            target = entry.get('target') or ''
+            attempts = int(entry.get('attempts') or 1)
+
+            try:
+                self._send_to_target(target, datapoint, route)
+                self.stats['dlq_reprocessed'] += 1
+                reprocessed_ok += 1
+            except Exception as e:
+                self.stats['dlq_reprocess_failed'] += 1
+                attempts += 1
+                if attempts > self.dead_letter_max_attempts:
+                    self.stats['dlq_dropped'] += 1
+                    dropped += 1
+                    continue
+
+                now = time.time()
+                entry['attempts'] = attempts
+                entry['last_failed_at'] = now
+                entry['last_failed_at_utc'] = self._utc_iso(now)
+                entry['error_class'] = self._classify_routing_error(e)
+                entry['error_message'] = str(e)
+                self.dead_letter_queue[entry['id']] = entry
+                requeued += 1
+
+        self._prune_dead_letter_queue()
+        return {
+            'processed': processed,
+            'reprocessed_ok': reprocessed_ok,
+            'requeued': requeued,
+            'dropped': dropped
         }
 
     # ========================================================================
@@ -1245,6 +1420,7 @@ class DataGateway(BaseModule):
             'telemetry_count': len(self.telemetry_cache),
             'telemetry_evictions': self.stats['telemetry_evictions'],
             'polling_backpressure_skips': self.stats['polling_backpressure_skips'],
+            'dead_letter': self.get_dead_letter_stats(),
             'timestamp_utc': self._utc_iso(),
             'uptime': time.time() - getattr(self, '_start_time', time.time())
         }
