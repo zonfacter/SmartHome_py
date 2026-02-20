@@ -47,3 +47,4 @@ jobs:
           python test_web_manager_fix.py
           python test_logging_system.py
           pytest -q test_api_contracts.py
+          pytest -q test_backup_manager.py

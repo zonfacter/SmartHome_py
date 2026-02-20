@@ -1829,6 +1829,130 @@ class WebManager(BaseModule):
                 logger.error(f"Fehler bei POST /api/admin/logs/clear: {e}", exc_info=True)
                 return jsonify({'success': False, 'error': str(e)}), 500
 
+        @self.app.route('/api/admin/backup/list', methods=['GET'])
+        def list_backups():
+            """Listet verfügbare Backup-Archive."""
+            try:
+                from modules.core.backup_manager import BackupManager
+                limit = request.args.get('limit', 50, type=int)
+                backups = BackupManager.list_backups(project_root=os.getcwd(), limit=limit)
+                return jsonify({'success': True, 'backups': backups})
+            except Exception as e:
+                logger.error(f"Fehler bei GET /api/admin/backup/list: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/admin/backup/create', methods=['POST'])
+        def create_backup():
+            """Erstellt ein Backup von Config + Log-DB."""
+            try:
+                from modules.core.backup_manager import BackupManager
+                from modules.core.database_logger import DatabaseLogger
+                data = request.get_json(silent=True) or {}
+                replay = self._idempotency_precheck(data)
+                if replay is not None:
+                    return replay
+
+                keep_count = int(data.get('keep_count', int(os.getenv('SMARTHOME_BACKUP_KEEP_COUNT', '30'))))
+                keep_count = max(5, min(keep_count, 200))
+                result = BackupManager.create_backup(project_root=os.getcwd(), keep_count=keep_count)
+
+                db_path = os.path.join(os.path.abspath(os.getcwd()), 'config', 'system_logs.db')
+                actor = request.headers.get('X-Admin-User') or request.remote_addr or 'unknown'
+                DatabaseLogger.audit_event(
+                    db_path=db_path,
+                    action='backup_created',
+                    actor=str(actor),
+                    details={
+                        'backup_file': result.get('backup_file'),
+                        'files_count': result.get('files_count'),
+                        'request_id': self._get_request_id()
+                    }
+                )
+
+                return self._build_idempotent_json_response(data, result, 200)
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/admin/backup/create: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/admin/backup/verify', methods=['GET'])
+        def verify_backup():
+            """Prüft Integrität eines Backup-Archivs."""
+            try:
+                from modules.core.backup_manager import BackupManager
+                backup_file = str(request.args.get('file') or '').strip()
+                if not backup_file:
+                    return jsonify({'success': False, 'error': 'file erforderlich'}), 400
+                result = BackupManager.verify_backup(project_root=os.getcwd(), backup_file=backup_file)
+                result['success'] = bool(result.get('ok'))
+                return jsonify(result), (200 if result.get('ok') else 400)
+            except Exception as e:
+                logger.error(f"Fehler bei GET /api/admin/backup/verify: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/admin/backup/restore', methods=['POST'])
+        def restore_backup():
+            """Stellt ein Backup wieder her."""
+            try:
+                from modules.core.backup_manager import BackupManager
+                from modules.core.database_logger import DatabaseLogger
+                data = request.get_json(silent=True) or {}
+                replay = self._idempotency_precheck(data)
+                if replay is not None:
+                    return replay
+
+                backup_file = str(data.get('file') or '').strip()
+                if not backup_file:
+                    return jsonify({'success': False, 'error': 'file erforderlich'}), 400
+
+                dry_run = bool(data.get('dry_run', False))
+                create_pre_restore = bool(data.get('create_pre_restore_backup', True))
+                keep_count = int(data.get('keep_count', int(os.getenv('SMARTHOME_BACKUP_KEEP_COUNT', '30'))))
+                keep_count = max(5, min(keep_count, 200))
+
+                result = BackupManager.restore_backup(
+                    project_root=os.getcwd(),
+                    backup_file=backup_file,
+                    dry_run=dry_run,
+                    create_pre_restore_backup=create_pre_restore,
+                    keep_count=keep_count,
+                )
+
+                db_path = os.path.join(os.path.abspath(os.getcwd()), 'config', 'system_logs.db')
+                actor = request.headers.get('X-Admin-User') or request.remote_addr or 'unknown'
+                DatabaseLogger.audit_event(
+                    db_path=db_path,
+                    action='backup_restore_requested',
+                    actor=str(actor),
+                    details={
+                        'backup_file': backup_file,
+                        'dry_run': dry_run,
+                        'success': bool(result.get('success')),
+                        'request_id': self._get_request_id()
+                    }
+                )
+
+                status = 200 if result.get('success') else 400
+                return self._build_idempotent_json_response(data, result, status)
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/admin/backup/restore: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/admin/backup/download', methods=['GET'])
+        def download_backup():
+            """Lädt ein Backup-Archiv herunter."""
+            try:
+                backup_file = str(request.args.get('file') or '').strip()
+                if not backup_file:
+                    return jsonify({'success': False, 'error': 'file erforderlich'}), 400
+                backup_dir = os.path.join(os.path.abspath(os.getcwd()), 'config', 'backups')
+                path = os.path.join(backup_dir, backup_file)
+                if not os.path.exists(path):
+                    return jsonify({'success': False, 'error': 'Backup nicht gefunden'}), 404
+                return send_file(path, as_attachment=True, download_name=backup_file)
+            except Exception as e:
+                logger.error(f"Fehler bei GET /api/admin/backup/download: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
         @self.app.route('/api/admin/service/info')
         def get_service_info():
             """Service-Informationen"""
