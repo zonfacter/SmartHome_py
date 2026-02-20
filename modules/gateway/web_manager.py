@@ -93,6 +93,8 @@ class WebManager(BaseModule):
         self._trigger_store = None
         self._control_rate_limit = {}
         self._control_rate_limit_lock = threading.Lock()
+        self._stream_viewers = {}
+        self._stream_viewers_lock = threading.Lock()
 
     def initialize(self, app_context: Any):
         """Initialisiert das Modul und erzwingt absolute Pfade für alle Manager."""
@@ -266,6 +268,7 @@ class WebManager(BaseModule):
             # HLS manifests/segments must not be cached, otherwise stale playlists
             # can reference already deleted TS fragments and trigger endless 404 loops.
             if request.path.startswith('/static/hls/'):
+                self._update_stream_viewer_metrics(request.path, request.remote_addr)
                 response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
                 response.headers['Pragma'] = 'no-cache'
                 response.headers['Expires'] = '0'
@@ -557,6 +560,53 @@ class WebManager(BaseModule):
         if ref_origin and ref_origin in allowed:
             return True, ''
         return False, f'Referer nicht erlaubt: {referer}'
+
+    def _camera_id_from_hls_path(self, path: str) -> str:
+        filename = os.path.basename(str(path or '').strip())
+        if not filename:
+            return ''
+        if filename.endswith('.m3u8'):
+            return filename[:-5]
+        if filename.endswith('.ts'):
+            filename = filename[:-3]
+            if '_' in filename:
+                return filename.rsplit('_', 1)[0]
+            return filename
+        return ''
+
+    def _update_stream_viewer_metrics(self, hls_path: str, remote_addr: str):
+        cam_id = self._camera_id_from_hls_path(hls_path)
+        if not cam_id:
+            return
+        ip = str(remote_addr or 'unknown').strip()
+        now = time.time()
+        with self._stream_viewers_lock:
+            viewers = self._stream_viewers.setdefault(cam_id, {})
+            viewers[ip] = now
+
+            # Opportunistisches Cleanup alter Viewer-Einträge.
+            cutoff = now - 30.0
+            for cid, cmap in list(self._stream_viewers.items()):
+                stale = [addr for addr, ts in cmap.items() if ts < cutoff]
+                for addr in stale:
+                    cmap.pop(addr, None)
+                if not cmap:
+                    self._stream_viewers.pop(cid, None)
+
+    def _get_stream_viewer_counts(self) -> Dict[str, int]:
+        now = time.time()
+        counts = {}
+        with self._stream_viewers_lock:
+            cutoff = now - 30.0
+            for cam_id, cmap in list(self._stream_viewers.items()):
+                stale = [addr for addr, ts in cmap.items() if ts < cutoff]
+                for addr in stale:
+                    cmap.pop(addr, None)
+                if cmap:
+                    counts[cam_id] = len(cmap)
+                else:
+                    self._stream_viewers.pop(cam_id, None)
+        return counts
 
     def _validate_api_payload(self):
         """
@@ -1574,6 +1624,27 @@ class WebManager(BaseModule):
                 'timestamp': time.time(),
                 'latency_ms': 0.5  # Stub - echte Messung würde über PLC gehen
             })
+
+        @self.app.route('/api/monitor/streams')
+        def monitor_streams():
+            """Debug/Health-Metriken für RTSP/Ring Streams."""
+            try:
+                stream_mgr = self.app_context.module_manager.get_module('stream_manager')
+                if not stream_mgr:
+                    return jsonify({'success': False, 'error': 'stream_manager nicht verfügbar'}), 503
+
+                payload = stream_mgr.get_debug_metrics()
+                viewer_counts = self._get_stream_viewer_counts()
+                streams = payload.get('streams', {})
+                for cam_id, data in streams.items():
+                    data['client_count'] = int(viewer_counts.get(cam_id, 0))
+
+                payload['viewer_ttl_seconds'] = 30
+                payload['success'] = True
+                return jsonify(payload)
+            except Exception as e:
+                logger.error(f"Fehler bei GET /api/monitor/streams: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
 
         # ==========================================
         # RING API ENDPOINTS
