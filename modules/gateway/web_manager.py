@@ -458,7 +458,7 @@ class WebManager(BaseModule):
 
         allow_loopback_without_key = os.getenv(
             'SMARTHOME_ALLOW_LOOPBACK_WITHOUT_KEY',
-            'true'
+            'false'
         ).strip().lower() in ('1', 'true', 'yes', 'on')
 
         if provided_key and hmac.compare_digest(provided_key, expected_key):
