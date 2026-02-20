@@ -44,12 +44,24 @@ jobs:
           git archive --format=tar.gz --prefix="${PKG}/" -o "dist/${PKG}.tar.gz" HEAD
           git archive --format=zip --prefix="${PKG}/" -o "dist/${PKG}.zip" HEAD
 
+      - name: Generate dependency manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "commit=${GITHUB_SHA}"
+            echo "requirements_lock_sha256=$(sha256sum requirements.lock.txt | awk '{print $1}')"
+            echo "package_lock_sha256=$(sha256sum package-lock.json | awk '{print $1}')"
+            echo "python_version=$(python3 --version | awk '{print $2}')"
+            echo "node_version=$(node --version)"
+          } > dist/DEPENDENCY_MANIFEST.txt
+
       - name: Generate checksums
         shell: bash
         run: |
           set -euo pipefail
           cd dist
-          sha256sum *.tar.gz *.zip > SHA256SUMS
+          sha256sum *.tar.gz *.zip DEPENDENCY_MANIFEST.txt > SHA256SUMS
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
@@ -58,6 +70,7 @@ jobs:
           path: |
             dist/*.tar.gz
             dist/*.zip
+            dist/DEPENDENCY_MANIFEST.txt
             dist/SHA256SUMS
           if-no-files-found: error
 
@@ -67,6 +80,7 @@ jobs:
           subject-path: |
             dist/*.tar.gz
             dist/*.zip
+            dist/DEPENDENCY_MANIFEST.txt
             dist/SHA256SUMS
 
       - name: Publish GitHub release
@@ -77,5 +91,6 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.zip
+            dist/DEPENDENCY_MANIFEST.txt
             dist/SHA256SUMS
           generate_release_notes: true

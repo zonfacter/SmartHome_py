@@ -18,13 +18,24 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
 
       - name: Install test tooling
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements.lock.txt ]; then pip install --require-hashes -r requirements.lock.txt; fi
           pip install pytest python-dotenv
+
+      - name: Verify Python lock consistency
+        run: |
+          python -m pip install pip-tools
+          python -m piptools compile --quiet --generate-hashes --resolver=backtracking -o requirements.lock.txt requirements.txt
+          git diff --exit-code requirements.lock.txt
+
+      - name: Verify Node lock consistency
+        run: |
+          npm install --package-lock-only --ignore-scripts
+          git diff --exit-code package-lock.json
 
       - name: Syntax check
         run: |

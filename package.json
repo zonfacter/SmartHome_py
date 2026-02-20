@@ -1,8 +1,9 @@
 {
+  "name": "Smarthome-Web",
   "devDependencies": {
-    "tailwindcss": "^4.1.18"
+    "tailwindcss": "4.1.18"
   },
   "dependencies": {
-    "ring-client-api": "^14.3.0"
+    "ring-client-api": "14.3.0"
   }
 }
