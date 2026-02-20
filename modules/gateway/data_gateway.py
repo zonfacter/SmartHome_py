@@ -80,6 +80,23 @@ class DataGateway(BaseModule):
         self.is_docker = self._detect_docker()
         self.capabilities = self._detect_capabilities()
 
+        # Runtime Limits (konfigurierbar via Env)
+        self.blob_cache_limit = self._get_env_int('SMARTHOME_BLOB_CACHE_LIMIT_BYTES', self.BLOB_CACHE_LIMIT, min_value=1024 * 1024)
+        self.telemetry_cache_limit = self._get_env_int('SMARTHOME_TELEMETRY_CACHE_SIZE', self.TELEMETRY_CACHE_SIZE, min_value=100)
+        default_prune = max(1, self.telemetry_cache_limit // 2)
+        self.telemetry_prune_batch = self._get_env_int(
+            'SMARTHOME_TELEMETRY_PRUNE_BATCH',
+            default_prune,
+            min_value=1,
+            max_value=self.telemetry_cache_limit
+        )
+        self.max_subscribed_variables_per_poll = self._get_env_int(
+            'SMARTHOME_MAX_SUBSCRIBED_VARIABLES_PER_POLL',
+            2000,
+            min_value=100
+        )
+        self._poll_window_cursor = 0
+
         # Caches
         self.blob_cache = OrderedDict()  # key -> (data, timestamp, size)
         self.blob_cache_size = 0
@@ -110,6 +127,8 @@ class DataGateway(BaseModule):
             'blob_misses': 0,
             'blob_evictions': 0,
             'telemetry_updates': 0,
+            'telemetry_evictions': 0,
+            'polling_backpressure_skips': 0,
             'routes_processed': 0,
             'routes_blocked': 0,
             'spam_events': 0,
@@ -137,7 +156,9 @@ class DataGateway(BaseModule):
         print(f"     🖥️  Platform: {self.platform}")
         print(f"     🐳 Docker: {self.is_docker}")
         print(f"     🎮 GPU: {self.capabilities.get('gpu_available', False)}")
-        print(f"     💾 Blob-Cache: {self.BLOB_CACHE_LIMIT // (1024*1024)} MB")
+        print(f"     💾 Blob-Cache: {self.blob_cache_limit // (1024*1024)} MB")
+        print(f"     📊 Telemetrie-Cache-Limit: {self.telemetry_cache_limit} (Prune-Batch: {self.telemetry_prune_batch})")
+        print(f"     🔁 Poll-Variablen-Limit/Zyklus: {self.max_subscribed_variables_per_poll}")
 
         # ⭐ v5.0: Lade Routing-Konfiguration
         self._load_routing_config()
@@ -224,6 +245,22 @@ class DataGateway(BaseModule):
                 return 'docker' in f.read()
         except:
             return False
+
+    def _get_env_int(self, key: str, default: int, min_value: int = None, max_value: int = None) -> int:
+        raw = str(os.getenv(key, '') or '').strip()
+        if not raw:
+            value = int(default)
+        else:
+            try:
+                value = int(raw)
+            except Exception:
+                value = int(default)
+
+        if min_value is not None:
+            value = max(int(min_value), value)
+        if max_value is not None:
+            value = min(int(max_value), value)
+        return value
 
     def _detect_capabilities(self) -> Dict[str, Any]:
         """Erkennt System-Capabilities"""
@@ -810,11 +847,11 @@ class DataGateway(BaseModule):
             size = len(data)
 
             # Prüfe ob zu groß
-            if size > self.BLOB_CACHE_LIMIT:
+            if size > self.blob_cache_limit:
                 return False
 
             # FIFO: Entferne älteste Einträge bis genug Platz
-            while self.blob_cache_size + size > self.BLOB_CACHE_LIMIT:
+            while self.blob_cache_size + size > self.blob_cache_limit:
                 if not self.blob_cache:
                     break
                 oldest_key = next(iter(self.blob_cache))
@@ -862,8 +899,8 @@ class DataGateway(BaseModule):
             return {
                 'count': len(self.blob_cache),
                 'total_size': self.blob_cache_size,
-                'cache_limit': self.BLOB_CACHE_LIMIT,
-                'utilization': round(self.blob_cache_size / self.BLOB_CACHE_LIMIT * 100, 2),
+                'cache_limit': self.blob_cache_limit,
+                'utilization': round(self.blob_cache_size / max(self.blob_cache_limit, 1) * 100, 2),
                 'hits': self.stats['blob_hits'],
                 'misses': self.stats['blob_misses'],
                 'evictions': self.stats['blob_evictions']
@@ -887,11 +924,11 @@ class DataGateway(BaseModule):
             self.stats['telemetry_updates'] += 1
 
             # LRU: Begrenze Cache-Größe
-            if len(self.telemetry_cache) > self.TELEMETRY_CACHE_SIZE:
-                # Entferne älteste Hälfte (einfache Strategie)
-                keys_to_remove = list(self.telemetry_cache.keys())[:self.TELEMETRY_CACHE_SIZE // 2]
+            if len(self.telemetry_cache) > self.telemetry_cache_limit:
+                keys_to_remove = list(self.telemetry_cache.keys())[:self.telemetry_prune_batch]
                 for k in keys_to_remove:
                     del self.telemetry_cache[k]
+                self.stats['telemetry_evictions'] += len(keys_to_remove)
 
             # Broadcast Update
             self._broadcast_telemetry_update(key, value)
@@ -1136,8 +1173,16 @@ class DataGateway(BaseModule):
                 'connected': plc_connected
             },
             'capabilities': self.capabilities,
+            'limits': {
+                'blob_cache_limit_bytes': self.blob_cache_limit,
+                'telemetry_cache_limit_entries': self.telemetry_cache_limit,
+                'telemetry_prune_batch': self.telemetry_prune_batch,
+                'max_subscribed_variables_per_poll': self.max_subscribed_variables_per_poll
+            },
             'blob_stats': self.get_blob_stats(),
             'telemetry_count': len(self.telemetry_cache),
+            'telemetry_evictions': self.stats['telemetry_evictions'],
+            'polling_backpressure_skips': self.stats['polling_backpressure_skips'],
             'uptime': time.time() - getattr(self, '_start_time', time.time())
         }
 
@@ -1199,8 +1244,22 @@ class DataGateway(BaseModule):
                     time.sleep(1.0)
                     continue
 
+                if len(subscribed_vars) > self.max_subscribed_variables_per_poll:
+                    total = len(subscribed_vars)
+                    limit = self.max_subscribed_variables_per_poll
+                    start = self._poll_window_cursor % total
+                    end = start + limit
+                    if end <= total:
+                        poll_batch = subscribed_vars[start:end]
+                    else:
+                        poll_batch = subscribed_vars[start:] + subscribed_vars[:end - total]
+                    self._poll_window_cursor = (start + limit) % total
+                    self.stats['polling_backpressure_skips'] += (total - limit)
+                else:
+                    poll_batch = subscribed_vars
+
                 # Lese Werte von PLC(s)
-                updates = self._read_subscribed_variables(subscribed_vars)
+                updates = self._read_subscribed_variables(poll_batch)
 
                 if updates:
                     # Broadcast Update (Safe-Implementation)

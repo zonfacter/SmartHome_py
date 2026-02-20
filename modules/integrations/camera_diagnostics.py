@@ -8,6 +8,7 @@ import struct
 import subprocess
 import json
 import logging
+import os
 import uuid
 import time
 import re
@@ -44,6 +45,22 @@ SNAPSHOT_URLS = [
     '/cgi-bin/snapshot.cgi',
     '/ISAPI/Streaming/channels/101/picture',
 ]
+
+
+def _env_int(name: str, default: int, min_value: int = None, max_value: int = None) -> int:
+    raw = str(os.getenv(name, '') or '').strip()
+    if not raw:
+        value = int(default)
+    else:
+        try:
+            value = int(raw)
+        except Exception:
+            value = int(default)
+    if min_value is not None:
+        value = max(int(min_value), value)
+    if max_value is not None:
+        value = min(int(max_value), value)
+    return value
 
 
 def _scan_port(host, port, timeout=2.0):
@@ -248,7 +265,8 @@ def diagnose_camera(host, user='admin', password='admin'):
         'snapshot': None,
     }
 
-    with ThreadPoolExecutor(max_workers=12) as executor:
+    diagnose_workers = _env_int('SMARTHOME_CAMERA_DIAG_MAX_WORKERS', 12, min_value=2, max_value=32)
+    with ThreadPoolExecutor(max_workers=diagnose_workers) as executor:
         # 1. Port-Scan (parallel)
         port_futures = {
             executor.submit(_scan_port, host, port): port
@@ -500,7 +518,8 @@ def scan_network(subnet=None, scan_range=None, ports=None, user='admin', passwor
     if result.get('local_ip'):
         hosts_to_scan = [h for h in hosts_to_scan if h != result['local_ip']]
 
-    with ThreadPoolExecutor(max_workers=64) as executor:
+    scan_workers = _env_int('SMARTHOME_CAMERA_SCAN_MAX_WORKERS', 64, min_value=4, max_value=128)
+    with ThreadPoolExecutor(max_workers=scan_workers) as executor:
         futures = {
             executor.submit(_scan_host_camera_ports, host, 0.8, scan_ports): host
             for host in hosts_to_scan

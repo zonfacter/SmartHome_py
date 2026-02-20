@@ -15,6 +15,7 @@ from typing import Optional, Any
 import pyads
 import threading
 import time
+import os
 
 
 class PLCCommunication(BaseModule):
@@ -50,6 +51,8 @@ class PLCCommunication(BaseModule):
         }
         self.cache = {}
         self.cache_timeout = 0.1  # 100ms Cache
+        self.cache_max_entries = max(100, int(os.getenv('SMARTHOME_PLC_CACHE_MAX_ENTRIES', '5000')))
+        self.cache_evictions = 0
         
         # ⭐ v1.1.0: Verbessertes Error-Handling
         self.consecutive_errors = 0
@@ -184,6 +187,11 @@ class PLCCommunication(BaseModule):
             value = self.plc.read_by_name(variable, plc_type)
             
             # Cache speichern
+            if variable not in self.cache and len(self.cache) >= self.cache_max_entries:
+                oldest_key = next(iter(self.cache), None)
+                if oldest_key is not None:
+                    del self.cache[oldest_key]
+                    self.cache_evictions += 1
             self.cache[variable] = (value, time.time())
             
             # ⭐ Reset Fehler-Counter bei Erfolg
@@ -286,6 +294,8 @@ class PLCCommunication(BaseModule):
             'consecutive_errors': self.consecutive_errors,
             'max_errors': self.max_errors,
             'cached_variables': len(self.cache),
+            'cache_max_entries': self.cache_max_entries,
+            'cache_evictions': self.cache_evictions,
             'total_reads': self.total_reads,
             'total_writes': self.total_writes,
             'total_errors': self.total_errors,
