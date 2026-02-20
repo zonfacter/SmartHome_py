@@ -10,6 +10,8 @@ Usage:
 import sys
 import argparse
 import os
+import signal
+import threading
 from module_manager import ModuleManager
 from dotenv import load_dotenv
 
@@ -86,7 +88,7 @@ def main():
     variable_manager = app.module_manager.get_module('variable_manager')
 
     # Start a background thread to auto-connect PLC after server has started
-    import threading, time
+    import time
 
     def _auto_connect_plc():
         if not plc:
@@ -137,6 +139,33 @@ def main():
 
     threading.Thread(target=_auto_connect_plc, daemon=True).start()
 
+    shutdown_started = threading.Event()
+    shutdown_reason = {'value': 'normal_exit'}
+
+    def _graceful_shutdown(reason: str):
+        if shutdown_started.is_set():
+            return
+        shutdown_started.set()
+        print()
+        print(f"Shutdown gestartet (Grund: {reason}) ...")
+        try:
+            app.module_manager.shutdown()
+        except Exception as e:
+            print(f"  ⚠️  Fehler beim globalen Shutdown: {e}")
+        print("Beendet")
+
+    def _handle_termination(signum, _frame):
+        try:
+            signame = signal.Signals(signum).name
+        except Exception:
+            signame = f"signal_{signum}"
+        shutdown_reason['value'] = signame
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGINT, _handle_termination)
+    if hasattr(signal, 'SIGTERM'):
+        signal.signal(signal.SIGTERM, _handle_termination)
+
     # Hinweis-Status zu optionalen Integrationen (keine erneute Initialisierung)
     if stream_manager:
         print("Info: StreamManager verfügbar")
@@ -170,15 +199,13 @@ def main():
     except KeyboardInterrupt:
         print()
         print("Beende Server...")
+        if shutdown_reason['value'] == 'normal_exit':
+            shutdown_reason['value'] = 'keyboard_interrupt'
+    except Exception:
+        shutdown_reason['value'] = 'unhandled_exception'
+        raise
     finally:
-        # Cleanup
-        if stream_manager:
-            stream_manager.shutdown()
-        if mqtt:
-            mqtt.shutdown()
-        data_gateway.shutdown()
-        web_manager.shutdown()
-        print("Beendet")
+        _graceful_shutdown(shutdown_reason['value'])
 
 
 if __name__ == '__main__':
