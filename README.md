@@ -33,6 +33,7 @@ Inhalt:
 - ADS TwinCAT Routen im Web-Setup verwalten (Status/Anlegen/Test)
 - Routing-Regeln über Setup-UI bearbeiten (`config/routing.json`)
 - Docker-Hardening/Least-Privilege: `docs/DOCKER_LEAST_PRIVILEGE.md`
+- Release-Verifikation (Checksums + Attestation): `docs/RELEASE_VERIFICATION.md`
 
 ---
 

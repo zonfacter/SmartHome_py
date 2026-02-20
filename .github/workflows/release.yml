@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build-and-release:
+    name: build-and-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME:-snapshot}"
+          if [[ -z "${TAG}" || "${TAG}" == "refs/heads/"* ]]; then
+            TAG="snapshot-${GITHUB_SHA::7}"
+          fi
+          PKG="smarthome-web-${TAG}"
+          mkdir -p dist
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "pkg=${PKG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build source archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG="${{ steps.meta.outputs.pkg }}"
+          git archive --format=tar.gz --prefix="${PKG}/" -o "dist/${PKG}.tar.gz" HEAD
+          git archive --format=zip --prefix="${PKG}/" -o "dist/${PKG}.zip" HEAD
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum *.tar.gz *.zip > SHA256SUMS
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ steps.meta.outputs.tag }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS
+          generate_release_notes: true
