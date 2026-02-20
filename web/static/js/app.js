@@ -57,6 +57,8 @@ class SmartHomeApp {
         this._ruleEditorActiveGroup = '';
         this._routingConfig = { version: '1.0', description: 'Routing-Konfiguration', routes: [], settings: {} };
         this._routeEditorSelectedId = null;
+        this._listenerRegistry = new Map();
+        this._listenerScopes = new Map();
 
         // Initialisierung
         this.init();
@@ -161,25 +163,24 @@ class SmartHomeApp {
         navButtons.forEach(btn => {
             const page = btn.getAttribute('data-page');
             console.log(`  ➜ Button für Seite: ${page}`);
-
-            btn.addEventListener('click', (e) => {
+            this._bindScopedListener(btn, 'click', (e) => {
                 e.preventDefault();
                 console.log(`🖱️ Click auf: ${page}`);
                 this.showPage(page);
 
                 // Mobile-Menü schließen
                 this.closeMobileMenu();
-            });
+            }, { scope: 'global', key: `nav:${page}:click` });
         });
 
         // Mobile-Hamburger-Menü
         const hamburger = document.getElementById('hamburger-btn');
         if (hamburger) {
             console.log('🍔 Hamburger-Button gefunden');
-            hamburger.addEventListener('click', () => {
+            this._bindScopedListener(hamburger, 'click', () => {
                 console.log('🍔 Hamburger geklickt');
                 this.toggleMobileMenu();
-            });
+            }, { scope: 'global', key: 'hamburger:click' });
         } else {
             console.warn('⚠️ Hamburger-Button NICHT gefunden');
         }
@@ -199,9 +200,9 @@ class SmartHomeApp {
         const connectBtn = document.getElementById('plc-connect-btn');
         if (connectBtn) {
             console.log('🔌 PLC-Connect-Button gefunden');
-            connectBtn.addEventListener('click', () => {
+            this._bindScopedListener(connectBtn, 'click', () => {
                 this.connectPLC();
-            });
+            }, { scope: 'global', key: 'plc-connect:click' });
         } else {
             console.warn('⚠️ PLC-Connect-Button NICHT gefunden');
         }
@@ -209,12 +210,45 @@ class SmartHomeApp {
         const disconnectBtn = document.getElementById('plc-disconnect-btn');
         if (disconnectBtn) {
             console.log('🔌 PLC-Disconnect-Button gefunden');
-            disconnectBtn.addEventListener('click', () => {
+            this._bindScopedListener(disconnectBtn, 'click', () => {
                 this.disconnectPLC();
-            });
+            }, { scope: 'global', key: 'plc-disconnect:click' });
         } else {
             console.warn('⚠️ PLC-Disconnect-Button NICHT gefunden');
         }
+    }
+
+    _bindScopedListener(el, event, handler, { scope = 'global', key = null, options = undefined } = {}) {
+        if (!el || typeof el.addEventListener !== 'function') return;
+        const listenerKey = key || `${scope}:${event}:${el.id || el.name || el.className || 'anon'}`;
+
+        const existing = this._listenerRegistry.get(listenerKey);
+        if (existing) {
+            try {
+                existing.el.removeEventListener(existing.event, existing.handler, existing.options);
+            } catch (e) {}
+        }
+
+        el.addEventListener(event, handler, options);
+        this._listenerRegistry.set(listenerKey, { el, event, handler, options, scope });
+
+        const scoped = this._listenerScopes.get(scope) || new Set();
+        scoped.add(listenerKey);
+        this._listenerScopes.set(scope, scoped);
+    }
+
+    _removeListenerScope(scope) {
+        const scoped = this._listenerScopes.get(scope);
+        if (!scoped) return;
+        scoped.forEach((listenerKey) => {
+            const ref = this._listenerRegistry.get(listenerKey);
+            if (!ref) return;
+            try {
+                ref.el.removeEventListener(ref.event, ref.handler, ref.options);
+            } catch (e) {}
+            this._listenerRegistry.delete(listenerKey);
+        });
+        this._listenerScopes.delete(scope);
     }
 
     showPage(pageName) {
@@ -227,6 +261,7 @@ class SmartHomeApp {
         if (this.currentPage === 'camera-wall' && pageName !== 'camera-wall') {
             this._cleanupCameraWallStreams();
         }
+        this._removeListenerScope(`page:${this.currentPage}`);
 
         // Alle Seiten ausblenden (entferne 'active' Klasse)
         document.querySelectorAll('.page').forEach(page => {
@@ -881,6 +916,7 @@ class SmartHomeApp {
 
     async loadCamerasPage() {
         console.log('📹 Lade Kameras...');
+        const scope = 'page:cameras';
 
         // ⭐ v5.1.1: Lade Widgets für diese Page
         await this.loadAndRenderWidgets('cameras');
@@ -891,48 +927,30 @@ class SmartHomeApp {
 
         // Registriere Add-Camera-Button
         const addCameraBtn = document.getElementById('add-camera-btn');
-        if (addCameraBtn && !addCameraBtn.hasAttribute('data-listener-attached')) {
-            addCameraBtn.addEventListener('click', () => {
-                this.addCamera();
-            });
-            addCameraBtn.setAttribute('data-listener-attached', 'true');
-        }
+        if (addCameraBtn) this._bindScopedListener(addCameraBtn, 'click', () => this.addCamera(), { scope, key: 'cameras:add-camera' });
 
         // Diagnose-Button registrieren
         const diagnoseBtn = document.getElementById('diagnose-btn');
-        if (diagnoseBtn && !diagnoseBtn.hasAttribute('data-listener-attached')) {
-            diagnoseBtn.addEventListener('click', () => this._runCameraDiagnose());
-            diagnoseBtn.setAttribute('data-listener-attached', 'true');
-        }
+        if (diagnoseBtn) this._bindScopedListener(diagnoseBtn, 'click', () => this._runCameraDiagnose(), { scope, key: 'cameras:diagnose' });
 
         // Netzwerk-Scan-Button registrieren
         const scanBtn = document.getElementById('network-scan-btn');
-        if (scanBtn && !scanBtn.hasAttribute('data-listener-attached')) {
-            scanBtn.addEventListener('click', () => this._runNetworkScan());
-            scanBtn.setAttribute('data-listener-attached', 'true');
-        }
+        if (scanBtn) this._bindScopedListener(scanBtn, 'click', () => this._runNetworkScan(), { scope, key: 'cameras:scan' });
 
         // Ring-Import-Button registrieren
         const ringImportBtn = document.getElementById('import-ring-btn');
-        if (ringImportBtn && !ringImportBtn.hasAttribute('data-listener-attached')) {
-            ringImportBtn.addEventListener('click', () => this._openRingImport());
-            ringImportBtn.setAttribute('data-listener-attached', 'true');
-        }
+        if (ringImportBtn) this._bindScopedListener(ringImportBtn, 'click', () => this._openRingImport(), { scope, key: 'cameras:ring-import' });
 
         const ringAuthBtn = document.getElementById('ring-auth-btn');
-        if (ringAuthBtn && !ringAuthBtn.hasAttribute('data-listener-attached')) {
-            ringAuthBtn.addEventListener('click', () => this._ringAuthenticateFromForm());
-            ringAuthBtn.setAttribute('data-listener-attached', 'true');
-        }
+        if (ringAuthBtn) this._bindScopedListener(ringAuthBtn, 'click', () => this._ringAuthenticateFromForm(), { scope, key: 'cameras:ring-auth' });
 
         const ringWebrtcPreferred = document.getElementById('ring-webrtc-preferred');
-        if (ringWebrtcPreferred && !ringWebrtcPreferred.hasAttribute('data-listener-attached')) {
+        if (ringWebrtcPreferred) {
             const stored = localStorage.getItem('ringWebrtcPreferred');
             ringWebrtcPreferred.checked = stored !== '0';
-            ringWebrtcPreferred.addEventListener('change', () => {
+            this._bindScopedListener(ringWebrtcPreferred, 'change', () => {
                 localStorage.setItem('ringWebrtcPreferred', ringWebrtcPreferred.checked ? '1' : '0');
-            });
-            ringWebrtcPreferred.setAttribute('data-listener-attached', 'true');
+            }, { scope, key: 'cameras:ring-webrtc-preferred' });
         }
 
         this._refreshRingStatus();
@@ -2805,13 +2823,12 @@ class SmartHomeApp {
 
     _setupGridLayoutToggle() {
         document.querySelectorAll('.grid-layout-btn').forEach(btn => {
-            if (btn.hasAttribute('data-listener-attached')) return;
-            btn.addEventListener('click', () => {
+            const colsKey = btn.getAttribute('data-grid-cols') || 'unknown';
+            this._bindScopedListener(btn, 'click', () => {
                 const cols = btn.getAttribute('data-grid-cols');
                 localStorage.setItem('cameraGridCols', cols);
                 this._applyGridLayout();
-            });
-            btn.setAttribute('data-listener-attached', 'true');
+            }, { scope: 'page:cameras', key: `cameras:grid-layout:${colsKey}` });
         });
     }
 
@@ -2821,6 +2838,7 @@ class SmartHomeApp {
 
     async loadCameraWallPage() {
         console.log('Lade Kamera-Wand...');
+        const scope = 'page:camera-wall';
 
         let cameras = {};
         try {
@@ -2854,9 +2872,10 @@ class SmartHomeApp {
 
                 // Checkbox Event-Listener
                 document.querySelectorAll('.wall-cam-checkbox').forEach(cb => {
-                    cb.addEventListener('change', () => {
+                    const camId = cb.getAttribute('data-cam-id') || 'unknown';
+                    this._bindScopedListener(cb, 'change', () => {
                         this._updateCameraWall();
-                    });
+                    }, { scope, key: `camera-wall:checkbox:${camId}` });
                 });
             }
         }
@@ -2866,8 +2885,8 @@ class SmartHomeApp {
 
         // Vollbild-Button
         const fsBtn = document.getElementById('wall-fullscreen-btn');
-        if (fsBtn && !fsBtn.hasAttribute('data-listener-attached')) {
-            fsBtn.addEventListener('click', () => {
+        if (fsBtn) {
+            this._bindScopedListener(fsBtn, 'click', () => {
                 const wallGrid = document.getElementById('camera-wall-grid');
                 if (wallGrid && wallGrid.requestFullscreen) {
                     wallGrid.requestFullscreen().catch(() => {
@@ -2875,15 +2894,14 @@ class SmartHomeApp {
                         document.documentElement.requestFullscreen().catch(() => {});
                     });
                 }
-            });
-            fsBtn.setAttribute('data-listener-attached', 'true');
+            }, { scope, key: 'camera-wall:fullscreen' });
         }
     }
 
     _setupWallLayoutToggle() {
         document.querySelectorAll('.wall-layout-btn').forEach(btn => {
-            if (btn.hasAttribute('data-listener-attached')) return;
-            btn.addEventListener('click', () => {
+            const layout = btn.getAttribute('data-wall-layout') || 'unknown';
+            this._bindScopedListener(btn, 'click', () => {
                 const layout = btn.getAttribute('data-wall-layout');
                 this._applyWallLayout(layout);
 
@@ -2892,8 +2910,7 @@ class SmartHomeApp {
                     b.classList.remove('bg-blue-500', 'text-white', 'border-blue-500');
                 });
                 btn.classList.add('bg-blue-500', 'text-white', 'border-blue-500');
-            });
-            btn.setAttribute('data-listener-attached', 'true');
+            }, { scope: 'page:camera-wall', key: `camera-wall:layout:${layout}` });
         });
     }
 
@@ -3084,6 +3101,7 @@ class SmartHomeApp {
 
     async loadSetupPage() {
         console.log('⚙️ Lade Setup...');
+        const scope = 'page:setup';
 
         // ⭐ v5.1.1: Lade Widgets für diese Page
         await this.loadAndRenderWidgets('setup');
@@ -3113,126 +3131,94 @@ class SmartHomeApp {
         const amsPortInput = document.getElementById('plc-ams-port');
         if (runtimeInput) {
             runtimeInput.value = savedRuntimeType === 'TC2' ? 'TC2' : 'TC3';
-            if (!runtimeInput.hasAttribute('data-listener-attached')) {
-                runtimeInput.addEventListener('change', () => {
-                    const rt = (runtimeInput.value || 'TC3').toUpperCase();
-                    localStorage.setItem('plc_runtime_type', rt);
-                    if (amsPortInput && amsPortInput.getAttribute('data-user-edited') !== '1') {
-                        amsPortInput.value = rt === 'TC2' ? '801' : '851';
-                    }
-                });
-                runtimeInput.setAttribute('data-listener-attached', 'true');
-            }
+            this._bindScopedListener(runtimeInput, 'change', () => {
+                const rt = (runtimeInput.value || 'TC3').toUpperCase();
+                localStorage.setItem('plc_runtime_type', rt);
+                if (amsPortInput && amsPortInput.getAttribute('data-user-edited') !== '1') {
+                    amsPortInput.value = rt === 'TC2' ? '801' : '851';
+                }
+            }, { scope, key: 'setup:runtime-change' });
         }
-        if (amsPortInput && !amsPortInput.hasAttribute('data-listener-attached')) {
-            amsPortInput.addEventListener('input', () => {
+        if (amsPortInput) {
+            this._bindScopedListener(amsPortInput, 'input', () => {
                 amsPortInput.setAttribute('data-user-edited', '1');
-            });
-            amsPortInput.setAttribute('data-listener-attached', 'true');
+            }, { scope, key: 'setup:ams-port-input' });
         }
 
         // Setup PLC-Button Event-Listener (falls noch nicht registriert)
         const connectBtn = document.getElementById('plc-connect-btn');
-        if (connectBtn && !connectBtn.hasAttribute('data-listener-attached')) {
-            console.log('🔌 Registriere PLC-Connect-Button');
-            connectBtn.addEventListener('click', () => {
-                this.connectPLC();
-            });
-            connectBtn.setAttribute('data-listener-attached', 'true');
-        }
+        if (connectBtn) this._bindScopedListener(connectBtn, 'click', () => this.connectPLC(), { scope, key: 'setup:plc-connect' });
 
         const disconnectBtn = document.getElementById('plc-disconnect-btn');
-        if (disconnectBtn && !disconnectBtn.hasAttribute('data-listener-attached')) {
-            console.log('🔌 Registriere PLC-Disconnect-Button');
-            disconnectBtn.addEventListener('click', () => {
-                this.disconnectPLC();
-            });
-            disconnectBtn.setAttribute('data-listener-attached', 'true');
-        }
+        if (disconnectBtn) this._bindScopedListener(disconnectBtn, 'click', () => this.disconnectPLC(), { scope, key: 'setup:plc-disconnect' });
 
         // Setup Symbol-Browser (falls noch nicht registriert)
         const symbolSearchBtn = document.getElementById('symbol-search-btn');
-        if (symbolSearchBtn && !symbolSearchBtn.hasAttribute('data-listener-attached')) {
-            console.log('🔍 Registriere Symbol-Search-Button');
-            symbolSearchBtn.addEventListener('click', () => {
-                this.searchPLCSymbols();
-            });
-            symbolSearchBtn.setAttribute('data-listener-attached', 'true');
+        if (symbolSearchBtn) {
+            this._bindScopedListener(symbolSearchBtn, 'click', () => this.searchPLCSymbols(), { scope, key: 'setup:symbol-search-btn' });
 
             // Enter-Taste im Suchfeld
             const symbolSearch = document.getElementById('symbol-search');
             if (symbolSearch) {
-                symbolSearch.addEventListener('keypress', (e) => {
+                this._bindScopedListener(symbolSearch, 'keypress', (e) => {
                     if (e.key === 'Enter') {
                         this.searchPLCSymbols();
                     }
-                });
+                }, { scope, key: 'setup:symbol-search-keypress' });
             }
         }
 
         // Setup Live-Symbol-Abruf
         const loadLiveSymbolsBtn = document.getElementById('load-live-symbols-btn');
-        if (loadLiveSymbolsBtn && !loadLiveSymbolsBtn.hasAttribute('data-listener-attached')) {
-            console.log('☁️ Registriere Live-Symbol-Abruf-Button');
-            loadLiveSymbolsBtn.addEventListener('click', () => {
-                this.loadLiveSymbols();
-            });
-            loadLiveSymbolsBtn.setAttribute('data-listener-attached', 'true');
-        }
+        if (loadLiveSymbolsBtn) this._bindScopedListener(loadLiveSymbolsBtn, 'click', () => this.loadLiveSymbols(), { scope, key: 'setup:live-symbols-btn' });
 
         // Setup TPY-Upload
         const tpyUploadBtn = document.getElementById('tpy-upload-btn');
         const tpyUploadInput = document.getElementById('tpy-upload');
-        if (tpyUploadBtn && tpyUploadInput && !tpyUploadBtn.hasAttribute('data-listener-attached')) {
-            console.log('📤 Registriere TPY-Upload-Button');
-            tpyUploadBtn.addEventListener('click', () => {
-                tpyUploadInput.click();
-            });
-            tpyUploadInput.addEventListener('change', (e) => {
-                this.uploadTPY(e.target.files[0]);
-            });
-            tpyUploadBtn.setAttribute('data-listener-attached', 'true');
+        if (tpyUploadBtn && tpyUploadInput) {
+            this._bindScopedListener(tpyUploadBtn, 'click', () => tpyUploadInput.click(), { scope, key: 'setup:tpy-upload-open' });
+            this._bindScopedListener(tpyUploadInput, 'change', (e) => this.uploadTPY(e.target.files[0]), { scope, key: 'setup:tpy-upload-change' });
         }
 
         // Setup MQTT-Handler (falls noch nicht registriert)
         const mqttConnectBtn = document.getElementById('mqtt-connect-btn');
-        if (mqttConnectBtn && !mqttConnectBtn.hasAttribute('data-listener-attached')) {
+        if (mqttConnectBtn) {
             this.registerMQTTHandlers();
-            mqttConnectBtn.setAttribute('data-listener-attached', 'true');
         }
 
         // Setup Symbol-Suche Event-Listener
         const symbolSearchInput = document.getElementById('symbol-search');
         if (symbolSearchInput) {
             // Input Event für Live-Suche
-            symbolSearchInput.addEventListener('input', () => {
+            this._bindScopedListener(symbolSearchInput, 'input', () => {
                 // Debounce: Warte 300ms nach letzter Eingabe
                 clearTimeout(this.searchDebounceTimer);
                 this.searchDebounceTimer = setTimeout(() => {
                     this.searchPLCSymbols();
                 }, 300);
-            });
+            }, { scope, key: 'setup:symbol-search-input' });
 
             // Enter-Key für sofortige Suche
-            symbolSearchInput.addEventListener('keydown', (e) => {
+            this._bindScopedListener(symbolSearchInput, 'keydown', (e) => {
                 if (e.key === 'Enter') {
                     clearTimeout(this.searchDebounceTimer);
                     this.searchPLCSymbols();
                 }
-            });
+            }, { scope, key: 'setup:symbol-search-keydown' });
         }
 
         // Setup Type-Filter Event-Listener
         const typeFilterSelect = document.getElementById('symbol-type-filter');
         if (typeFilterSelect) {
-            typeFilterSelect.addEventListener('change', () => {
+            this._bindScopedListener(typeFilterSelect, 'change', () => {
                 this.searchPLCSymbols();
-            });
+            }, { scope, key: 'setup:symbol-type-filter-change' });
         }
 
         // Setup View-Mode-Umschaltung
         document.querySelectorAll('input[name="symbol-view"]').forEach(radio => {
-            radio.addEventListener('change', () => {
+            const mode = radio.value || 'unknown';
+            this._bindScopedListener(radio, 'change', () => {
                 if (this.currentSymbols && this.currentSymbols.length > 0) {
                     const viewMode = radio.value;
                     const symbolTree = document.getElementById('symbol-tree');
@@ -3243,7 +3229,7 @@ class SmartHomeApp {
                         this.renderSymbolList(this.currentSymbols, symbolTree);
                     }
                 }
-            });
+            }, { scope, key: `setup:symbol-view:${mode}` });
         });
 
         // Lade System-Status (mit Delay für DOM)
@@ -4738,21 +4724,22 @@ class SmartHomeApp {
 
     registerMQTTHandlers() {
         console.log('🔌 Registriere MQTT-Handler');
+        const scope = 'page:setup';
 
         const connectBtn = document.getElementById('mqtt-connect-btn');
         const disconnectBtn = document.getElementById('mqtt-disconnect-btn');
         const subscribeBtn = document.getElementById('mqtt-subscribe-btn');
 
         if (connectBtn) {
-            connectBtn.addEventListener('click', () => this.connectMQTT());
+            this._bindScopedListener(connectBtn, 'click', () => this.connectMQTT(), { scope, key: 'setup:mqtt-connect' });
         }
 
         if (disconnectBtn) {
-            disconnectBtn.addEventListener('click', () => this.disconnectMQTT());
+            this._bindScopedListener(disconnectBtn, 'click', () => this.disconnectMQTT(), { scope, key: 'setup:mqtt-disconnect' });
         }
 
         if (subscribeBtn) {
-            subscribeBtn.addEventListener('click', () => this.subscribeMQTT());
+            this._bindScopedListener(subscribeBtn, 'click', () => this.subscribeMQTT(), { scope, key: 'setup:mqtt-subscribe' });
         }
 
         // Load initial status
@@ -4765,6 +4752,7 @@ class SmartHomeApp {
 
     async loadAdminPage() {
         console.log('👑 Lade Admin...');
+        const scope = 'page:admin';
         if (!this._adminLogFilter) {
             this._adminLogFilter = 'all';
         }
@@ -4788,34 +4776,34 @@ class SmartHomeApp {
         const logsFilterSelect = document.getElementById('logs-filter-select');
 
         if (addPlcBtn) {
-            addPlcBtn.addEventListener('click', () => this.addPLC());
+            this._bindScopedListener(addPlcBtn, 'click', () => this.addPLC(), { scope, key: 'admin:add-plc' });
         }
 
         if (cleanupBtn) {
-            cleanupBtn.addEventListener('click', () => this.cleanupTPY());
+            this._bindScopedListener(cleanupBtn, 'click', () => this.cleanupTPY(), { scope, key: 'admin:cleanup-tpy' });
         }
 
         if (refreshLogsBtn) {
-            refreshLogsBtn.addEventListener('click', () => this.loadLogs());
+            this._bindScopedListener(refreshLogsBtn, 'click', () => this.loadLogs(), { scope, key: 'admin:refresh-logs' });
         }
 
         if (logsFilterSelect) {
             logsFilterSelect.value = this._adminLogFilter || 'all';
-            logsFilterSelect.addEventListener('change', () => {
+            this._bindScopedListener(logsFilterSelect, 'change', () => {
                 this._adminLogFilter = logsFilterSelect.value || 'all';
                 this.loadLogs();
-            });
+            }, { scope, key: 'admin:logs-filter-change' });
         }
 
         if (clearLogsBtn) {
-            clearLogsBtn.addEventListener('click', () => this.clearLogs());
+            this._bindScopedListener(clearLogsBtn, 'click', () => this.clearLogs(), { scope, key: 'admin:clear-logs' });
         }
 
         if (restartServiceBtn) {
-            restartServiceBtn.addEventListener('click', () => this.restartService());
+            this._bindScopedListener(restartServiceBtn, 'click', () => this.restartService(), { scope, key: 'admin:restart-service' });
         }
         if (restartDaemonBtn) {
-            restartDaemonBtn.addEventListener('click', () => this.restartDaemonService());
+            this._bindScopedListener(restartDaemonBtn, 'click', () => this.restartDaemonService(), { scope, key: 'admin:restart-daemon' });
         }
     }
 
