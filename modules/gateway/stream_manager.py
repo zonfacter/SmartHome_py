@@ -21,6 +21,7 @@ import os
 import shutil
 import random
 import logging
+import glob
 
 
 class StreamManager(BaseModule):
@@ -66,6 +67,7 @@ class StreamManager(BaseModule):
         self._recovery_state = {}  # camera_id -> retry/cooldown state
         self._recovery_thread = None
         self._recovery_active = False
+        self._stream_metrics = {}  # camera_id -> metrics
 
         # HLS Output-Verzeichnis
         self.hls_dir = 'web/static/hls'
@@ -118,6 +120,26 @@ class StreamManager(BaseModule):
         """Prüft ob Node.js installiert ist"""
         return shutil.which('node') is not None
 
+    def _ensure_metrics(self, camera_id: str) -> Dict[str, Any]:
+        metrics = self._stream_metrics.get(camera_id)
+        if metrics:
+            return metrics
+        metrics = {
+            'starts_total': 0,
+            'stops_total': 0,
+            'restarts_total': 0,
+            'recovery_success_total': 0,
+            'recovery_failed_total': 0,
+            'last_start_ts': 0.0,
+            'last_stop_ts': 0.0,
+            'last_exit_code': None,
+            'last_error': '',
+            'last_recovery_attempt_ts': 0.0,
+            'cooldown_until': 0.0,
+        }
+        self._stream_metrics[camera_id] = metrics
+        return metrics
+
     def _detect_hw_accel(self) -> Optional[str]:
         """
         Erkennt verfügbare Hardware-Beschleunigung
@@ -163,6 +185,7 @@ class StreamManager(BaseModule):
 
         with self.lock:
             self._cancel_delayed_stop(camera_id)
+            metrics = self._ensure_metrics(camera_id)
             desired_spec = {
                 'type': 'rtsp',
                 'camera_id': camera_id,
@@ -200,9 +223,14 @@ class StreamManager(BaseModule):
                     process.kill()
                 except Exception:
                     pass
+                try:
+                    metrics['last_exit_code'] = process.poll()
+                except Exception:
+                    pass
 
                 del self.streams[camera_id]
                 self._cleanup_hls_files(camera_id)
+                metrics['restarts_total'] += 1
 
             # HLS-Pfade
             hls_playlist = os.path.join(self.hls_dir, f"{camera_id}.m3u8")
@@ -243,6 +271,9 @@ class StreamManager(BaseModule):
                 }
                 self._desired_streams[camera_id] = desired_spec
                 self._reset_recovery_state(camera_id)
+                metrics['starts_total'] += 1
+                metrics['last_start_ts'] = time.time()
+                metrics['last_error'] = ''
 
                 print(f"  ▶️  Stream '{camera_id}' gestartet")
                 print(f"     🎬 HLS: /static/hls/{camera_id}.m3u8")
@@ -258,6 +289,8 @@ class StreamManager(BaseModule):
                         pass
                     del self.streams[camera_id]
                     self._cleanup_hls_files(camera_id)
+                    metrics['last_exit_code'] = process.poll()
+                    metrics['last_error'] = 'early_exit'
                     print(f"  ✗ Stream '{camera_id}' direkt beendet")
                     if err_text:
                         print(f"    FFmpeg: {err_text.splitlines()[:1][0]}")
@@ -266,6 +299,7 @@ class StreamManager(BaseModule):
                 return True
 
             except Exception as e:
+                metrics['last_error'] = str(e)
                 print(f"  ✗ Fehler beim Starten von '{camera_id}': {e}")
                 return False
 
@@ -289,6 +323,7 @@ class StreamManager(BaseModule):
 
             stream = self.streams[camera_id]
             process = stream['process']
+            metrics = self._ensure_metrics(camera_id)
 
             # Beende FFmpeg
             try:
@@ -296,6 +331,8 @@ class StreamManager(BaseModule):
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()
+            except Exception as e:
+                metrics['last_error'] = str(e)
 
             # Cleanup HLS-Dateien
             if cleanup:
@@ -303,6 +340,12 @@ class StreamManager(BaseModule):
 
             # Entferne aus Liste
             del self.streams[camera_id]
+            metrics['stops_total'] += 1
+            metrics['last_stop_ts'] = time.time()
+            try:
+                metrics['last_exit_code'] = process.poll()
+            except Exception:
+                pass
 
             print(f"  ⏸️  Stream '{camera_id}' gestoppt")
             return True
@@ -358,6 +401,7 @@ class StreamManager(BaseModule):
 
         with self.lock:
             self._cancel_delayed_stop(camera_id)
+            metrics = self._ensure_metrics(camera_id)
             desired_spec = {
                 'type': 'ring',
                 'camera_id': camera_id,
@@ -375,6 +419,7 @@ class StreamManager(BaseModule):
                 if is_running and same_source:
                     self._desired_streams[camera_id] = desired_spec
                     return True
+                metrics['restarts_total'] += 1
                 self.stop_stream(camera_id, cleanup=True)
 
             hls_playlist = os.path.join(self.hls_dir, f"{camera_id}.m3u8")
@@ -413,6 +458,9 @@ class StreamManager(BaseModule):
                 }
                 self._desired_streams[camera_id] = desired_spec
                 self._reset_recovery_state(camera_id)
+                metrics['starts_total'] += 1
+                metrics['last_start_ts'] = time.time()
+                metrics['last_error'] = ''
 
                 # Early-fail check
                 time.sleep(1.2)
@@ -425,6 +473,8 @@ class StreamManager(BaseModule):
                         pass
                     del self.streams[camera_id]
                     self._cleanup_hls_files(camera_id)
+                    metrics['last_exit_code'] = process.poll()
+                    metrics['last_error'] = 'early_exit'
                     print(f"  ✗ Ring-Stream '{camera_id}' direkt beendet")
                     if err_text:
                         first = err_text.splitlines()[0] if err_text.splitlines() else err_text
@@ -435,6 +485,7 @@ class StreamManager(BaseModule):
                 print(f"     🎬 HLS: /static/hls/{camera_id}.m3u8")
                 return True
             except Exception as e:
+                metrics['last_error'] = str(e)
                 print(f"  ✗ Fehler beim Starten des Ring-Streams '{camera_id}': {e}")
                 return False
 
@@ -582,6 +633,9 @@ class StreamManager(BaseModule):
 
                 if len(retry_timestamps) >= self.recovery_max_retries:
                     state['cooldown_until'] = now + self.recovery_cooldown_seconds
+                    metrics = self._ensure_metrics(camera_id)
+                    metrics['cooldown_until'] = state['cooldown_until']
+                    metrics['last_error'] = 'recovery_cooldown'
                     self.logger.error(
                         "Stream recovery escalated: camera=%s retries=%s cooldown=%ss",
                         camera_id,
@@ -597,6 +651,9 @@ class StreamManager(BaseModule):
 
                 state['retry_timestamps'].append(now)
                 restart_queue.append((camera_id, desired_spec, max(0.0, delay), exit_code, attempt))
+                metrics = self._ensure_metrics(camera_id)
+                metrics['last_recovery_attempt_ts'] = now
+                metrics['last_exit_code'] = exit_code
 
                 # Toten Prozess/Artefakte aufräumen, bevor Restart versucht wird.
                 if camera_id in self.streams:
@@ -614,6 +671,12 @@ class StreamManager(BaseModule):
             )
             time.sleep(delay)
             ok = self._restart_from_desired_spec(desired_spec)
+            with self.lock:
+                metrics = self._ensure_metrics(camera_id)
+                if ok:
+                    metrics['recovery_success_total'] += 1
+                else:
+                    metrics['recovery_failed_total'] += 1
             if ok:
                 self.logger.info("Stream recovery successful: camera=%s attempt=%s", camera_id, attempt)
             else:
@@ -752,6 +815,54 @@ class StreamManager(BaseModule):
     # ========================================================================
     # SYSTEM
     # ========================================================================
+
+    def get_debug_metrics(self) -> Dict[str, Any]:
+        with self.lock:
+            now = time.time()
+            per_stream = {}
+            camera_ids = set(self._stream_metrics.keys()) | set(self._desired_streams.keys()) | set(self.streams.keys())
+            for cam_id in sorted(camera_ids):
+                state = self._recovery_state.get(cam_id, {})
+                retry_timestamps = list(state.get('retry_timestamps', []))
+                cooldown_until = float(state.get('cooldown_until', 0.0) or 0.0)
+                metrics = dict(self._stream_metrics.get(cam_id, {}))
+                metrics.setdefault('cooldown_until', cooldown_until)
+                hls_files = glob.glob(os.path.join(self.hls_dir, f"{cam_id}_*.ts"))
+                playlist_exists = os.path.exists(os.path.join(self.hls_dir, f"{cam_id}.m3u8"))
+
+                stream = self.streams.get(cam_id)
+                running = False
+                process_pid = None
+                if stream and stream.get('process') is not None:
+                    process = stream.get('process')
+                    process_pid = getattr(process, 'pid', None)
+                    running = process.poll() is None
+
+                per_stream[cam_id] = {
+                    'running': running,
+                    'process_pid': process_pid,
+                    'source_type': (stream or {}).get('source_type') or (self._desired_streams.get(cam_id, {}).get('type')),
+                    'desired': self._desired_streams.get(cam_id),
+                    'metrics': metrics,
+                    'recovery': {
+                        'retries_in_window': len([t for t in retry_timestamps if now - t <= self.RECOVERY_WINDOW_SECONDS]),
+                        'cooldown_until': cooldown_until,
+                        'in_cooldown': now < cooldown_until,
+                    },
+                    'hls': {
+                        'playlist_exists': playlist_exists,
+                        'segment_count': len(hls_files),
+                    }
+                }
+
+            return {
+                'timestamp': now,
+                'auto_recovery_enabled': self.recovery_enabled,
+                'recovery_check_interval_seconds': self.recovery_interval,
+                'recovery_max_retries': self.recovery_max_retries,
+                'recovery_cooldown_seconds': self.recovery_cooldown_seconds,
+                'streams': per_stream,
+            }
 
     def get_status(self) -> Dict[str, Any]:
         """Status für Web-API"""
