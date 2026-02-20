@@ -22,6 +22,7 @@ import shutil
 import random
 import logging
 import glob
+from modules.core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 
 
 class StreamManager(BaseModule):
@@ -85,6 +86,10 @@ class StreamManager(BaseModule):
         self.recovery_backoff_base = max(0.2, float(os.getenv('STREAM_RECOVERY_BACKOFF_BASE_SECONDS', '1.5')))
         self.recovery_backoff_max = max(1.0, float(os.getenv('STREAM_RECOVERY_BACKOFF_MAX_SECONDS', '20')))
         self.recovery_jitter_max = max(0.0, float(os.getenv('STREAM_RECOVERY_JITTER_MAX_SECONDS', '0.6')))
+        self._stream_breakers: Dict[str, CircuitBreaker] = {}
+        self.cb_failure_threshold = max(1, int(os.getenv('SMARTHOME_STREAM_CB_FAILURE_THRESHOLD', '3')))
+        self.cb_recovery_seconds = max(1.0, float(os.getenv('SMARTHOME_STREAM_CB_RECOVERY_SECONDS', '30')))
+        self.cb_half_open_max_calls = max(1, int(os.getenv('SMARTHOME_STREAM_CB_HALF_OPEN_MAX_CALLS', '1')))
 
     def initialize(self, app_context: Any):
         """Initialisiert Stream Manager"""
@@ -140,6 +145,29 @@ class StreamManager(BaseModule):
         self._stream_metrics[camera_id] = metrics
         return metrics
 
+    def _stream_breaker_key(self, camera_id: str, source_type: str) -> str:
+        return f"stream:{source_type}:{camera_id}"
+
+    def _get_stream_breaker(self, camera_id: str, source_type: str) -> CircuitBreaker:
+        key = self._stream_breaker_key(camera_id, source_type)
+        breaker = self._stream_breakers.get(key)
+        if breaker:
+            return breaker
+        cfg = CircuitBreakerConfig(
+            failure_threshold=self.cb_failure_threshold,
+            recovery_timeout_seconds=self.cb_recovery_seconds,
+            half_open_max_calls=self.cb_half_open_max_calls
+        )
+        breaker = CircuitBreaker(name=key, config=cfg)
+        self._stream_breakers[key] = breaker
+        return breaker
+
+    def get_circuit_breaker_stats(self) -> Dict[str, Any]:
+        return {
+            key: breaker.snapshot()
+            for key, breaker in self._stream_breakers.items()
+        }
+
     def _detect_hw_accel(self) -> Optional[str]:
         """
         Erkennt verfügbare Hardware-Beschleunigung
@@ -186,6 +214,11 @@ class StreamManager(BaseModule):
         with self.lock:
             self._cancel_delayed_stop(camera_id)
             metrics = self._ensure_metrics(camera_id)
+            breaker = self._get_stream_breaker(camera_id, 'rtsp')
+            if not breaker.allow_request():
+                metrics['last_error'] = 'circuit_open'
+                self.logger.warning("Stream start blocked by circuit breaker: camera=%s", camera_id)
+                return False
             desired_spec = {
                 'type': 'rtsp',
                 'camera_id': camera_id,
@@ -206,6 +239,7 @@ class StreamManager(BaseModule):
                 if is_running and same_source:
                     # Bereits mit derselben Quelle aktiv -> idempotent success.
                     self._desired_streams[camera_id] = desired_spec
+                    breaker.record_success()
                     print(f"  ⚠️  Stream '{camera_id}' läuft bereits (gleiche Quelle)")
                     return True
 
@@ -291,15 +325,18 @@ class StreamManager(BaseModule):
                     self._cleanup_hls_files(camera_id)
                     metrics['last_exit_code'] = process.poll()
                     metrics['last_error'] = 'early_exit'
+                    breaker.record_failure('early_exit')
                     print(f"  ✗ Stream '{camera_id}' direkt beendet")
                     if err_text:
                         print(f"    FFmpeg: {err_text.splitlines()[:1][0]}")
                     return False
 
+                breaker.record_success()
                 return True
 
             except Exception as e:
                 metrics['last_error'] = str(e)
+                breaker.record_failure(str(e))
                 print(f"  ✗ Fehler beim Starten von '{camera_id}': {e}")
                 return False
 
@@ -402,6 +439,11 @@ class StreamManager(BaseModule):
         with self.lock:
             self._cancel_delayed_stop(camera_id)
             metrics = self._ensure_metrics(camera_id)
+            breaker = self._get_stream_breaker(camera_id, 'ring')
+            if not breaker.allow_request():
+                metrics['last_error'] = 'circuit_open'
+                self.logger.warning("Ring stream start blocked by circuit breaker: camera=%s", camera_id)
+                return False
             desired_spec = {
                 'type': 'ring',
                 'camera_id': camera_id,
@@ -418,6 +460,7 @@ class StreamManager(BaseModule):
                 )
                 if is_running and same_source:
                     self._desired_streams[camera_id] = desired_spec
+                    breaker.record_success()
                     return True
                 metrics['restarts_total'] += 1
                 self.stop_stream(camera_id, cleanup=True)
@@ -475,6 +518,7 @@ class StreamManager(BaseModule):
                     self._cleanup_hls_files(camera_id)
                     metrics['last_exit_code'] = process.poll()
                     metrics['last_error'] = 'early_exit'
+                    breaker.record_failure('early_exit')
                     print(f"  ✗ Ring-Stream '{camera_id}' direkt beendet")
                     if err_text:
                         first = err_text.splitlines()[0] if err_text.splitlines() else err_text
@@ -483,9 +527,11 @@ class StreamManager(BaseModule):
 
                 print(f"  ▶️  Ring-Stream '{camera_id}' gestartet")
                 print(f"     🎬 HLS: /static/hls/{camera_id}.m3u8")
+                breaker.record_success()
                 return True
             except Exception as e:
                 metrics['last_error'] = str(e)
+                breaker.record_failure(str(e))
                 print(f"  ✗ Fehler beim Starten des Ring-Streams '{camera_id}': {e}")
                 return False
 
@@ -861,6 +907,7 @@ class StreamManager(BaseModule):
                 'recovery_check_interval_seconds': self.recovery_interval,
                 'recovery_max_retries': self.recovery_max_retries,
                 'recovery_cooldown_seconds': self.recovery_cooldown_seconds,
+                'circuit_breakers': self.get_circuit_breaker_stats(),
                 'streams': per_stream,
             }
 
