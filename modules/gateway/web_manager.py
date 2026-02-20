@@ -290,17 +290,20 @@ class WebManager(BaseModule):
 
             payload_ok, payload_error, payload_status = self._validate_api_payload()
             if not payload_ok:
+                error_class = self._classify_payload_error(payload_status, payload_error)
                 logger.warning(
-                    "API payload rejected: req_id=%s method=%s path=%s remote=%s reason=%s",
+                    "API payload rejected: req_id=%s method=%s path=%s remote=%s class=%s reason=%s",
                     self._get_request_id(),
                     request.method,
                     request.path,
                     request.remote_addr,
+                    error_class,
                     payload_error
                 )
                 return jsonify({
                     'success': False,
                     'error': 'invalid_payload',
+                    'error_class': error_class,
                     'message': payload_error
                 }), payload_status
 
@@ -632,6 +635,21 @@ class WebManager(BaseModule):
             max_keys = max(10, int(max_keys_raw))
         except Exception:
             max_keys = 200
+        max_depth_raw = str(os.getenv('SMARTHOME_MAX_API_JSON_DEPTH', '12')).strip()
+        max_items_raw = str(os.getenv('SMARTHOME_MAX_API_JSON_ITEMS_PER_CONTAINER', '1000')).strip()
+        max_string_len_raw = str(os.getenv('SMARTHOME_MAX_API_JSON_STRING_LENGTH', '8192')).strip()
+        try:
+            max_depth = max(2, int(max_depth_raw))
+        except Exception:
+            max_depth = 12
+        try:
+            max_items = max(10, int(max_items_raw))
+        except Exception:
+            max_items = 1000
+        try:
+            max_string_len = max(64, int(max_string_len_raw))
+        except Exception:
+            max_string_len = 8192
 
         content_length = request.content_length or 0
         if content_length > max_bytes:
@@ -650,8 +668,68 @@ class WebManager(BaseModule):
                 return False, 'JSON-Body muss ein Objekt sein', 400
             if len(data) > max_keys:
                 return False, f'Zu viele JSON-Felder ({len(data)}>{max_keys})', 400
+            ok, reason = self._validate_json_structure(
+                data,
+                max_depth=max_depth,
+                max_items=max_items,
+                max_string_len=max_string_len
+            )
+            if not ok:
+                return False, reason, 400
 
         return True, '', 200
+
+    def _validate_json_structure(self, value: Any, max_depth: int, max_items: int, max_string_len: int, depth: int = 0):
+        """Validiert JSON-Struktur rekursiv gegen harte Grenzen."""
+        if depth > max_depth:
+            return False, f'JSON-Struktur zu tief (>{max_depth})'
+
+        if value is None or isinstance(value, (bool, int, float)):
+            return True, ''
+
+        if isinstance(value, str):
+            if len(value) > max_string_len:
+                return False, f'String-Feld zu lang ({len(value)}>{max_string_len})'
+            return True, ''
+
+        if isinstance(value, list):
+            if len(value) > max_items:
+                return False, f'Array zu groß ({len(value)}>{max_items})'
+            for item in value:
+                ok, reason = self._validate_json_structure(item, max_depth, max_items, max_string_len, depth + 1)
+                if not ok:
+                    return ok, reason
+            return True, ''
+
+        if isinstance(value, dict):
+            if len(value) > max_items:
+                return False, f'Objekt zu groß ({len(value)}>{max_items})'
+            for key, nested_value in value.items():
+                if not isinstance(key, str):
+                    return False, 'JSON-Objekt enthält Nicht-String-Key'
+                if len(key) > max_string_len:
+                    return False, f'JSON-Key zu lang ({len(key)}>{max_string_len})'
+                ok, reason = self._validate_json_structure(
+                    nested_value,
+                    max_depth,
+                    max_items,
+                    max_string_len,
+                    depth + 1
+                )
+                if not ok:
+                    return ok, reason
+            return True, ''
+
+        return False, f'Nicht unterstützter JSON-Typ: {type(value).__name__}'
+
+    def _classify_payload_error(self, status_code: int, message: str) -> str:
+        """Leitet Fehlerklasse für Payload-Rejects ab."""
+        msg = str(message or '').lower()
+        if int(status_code) == 413:
+            return 'payload_too_large'
+        if 'tief' in msg or 'array' in msg or 'objekt' in msg or 'json' in msg:
+            return 'schema_validation_failed'
+        return 'payload_validation_failed'
 
     def _get_idempotency_key(self) -> str:
         """Liest Idempotency-Key aus Request-Headern."""
@@ -1482,7 +1560,8 @@ class WebManager(BaseModule):
                 'connected': mqtt.connected,
                 'broker': mqtt.config.get('broker', 'nicht konfiguriert'),
                 'port': mqtt.config.get('port', 1883),
-                'subscriptions': len(mqtt.subscriptions)
+                'subscriptions': len(mqtt.subscriptions),
+                'ingress': mqtt.get_ingress_stats() if hasattr(mqtt, 'get_ingress_stats') else {}
             })
 
         @self.app.route('/api/admin/plcs', methods=['GET', 'POST'])

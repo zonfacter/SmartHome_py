@@ -23,6 +23,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 import time
+import os
 
 
 @dataclass
@@ -294,6 +295,19 @@ class BaseBMSParser(ABC):
             BMSData oder None
         """
         try:
+            max_frame_raw = str(os.getenv('SMARTHOME_BT_MAX_FRAME_BYTES', '2048')).strip()
+            try:
+                max_frame_bytes = max(64, int(max_frame_raw))
+            except Exception:
+                max_frame_bytes = 2048
+            if not isinstance(data, (bytes, bytearray)):
+                self.parse_errors += 1
+                return None
+            if len(data) > max_frame_bytes:
+                print(f"  ⚠️  [{self.connection_id}] Response zu groß ({len(data)}>{max_frame_bytes})")
+                self.parse_errors += 1
+                return None
+
             # Validiere Response
             if not self.validate_response(data):
                 print(f"  ⚠️  [{self.connection_id}] Ungültige Response!")
