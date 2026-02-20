@@ -48,3 +48,4 @@ jobs:
           python test_logging_system.py
           pytest -q test_api_contracts.py
           pytest -q test_backup_manager.py
+          pytest -q test_integration_core_flows.py
