@@ -280,6 +280,11 @@ class WebManager(BaseModule):
                 response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
                 response.headers['Pragma'] = 'no-cache'
                 response.headers['Expires'] = '0'
+            if self.data_gateway and hasattr(self.data_gateway, 'clear_correlation_id'):
+                try:
+                    self.data_gateway.clear_correlation_id()
+                except Exception:
+                    pass
             return response
 
         @self.app.before_request
@@ -287,6 +292,11 @@ class WebManager(BaseModule):
             """Schützt kritische Steuer-Endpunkte gegen unautorisierte Aufrufe."""
             incoming_req_id = str(request.headers.get('X-Request-ID') or '').strip()
             g.request_id = incoming_req_id or uuid.uuid4().hex
+            if self.data_gateway and hasattr(self.data_gateway, 'set_correlation_id'):
+                try:
+                    self.data_gateway.set_correlation_id(g.request_id)
+                except Exception:
+                    pass
 
             payload_ok, payload_error, payload_status = self._validate_api_payload()
             if not payload_ok:
@@ -2943,6 +2953,7 @@ class WebManager(BaseModule):
             if self.data_gateway:
                 telemetry = self.data_gateway.get_all_telemetry()
                 emit('initial_telemetry', telemetry)
+                emit('request_context', {'correlation_id': f"ws-connect-{client_id[:8]}-{int(time.time() * 1000)}"})
 
         @self.socketio.on('disconnect')
         def handle_disconnect():
@@ -3566,7 +3577,7 @@ class WebManager(BaseModule):
         except Exception as e:
             logger.debug(f"Trigger-Regelverarbeitung fehlgeschlagen ({key}): {e}")
 
-    def broadcast_telemetry(self, key: str, value: Any):
+    def broadcast_telemetry(self, key: str, value: Any, correlation_id: str = None):
         """
         Sendet Telemetrie-Update an alle Clients
 
@@ -3580,8 +3591,10 @@ class WebManager(BaseModule):
         self.socketio.emit('telemetry_update', {
             'key': key,
             'value': value,
-            'timestamp': time.time()
+            'timestamp': time.time(),
+            'correlation_id': correlation_id or self._get_request_id()
         })
+        logger.debug("Socket telemetry_update: key=%s cid=%s", key, correlation_id or self._get_request_id())
 
     def broadcast_event(self, event_type: str, data: Dict[str, Any]):
         """
@@ -3594,7 +3607,14 @@ class WebManager(BaseModule):
         if not self.running or not self.socketio:
             return
 
-        self.socketio.emit(event_type, data)
+        payload = dict(data or {})
+        payload.setdefault('correlation_id', self._get_request_id())
+        self.socketio.emit(event_type, payload)
+        logger.info("Socket event emitted: type=%s cid=%s", event_type, payload.get('correlation_id'))
+
+    def broadcast_system_event(self, data: Dict[str, Any]):
+        """Broadcastet System-Ereignisse mit Korrelations-ID."""
+        self.broadcast_event('system_event', data)
 
     def start_server(self, host: str = '0.0.0.0', port: int = 5000):
         """Startet den Server (wird von start_web_hmi.py aufgerufen)."""
