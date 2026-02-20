@@ -19,6 +19,8 @@ import threading
 import time
 import os
 import shutil
+import random
+import logging
 
 
 class StreamManager(BaseModule):
@@ -46,6 +48,9 @@ class StreamManager(BaseModule):
     HLS_LIST_SIZE = 4  # Anzahl Segmente in Playlist (geringere Latenz)
     HLS_DELETE_THRESHOLD = 8  # Kurze Historie, aber genug Puffer gegen 404
     HLS_FLAGS = "delete_segments+omit_endlist+independent_segments"
+    RECOVERY_WINDOW_SECONDS = 180.0
+
+    logger = logging.getLogger("StreamManager")
 
     def __init__(self):
         super().__init__()
@@ -56,7 +61,11 @@ class StreamManager(BaseModule):
 
         # Streams
         self.streams = {}  # camera_id -> {process, rtsp_url, hls_path, etc.}
+        self._desired_streams = {}  # camera_id -> restart spec
         self._delayed_stop_timers = {}  # camera_id -> Timer
+        self._recovery_state = {}  # camera_id -> retry/cooldown state
+        self._recovery_thread = None
+        self._recovery_active = False
 
         # HLS Output-Verzeichnis
         self.hls_dir = 'web/static/hls'
@@ -65,6 +74,15 @@ class StreamManager(BaseModule):
         self.has_ffmpeg = self._check_ffmpeg()
         self.has_node = self._check_node()
         self.hw_accel_mode = None
+        self.recovery_enabled = str(os.getenv('STREAM_AUTO_RECOVERY_ENABLED', 'true')).lower() in (
+            '1', 'true', 'yes', 'on'
+        )
+        self.recovery_interval = max(0.5, float(os.getenv('STREAM_RECOVERY_CHECK_INTERVAL_SECONDS', '2.0')))
+        self.recovery_max_retries = max(1, int(os.getenv('STREAM_RECOVERY_MAX_RETRIES', '5')))
+        self.recovery_cooldown_seconds = max(10.0, float(os.getenv('STREAM_RECOVERY_COOLDOWN_SECONDS', '120')))
+        self.recovery_backoff_base = max(0.2, float(os.getenv('STREAM_RECOVERY_BACKOFF_BASE_SECONDS', '1.5')))
+        self.recovery_backoff_max = max(1.0, float(os.getenv('STREAM_RECOVERY_BACKOFF_MAX_SECONDS', '20')))
+        self.recovery_jitter_max = max(0.0, float(os.getenv('STREAM_RECOVERY_JITTER_MAX_SECONDS', '0.6')))
 
     def initialize(self, app_context: Any):
         """Initialisiert Stream Manager"""
@@ -88,6 +106,9 @@ class StreamManager(BaseModule):
         print(f"     🟩 Node.js: {'Verfügbar' if self.has_node else 'NICHT INSTALLIERT'}")
         print(f"     🎮 HW-Accel: {self.hw_accel_mode or 'CPU (Software)'}")
         print(f"     📁 HLS-Dir: {self.hls_dir}")
+        print(f"     🔁 Auto-Recovery: {'Aktiv' if self.recovery_enabled else 'Deaktiviert'}")
+        if self.recovery_enabled:
+            self._start_recovery_monitor()
 
     def _check_ffmpeg(self) -> bool:
         """Prüft ob FFmpeg installiert ist"""
@@ -142,6 +163,13 @@ class StreamManager(BaseModule):
 
         with self.lock:
             self._cancel_delayed_stop(camera_id)
+            desired_spec = {
+                'type': 'rtsp',
+                'camera_id': camera_id,
+                'rtsp_url': rtsp_url,
+                'force_cpu': bool(force_cpu),
+                'resolution': resolution
+            }
             # Prüfe ob bereits läuft
             if camera_id in self.streams:
                 current = self.streams[camera_id]
@@ -154,6 +182,7 @@ class StreamManager(BaseModule):
 
                 if is_running and same_source:
                     # Bereits mit derselben Quelle aktiv -> idempotent success.
+                    self._desired_streams[camera_id] = desired_spec
                     print(f"  ⚠️  Stream '{camera_id}' läuft bereits (gleiche Quelle)")
                     return True
 
@@ -209,8 +238,11 @@ class StreamManager(BaseModule):
                     'hls_segment': hls_segment,
                     'started_at': time.time(),
                     'hw_accel': self.hw_accel_mode if not force_cpu else None,
-                    'resolution': resolution
+                    'resolution': resolution,
+                    'desired_spec': desired_spec
                 }
+                self._desired_streams[camera_id] = desired_spec
+                self._reset_recovery_state(camera_id)
 
                 print(f"  ▶️  Stream '{camera_id}' gestartet")
                 print(f"     🎬 HLS: /static/hls/{camera_id}.m3u8")
@@ -250,6 +282,8 @@ class StreamManager(BaseModule):
         """
         with self.lock:
             self._cancel_delayed_stop(camera_id)
+            self._desired_streams.pop(camera_id, None)
+            self._recovery_state.pop(camera_id, None)
             if camera_id not in self.streams:
                 return False
 
@@ -304,6 +338,8 @@ class StreamManager(BaseModule):
     def stop_all_streams(self):
         """Stoppt alle laufenden Streams"""
         with self.lock:
+            self._desired_streams.clear()
+            self._recovery_state.clear()
             camera_ids = list(self.streams.keys())
             for camera_id in camera_ids:
                 self.stop_stream(camera_id)
@@ -322,6 +358,12 @@ class StreamManager(BaseModule):
 
         with self.lock:
             self._cancel_delayed_stop(camera_id)
+            desired_spec = {
+                'type': 'ring',
+                'camera_id': camera_id,
+                'ring_device_id': str(ring_device_id),
+                'refresh_token': refresh_token
+            }
             if camera_id in self.streams:
                 current = self.streams[camera_id]
                 process = current.get('process')
@@ -331,6 +373,7 @@ class StreamManager(BaseModule):
                     str(current.get('ring_device_id')) == str(ring_device_id)
                 )
                 if is_running and same_source:
+                    self._desired_streams[camera_id] = desired_spec
                     return True
                 self.stop_stream(camera_id, cleanup=True)
 
@@ -365,8 +408,11 @@ class StreamManager(BaseModule):
                     'hls_segment': hls_segment,
                     'started_at': time.time(),
                     'hw_accel': None,
-                    'resolution': None
+                    'resolution': None,
+                    'desired_spec': desired_spec
                 }
+                self._desired_streams[camera_id] = desired_spec
+                self._reset_recovery_state(camera_id)
 
                 # Early-fail check
                 time.sleep(1.2)
@@ -467,6 +513,128 @@ class StreamManager(BaseModule):
             return proc.stdout or None
         except Exception:
             return None
+
+    # ========================================================================
+    # RECOVERY
+    # ========================================================================
+
+    def _start_recovery_monitor(self):
+        if self._recovery_active:
+            return
+        self._recovery_active = True
+        self._recovery_thread = threading.Thread(
+            target=self._recovery_loop,
+            daemon=True,
+            name="StreamRecoveryMonitor"
+        )
+        self._recovery_thread.start()
+
+    def _stop_recovery_monitor(self):
+        self._recovery_active = False
+        if self._recovery_thread:
+            self._recovery_thread.join(timeout=max(2.0, self.recovery_interval * 2))
+            self._recovery_thread = None
+
+    def _reset_recovery_state(self, camera_id: str):
+        self._recovery_state[camera_id] = {
+            'retry_timestamps': [],
+            'cooldown_until': 0.0
+        }
+
+    def _recovery_loop(self):
+        while self._recovery_active:
+            try:
+                self._recovery_tick()
+            except Exception as e:
+                self.logger.warning("Recovery tick failed: %s", e)
+            time.sleep(self.recovery_interval)
+
+    def _recovery_tick(self):
+        now = time.time()
+        restart_queue = []
+
+        with self.lock:
+            for camera_id, desired_spec in list(self._desired_streams.items()):
+                stream = self.streams.get(camera_id)
+                running = False
+                exit_code = None
+
+                if stream:
+                    process = stream.get('process')
+                    if process is not None:
+                        exit_code = process.poll()
+                        running = exit_code is None
+
+                if running:
+                    continue
+
+                state = self._recovery_state.get(camera_id)
+                if not state:
+                    state = {'retry_timestamps': [], 'cooldown_until': 0.0}
+                    self._recovery_state[camera_id] = state
+
+                retry_timestamps = state.get('retry_timestamps', [])
+                retry_timestamps = [t for t in retry_timestamps if now - t <= self.RECOVERY_WINDOW_SECONDS]
+                state['retry_timestamps'] = retry_timestamps
+
+                if now < float(state.get('cooldown_until', 0.0)):
+                    continue
+
+                if len(retry_timestamps) >= self.recovery_max_retries:
+                    state['cooldown_until'] = now + self.recovery_cooldown_seconds
+                    self.logger.error(
+                        "Stream recovery escalated: camera=%s retries=%s cooldown=%ss",
+                        camera_id,
+                        len(retry_timestamps),
+                        int(self.recovery_cooldown_seconds)
+                    )
+                    continue
+
+                attempt = len(retry_timestamps) + 1
+                delay = min(self.recovery_backoff_max, self.recovery_backoff_base * (2 ** (attempt - 1)))
+                if self.recovery_jitter_max > 0:
+                    delay += random.uniform(0.0, self.recovery_jitter_max)
+
+                state['retry_timestamps'].append(now)
+                restart_queue.append((camera_id, desired_spec, max(0.0, delay), exit_code, attempt))
+
+                # Toten Prozess/Artefakte aufräumen, bevor Restart versucht wird.
+                if camera_id in self.streams:
+                    del self.streams[camera_id]
+                self._cleanup_hls_files(camera_id)
+
+        for camera_id, desired_spec, delay, exit_code, attempt in restart_queue:
+            self.logger.warning(
+                "Stream recovery scheduled: camera=%s type=%s attempt=%s delay=%.1fs exit_code=%s",
+                camera_id,
+                desired_spec.get('type'),
+                attempt,
+                delay,
+                exit_code
+            )
+            time.sleep(delay)
+            ok = self._restart_from_desired_spec(desired_spec)
+            if ok:
+                self.logger.info("Stream recovery successful: camera=%s attempt=%s", camera_id, attempt)
+            else:
+                self.logger.error("Stream recovery failed: camera=%s attempt=%s", camera_id, attempt)
+
+    def _restart_from_desired_spec(self, desired_spec: Dict[str, Any]) -> bool:
+        spec_type = str(desired_spec.get('type', '')).strip().lower()
+        if spec_type == 'rtsp':
+            return self.start_stream(
+                camera_id=str(desired_spec.get('camera_id')),
+                rtsp_url=str(desired_spec.get('rtsp_url')),
+                force_cpu=bool(desired_spec.get('force_cpu', False)),
+                resolution=desired_spec.get('resolution')
+            )
+        if spec_type == 'ring':
+            return self.start_ring_stream(
+                camera_id=str(desired_spec.get('camera_id')),
+                ring_device_id=str(desired_spec.get('ring_device_id')),
+                refresh_token=str(desired_spec.get('refresh_token', ''))
+            )
+        return False
 
     # ========================================================================
     # FFMPEG
@@ -591,12 +759,14 @@ class StreamManager(BaseModule):
             return {
                 'ffmpeg_available': self.has_ffmpeg,
                 'hw_accel_mode': self.hw_accel_mode,
+                'auto_recovery_enabled': self.recovery_enabled,
                 'active_streams': len(self.streams),
                 'streams': self.get_all_streams()
             }
 
     def shutdown(self):
         """Cleanup"""
+        self._stop_recovery_monitor()
         print(f"  🛑 Stoppe alle Streams...")
         self.stop_all_streams()
 
