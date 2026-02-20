@@ -1615,6 +1615,20 @@ class WebManager(BaseModule):
                     'writes': plc_stats.get('total_writes', 0)
                 }
 
+            gateway = self.app_context.module_manager.get_module('data_gateway')
+            if gateway:
+                try:
+                    gw_status = gateway.get_system_status()
+                    stats['protocols']['gateway'] = {
+                        'name': 'Data Gateway',
+                        'telemetry_count': gw_status.get('telemetry_count', 0),
+                        'telemetry_evictions': gw_status.get('telemetry_evictions', 0),
+                        'polling_backpressure_skips': gw_status.get('polling_backpressure_skips', 0),
+                        'limits': gw_status.get('limits', {})
+                    }
+                except Exception:
+                    pass
+
             return jsonify(stats)
 
         @self.app.route('/api/monitor/latency')

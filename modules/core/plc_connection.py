@@ -82,7 +82,9 @@ class PLCConnection(BaseConnection):
         # Read-Cache
         self.cache = {}
         self.cache_timeout = 0.1  # 100ms
+        self.cache_max_entries = max(100, int(os.getenv('SMARTHOME_PLC_CONNECTION_CACHE_MAX_ENTRIES', '5000')))
         self.cache_lock = threading.RLock()
+        self.stats['cache_evictions'] = 0
 
         # Health-Check Variable (optional)
         self.health_check_variable = config.get('health_check_variable', None)
@@ -382,6 +384,11 @@ class PLCConnection(BaseConnection):
     def _put_to_cache(self, symbol: str, value: Any):
         """Speichert Wert im Cache"""
         with self.cache_lock:
+            if symbol not in self.cache and len(self.cache) >= self.cache_max_entries:
+                oldest_key = next(iter(self.cache), None)
+                if oldest_key is not None:
+                    del self.cache[oldest_key]
+                    self.stats['cache_evictions'] = self.stats.get('cache_evictions', 0) + 1
             self.cache[symbol] = (value, time.time())
 
     # ========================================================================
