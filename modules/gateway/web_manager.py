@@ -99,6 +99,14 @@ class WebManager(BaseModule):
         self._stream_viewers_lock = threading.Lock()
         self._idempotency_results = {}
         self._idempotency_lock = threading.Lock()
+        self._api_sli_window_seconds = max(60, int(os.getenv('SLO_WINDOW_SECONDS', '3600')))
+        self._api_sli_samples = deque()
+        self._api_totals = {'requests': 0, 'errors_5xx': 0}
+        self._slo_targets = {
+            'api_availability_ratio': float(os.getenv('SLO_API_AVAILABILITY', '0.995')),
+            'api_p95_latency_ms': float(os.getenv('SLO_API_P95_LATENCY_MS', '500')),
+            'stream_health_ratio': float(os.getenv('SLO_STREAM_HEALTH_RATIO', '0.99'))
+        }
 
     def initialize(self, app_context: Any):
         """Initialisiert das Modul und erzwingt absolute Pfade für alle Manager."""
@@ -269,6 +277,15 @@ class WebManager(BaseModule):
         def _disable_hls_cache(response):
             req_id = self._get_request_id()
             response.headers['X-Request-ID'] = req_id
+            if request.path.startswith('/api/'):
+                started = getattr(g, '_api_started_at', None)
+                if started:
+                    duration_ms = max(0.0, (time.time() - started) * 1000.0)
+                    self._api_sli_samples.append((time.time(), response.status_code, duration_ms))
+                    self._api_totals['requests'] += 1
+                    if response.status_code >= 500:
+                        self._api_totals['errors_5xx'] += 1
+                    self._prune_api_sli_samples()
             # HLS manifests/segments must not be cached, otherwise stale playlists
             # can reference already deleted TS fragments and trigger endless 404 loops.
             if request.path.startswith('/static/hls/'):
@@ -293,6 +310,7 @@ class WebManager(BaseModule):
             """Schützt kritische Steuer-Endpunkte gegen unautorisierte Aufrufe."""
             incoming_req_id = str(request.headers.get('X-Request-ID') or '').strip()
             g.request_id = incoming_req_id or uuid.uuid4().hex
+            g._api_started_at = time.time()
             if self.data_gateway and hasattr(self.data_gateway, 'set_correlation_id'):
                 try:
                     self.data_gateway.set_correlation_id(g.request_id)
@@ -1882,6 +1900,15 @@ class WebManager(BaseModule):
                 'latency_ms': 0.5  # Stub - echte Messung würde über PLC gehen
             })
 
+        @self.app.route('/api/monitor/slo')
+        def get_slo_report():
+            """SLI/SLO Report für API- und Stream-Verfügbarkeit."""
+            try:
+                return jsonify(self._compute_slo_report())
+            except Exception as e:
+                logger.error(f"Fehler bei GET /api/monitor/slo: {e}", exc_info=True)
+                return jsonify({'error': str(e)}), 500
+
         @self.app.route('/api/monitor/streams')
         def monitor_streams():
             """Debug/Health-Metriken für RTSP/Ring Streams."""
@@ -3201,6 +3228,102 @@ class WebManager(BaseModule):
                 },
             ])
         return symbols
+
+    def _prune_api_sli_samples(self):
+        cutoff = time.time() - self._api_sli_window_seconds
+        while self._api_sli_samples and self._api_sli_samples[0][0] < cutoff:
+            self._api_sli_samples.popleft()
+
+    def _compute_api_sli_snapshot(self) -> Dict[str, Any]:
+        self._prune_api_sli_samples()
+        window = list(self._api_sli_samples)
+        total = len(window)
+        if total == 0:
+            return {
+                'window_seconds': self._api_sli_window_seconds,
+                'total_requests': 0,
+                'availability_ratio': None,
+                'p95_latency_ms': None,
+                'errors_5xx': 0
+            }
+
+        non_5xx = sum(1 for _, status, _ in window if status < 500)
+        errors_5xx = total - non_5xx
+        latencies = sorted(duration for _, _, duration in window)
+        p95_index = min(len(latencies) - 1, max(0, int(0.95 * len(latencies)) - 1))
+        p95_latency = round(latencies[p95_index], 2)
+
+        return {
+            'window_seconds': self._api_sli_window_seconds,
+            'total_requests': total,
+            'availability_ratio': round(non_5xx / total, 6),
+            'p95_latency_ms': p95_latency,
+            'errors_5xx': errors_5xx
+        }
+
+    def _compute_stream_sli_snapshot(self) -> Dict[str, Any]:
+        stream_mgr = self.app_context.module_manager.get_module('stream_manager') if self.app_context else None
+        if not stream_mgr:
+            return {
+                'active_streams': 0,
+                'running_streams': 0,
+                'health_ratio': None
+            }
+
+        active_streams = stream_mgr.get_all_streams()
+        active_total = len(active_streams)
+        if active_total == 0:
+            return {
+                'active_streams': 0,
+                'running_streams': 0,
+                'health_ratio': None
+            }
+
+        running = sum(1 for info in active_streams.values() if info and info.get('running'))
+        return {
+            'active_streams': active_total,
+            'running_streams': running,
+            'health_ratio': round(running / active_total, 6)
+        }
+
+    def _compute_slo_report(self) -> Dict[str, Any]:
+        api = self._compute_api_sli_snapshot()
+        stream = self._compute_stream_sli_snapshot()
+
+        alerts = []
+        if api.get('availability_ratio') is not None and api['availability_ratio'] < self._slo_targets['api_availability_ratio']:
+            alerts.append({
+                'name': 'api_availability_below_target',
+                'severity': 'critical',
+                'value': api['availability_ratio'],
+                'target': self._slo_targets['api_availability_ratio']
+            })
+        if api.get('p95_latency_ms') is not None and api['p95_latency_ms'] > self._slo_targets['api_p95_latency_ms']:
+            alerts.append({
+                'name': 'api_latency_above_target',
+                'severity': 'warning',
+                'value': api['p95_latency_ms'],
+                'target': self._slo_targets['api_p95_latency_ms']
+            })
+        if stream.get('health_ratio') is not None and stream['health_ratio'] < self._slo_targets['stream_health_ratio']:
+            alerts.append({
+                'name': 'stream_health_below_target',
+                'severity': 'critical',
+                'value': stream['health_ratio'],
+                'target': self._slo_targets['stream_health_ratio']
+            })
+
+        return {
+            'timestamp': time.time(),
+            'timestamp_utc': self._utc_iso(),
+            'targets': self._slo_targets,
+            'sli': {
+                'api': api,
+                'streams': stream
+            },
+            'alerts': alerts,
+            'status': 'degraded' if alerts else 'ok'
+        }
 
     def _routing_config_path(self) -> str:
         return os.path.join(os.path.abspath(os.getcwd()), 'config', 'routing.json')
