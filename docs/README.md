@@ -14,6 +14,7 @@ Diese Dateien sind der verbindliche Stand fuer Betrieb, Integration und API:
 - `docs/08_socket_events.md`
 - `docs/ADR/README.md`
 - `docs/09_module_boundaries_ownership.md`
+- `docs/10_blue_green_atomic_deployment.md`
 - `docs/DOCKER_DEPLOYMENT.md`
 - `docs/STAGING_GATE.md`
 - `docs/SECURITY_INCIDENT_SENTRY_DSN.md`
