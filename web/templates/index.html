@@ -6,7 +6,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="mobile-web-app-capable" content="yes">
-    <title>SmartHome OS v4.6.1</title>
+    <title>SmartHome OS v4.6.2</title>
 
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🏠</text></svg>">
@@ -60,7 +60,7 @@
                 </div>
                 <div>
                     <h1 class="text-lg font-bold text-gray-900 dark:text-white">SmartHome</h1>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">OS v4.6.1</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">OS v4.6.2</p>
                 </div>
             </div>
         </div>
@@ -1093,6 +1093,62 @@
                     <button id="cleanup-tpy-btn" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
                         <i data-lucide="trash-2" class="w-4 h-4 inline mr-1"></i> Ungenutzte TPY-Dateien löschen
                     </button>
+                </div>
+            </div>
+
+            <!-- API-Key Management -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mt-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">API-Key Management</h2>
+                    <button id="apikey-refresh-btn" class="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                        <i data-lucide="refresh-cw" class="w-4 h-4 inline mr-1"></i> Aktualisieren
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4">
+                    <input id="apikey-name" type="text" placeholder="Name (z.B. Wallpanel EG)"
+                        class="md:col-span-2 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    <select id="apikey-level"
+                        class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        <option value="viewer">viewer</option>
+                        <option value="operator" selected>operator</option>
+                        <option value="admin">admin</option>
+                    </select>
+                    <input id="apikey-exp-hours" type="number" min="1" step="1" placeholder="Ablauf (h), leer = nie"
+                        class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    <button id="apikey-create-btn" class="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                        <i data-lucide="key-round" class="w-4 h-4 inline mr-1"></i> Key erstellen
+                    </button>
+                </div>
+                <input id="apikey-notes" type="text" placeholder="Notiz (optional)"
+                    class="w-full mb-4 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+
+                <div id="apikey-created-box" class="hidden mb-4 p-3 rounded-lg border border-green-300 bg-green-50 dark:bg-green-900/30 dark:border-green-700">
+                    <div class="text-sm text-green-800 dark:text-green-200 mb-1">Neuer API-Key (nur jetzt sichtbar):</div>
+                    <code id="apikey-created-value" class="text-xs break-all bg-white/70 dark:bg-black/20 px-2 py-1 rounded inline-block"></code>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="text-xs text-gray-700 dark:text-gray-300 uppercase bg-gray-50 dark:bg-gray-900">
+                            <tr>
+                                <th class="px-3 py-2 text-left">Name</th>
+                                <th class="px-3 py-2 text-left">Prefix</th>
+                                <th class="px-3 py-2 text-left">Level</th>
+                                <th class="px-3 py-2 text-left">Status</th>
+                                <th class="px-3 py-2 text-left">Ablauf</th>
+                                <th class="px-3 py-2 text-left">Zuletzt genutzt</th>
+                                <th class="px-3 py-2 text-left">Aktion</th>
+                            </tr>
+                        </thead>
+                        <tbody id="apikey-table-body" class="divide-y divide-gray-200 dark:divide-gray-700">
+                            <tr>
+                                <td colspan="7" class="px-3 py-4 text-center text-gray-500 dark:text-gray-400">
+                                    Lade API-Keys...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>

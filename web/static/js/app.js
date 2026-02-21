@@ -236,26 +236,50 @@ class SmartHomeApp {
 
         const originalFetch = window.fetch.bind(window);
         window.fetch = async (input, init = {}) => {
+            const tryWithKey = async (requestInput, requestInit, adminKey) => {
+                if (!adminKey) return originalFetch(requestInput, requestInit);
+                const headers = new Headers((requestInit && requestInit.headers) || {});
+                if (!headers.has('X-API-Key') && !headers.has('Authorization')) {
+                    headers.set('X-API-Key', adminKey);
+                }
+                const withHeaders = Object.assign({}, requestInit, { headers });
+                return originalFetch(requestInput, withHeaders);
+            };
+
             try {
                 const path = this._extractApiPath(input);
-                if (this._isProtectedApiPath(path)) {
-                    const adminKey =
-                        localStorage.getItem('smarthome_admin_api_key') ||
-                        localStorage.getItem('admin_api_key') ||
-                        '';
+                if (!this._isProtectedApiPath(path)) {
+                    return originalFetch(input, init);
+                }
 
-                    if (adminKey) {
-                        const headers = new Headers((init && init.headers) || {});
-                        if (!headers.has('X-API-Key') && !headers.has('Authorization')) {
-                            headers.set('X-API-Key', adminKey);
+                const storedKey =
+                    localStorage.getItem('smarthome_admin_api_key') ||
+                    localStorage.getItem('admin_api_key') ||
+                    '';
+
+                let response = await tryWithKey(input, init, storedKey);
+
+                if (response.status === 401) {
+                    const retryToken = String((init && init.__authRetry) || '');
+                    if (!retryToken) {
+                        const entered = window.prompt(
+                            'Admin API-Key erforderlich.\nBitte API-Key eingeben (wird im Browser gespeichert):',
+                            storedKey || ''
+                        );
+                        const newKey = String(entered || '').trim();
+                        if (newKey) {
+                            localStorage.setItem('smarthome_admin_api_key', newKey);
+                            const retryInit = Object.assign({}, init, { __authRetry: '1' });
+                            response = await tryWithKey(input, retryInit, newKey);
                         }
-                        init = Object.assign({}, init, { headers });
                     }
                 }
+
+                return response;
             } catch (e) {
                 console.warn('API-Key Injection übersprungen:', e);
+                return originalFetch(input, init);
             }
-            return originalFetch(input, init);
         };
 
         window.__smarthomeFetchAuthWrapped = true;
@@ -5222,6 +5246,7 @@ class SmartHomeApp {
         // Lade Logs & Service-Info (NEU)
         await this.loadLogs();
         await this.loadServiceInfo();
+        await this.loadApiKeys();
 
         // Event Listeners
         const addPlcBtn = document.getElementById('add-plc-btn');
@@ -5231,6 +5256,8 @@ class SmartHomeApp {
         const restartServiceBtn = document.getElementById('restart-service-btn');
         const restartDaemonBtn = document.getElementById('restart-daemon-btn');
         const logsFilterSelect = document.getElementById('logs-filter-select');
+        const apiKeyRefreshBtn = document.getElementById('apikey-refresh-btn');
+        const apiKeyCreateBtn = document.getElementById('apikey-create-btn');
 
         if (addPlcBtn) {
             this._bindScopedListener(addPlcBtn, 'click', () => this.addPLC(), { scope, key: 'admin:add-plc' });
@@ -5261,6 +5288,12 @@ class SmartHomeApp {
         }
         if (restartDaemonBtn) {
             this._bindScopedListener(restartDaemonBtn, 'click', () => this.restartDaemonService(), { scope, key: 'admin:restart-daemon' });
+        }
+        if (apiKeyRefreshBtn) {
+            this._bindScopedListener(apiKeyRefreshBtn, 'click', () => this.loadApiKeys(), { scope, key: 'admin:apikey-refresh' });
+        }
+        if (apiKeyCreateBtn) {
+            this._bindScopedListener(apiKeyCreateBtn, 'click', () => this.createApiKey(), { scope, key: 'admin:apikey-create' });
         }
     }
 
@@ -5344,6 +5377,178 @@ class SmartHomeApp {
 
         } catch (error) {
             console.error('❌ Fehler beim Laden der Service-Info:', error);
+        }
+    }
+
+    _formatAdminTs(epochSeconds) {
+        if (!epochSeconds) return '-';
+        try {
+            return new Date(Number(epochSeconds) * 1000).toLocaleString('de-DE');
+        } catch (e) {
+            return String(epochSeconds);
+        }
+    }
+
+    async loadApiKeys() {
+        try {
+            const tbody = document.getElementById('apikey-table-body');
+            if (!tbody) return;
+            const response = await fetch('/api/admin/apikeys');
+            const payload = await response.json();
+            if (!response.ok || !payload.success) {
+                throw new Error(payload.error || 'API-Keys konnten nicht geladen werden');
+            }
+            const keys = Array.isArray(payload.keys) ? payload.keys : [];
+            if (keys.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="px-3 py-4 text-center text-gray-500 dark:text-gray-400">Keine API-Keys vorhanden</td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = keys.map(key => {
+                const isEnabled = !!key.enabled && !key.expired;
+                const statusClass = isEnabled
+                    ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                    : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
+                const statusText = key.expired ? 'Abgelaufen' : (key.enabled ? 'Aktiv' : 'Deaktiviert');
+                return `
+                    <tr>
+                        <td class="px-3 py-2">${this.escapeHtml(key.name || '')}</td>
+                        <td class="px-3 py-2 font-mono text-xs">${this.escapeHtml(key.key_prefix || '-')}</td>
+                        <td class="px-3 py-2">
+                            <select data-apikey-level="${key.id}" class="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700">
+                                <option value="viewer" ${key.level === 'viewer' ? 'selected' : ''}>viewer</option>
+                                <option value="operator" ${key.level === 'operator' ? 'selected' : ''}>operator</option>
+                                <option value="admin" ${key.level === 'admin' ? 'selected' : ''}>admin</option>
+                            </select>
+                        </td>
+                        <td class="px-3 py-2">
+                            <span class="px-2 py-1 rounded text-xs ${statusClass}">${statusText}</span>
+                            <label class="inline-flex items-center gap-1 ml-2 text-xs">
+                                <input type="checkbox" data-apikey-enabled="${key.id}" ${key.enabled ? 'checked' : ''}>
+                                enabled
+                            </label>
+                        </td>
+                        <td class="px-3 py-2">
+                            <div class="text-xs">${this._formatAdminTs(key.expires_at)}</div>
+                            <input type="number" min="1" step="1" placeholder="h neu" data-apikey-exp-hours="${key.id}"
+                                class="mt-1 w-20 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700">
+                        </td>
+                        <td class="px-3 py-2 text-xs">${this._formatAdminTs(key.last_used_at)}</td>
+                        <td class="px-3 py-2">
+                            <div class="flex items-center gap-2">
+                                <button data-apikey-save="${key.id}" class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-500">Speichern</button>
+                                <button data-apikey-delete="${key.id}" class="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-500">Löschen</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            tbody.querySelectorAll('[data-apikey-save]').forEach(btn => {
+                btn.addEventListener('click', () => this.updateApiKey(btn.getAttribute('data-apikey-save')));
+            });
+            tbody.querySelectorAll('[data-apikey-delete]').forEach(btn => {
+                btn.addEventListener('click', () => this.deleteApiKey(btn.getAttribute('data-apikey-delete')));
+            });
+        } catch (error) {
+            console.error('❌ API-Keys laden fehlgeschlagen:', error);
+            const tbody = document.getElementById('apikey-table-body');
+            if (tbody) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="px-3 py-4 text-center text-red-500">Fehler: ${this.escapeHtml(error.message || String(error))}</td>
+                    </tr>
+                `;
+            }
+        }
+    }
+
+    async createApiKey() {
+        const name = document.getElementById('apikey-name')?.value?.trim();
+        const level = document.getElementById('apikey-level')?.value || 'operator';
+        const expRaw = document.getElementById('apikey-exp-hours')?.value?.trim() || '';
+        const notes = document.getElementById('apikey-notes')?.value?.trim() || '';
+        if (!name) {
+            alert('Bitte Namen für den API-Key angeben.');
+            return;
+        }
+        try {
+            const body = { name, level, notes };
+            if (expRaw) body.expires_hours = Number(expRaw);
+            const response = await fetch('/api/admin/apikeys', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'API-Key konnte nicht erstellt werden');
+            }
+
+            const createdBox = document.getElementById('apikey-created-box');
+            const createdValue = document.getElementById('apikey-created-value');
+            if (createdBox && createdValue) {
+                createdValue.textContent = data.raw_key || '';
+                createdBox.classList.remove('hidden');
+            }
+            const nameEl = document.getElementById('apikey-name');
+            const expEl = document.getElementById('apikey-exp-hours');
+            const notesEl = document.getElementById('apikey-notes');
+            if (nameEl) nameEl.value = '';
+            if (expEl) expEl.value = '';
+            if (notesEl) notesEl.value = '';
+            await this.loadApiKeys();
+        } catch (error) {
+            console.error('❌ API-Key Erstellen fehlgeschlagen:', error);
+            alert(`❌ Fehler: ${error.message}`);
+        }
+    }
+
+    async updateApiKey(keyId) {
+        const id = parseInt(String(keyId || ''), 10);
+        if (!id) return;
+        const level = document.querySelector(`[data-apikey-level="${id}"]`)?.value || 'operator';
+        const enabled = !!document.querySelector(`[data-apikey-enabled="${id}"]`)?.checked;
+        const expRaw = document.querySelector(`[data-apikey-exp-hours="${id}"]`)?.value?.trim() || '';
+        try {
+            const payload = { level, enabled };
+            if (expRaw) {
+                payload.expires_hours = Number(expRaw);
+            }
+            const response = await fetch(`/api/admin/apikeys/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'API-Key konnte nicht aktualisiert werden');
+            }
+            await this.loadApiKeys();
+        } catch (error) {
+            console.error('❌ API-Key Update fehlgeschlagen:', error);
+            alert(`❌ Fehler: ${error.message}`);
+        }
+    }
+
+    async deleteApiKey(keyId) {
+        const id = parseInt(String(keyId || ''), 10);
+        if (!id) return;
+        if (!confirm('API-Key wirklich löschen?')) return;
+        try {
+            const response = await fetch(`/api/admin/apikeys/${id}`, { method: 'DELETE' });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'API-Key konnte nicht gelöscht werden');
+            }
+            await this.loadApiKeys();
+        } catch (error) {
+            console.error('❌ API-Key Löschen fehlgeschlagen:', error);
+            alert(`❌ Fehler: ${error.message}`);
         }
     }
 

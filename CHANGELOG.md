@@ -1,5 +1,31 @@
 # CHANGELOG.md
 
+## v4.6.2 - API-Key Management + ONVIF/PTZ Stabilisierung (2026-02-21)
+
+### Added
+- Admin-Bereich: API-Key-Management mit SQLite (`config/auth_keys.db`) inklusive:
+- Erstellen/Löschen/Aktualisieren von Keys
+- Rollen/Level (`viewer`, `operator`, `admin`)
+- Optionaler Ablaufzeit (`expires_hours`)
+- Einmalige Anzeige des neu erzeugten Raw-Keys
+- Audit-Logging fuer Key-Create/Update/Delete in `system_logs.db`
+- Neue Admin-Endpoints:
+- `GET /api/admin/apikeys`
+- `POST /api/admin/apikeys`
+- `PUT /api/admin/apikeys/<id>`
+- `DELETE /api/admin/apikeys/<id>`
+
+### Changed
+- Auth-Logik erweitert: verwaltete API-Keys werden fuer geschuetzte Control-Endpoints validiert.
+- Bootstrap-Pfad fuer Erstinbetriebnahme:
+- Lokale/Trusted Requests duerfen den ersten Managed-Key anlegen, wenn noch kein Key existiert.
+- Versionen auf `4.6.2` synchronisiert (`VERSION`, Web-UI Titel/Label, `WebManager.VERSION`).
+
+### Fixed
+- PTZ war nicht steuerbar, wenn ONVIF-Dependency fehlte:
+- `onvif-zeep==0.2.12` in `requirements.txt` aufgenommen.
+- Kamera-Dokumentation um ONVIF/PTZ-Voraussetzungen erweitert.
+
 ## v4.6.0 – Edge-Betriebssystem für industrielle Hausautomatisierung (🔄 In Entwicklung)
 
 ### Übersicht

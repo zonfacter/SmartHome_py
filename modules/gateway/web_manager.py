@@ -1,5 +1,5 @@
 """
-Web Manager Module v4.6.1
+Web Manager Module v4.6.2
 FINAL FIX: Beseitigt NoneType-Pfadfehler durch synchrone Initialisierung.
 
 📁 SPEICHERORT: modules/gateway/web_manager.py
@@ -12,10 +12,12 @@ import time
 import os
 import sys
 import json
+import sqlite3
 import logging
 import traceback
 import hmac
 import secrets
+import ipaddress
 from collections import deque
 from urllib.parse import urlparse
 import uuid
@@ -55,12 +57,12 @@ logger = logging.getLogger(__name__)
 
 class WebManager(BaseModule):
     """
-    Web Manager v4.6.1
+    Web Manager v4.6.2
     Verwaltet das Web-Interface und die Kommunikation zum Frontend.
     """
 
     NAME = "web_manager"
-    VERSION = "4.6.1"
+    VERSION = "4.6.2"
     DESCRIPTION = "Flask + SocketIO Web-HMI Server"
     AUTHOR = "TwinCAT Team"
     API_MAJOR_VERSION = "1"
@@ -98,6 +100,12 @@ class WebManager(BaseModule):
         self._camera_trigger_state = {}
         self._camera_trigger_last_fired = {}
         self._trigger_store = None
+        self._api_keys_db_lock = threading.Lock()
+        self._api_key_levels = {
+            'viewer': 10,
+            'operator': 20,
+            'admin': 30
+        }
         self._camera_config_recovery_lock = threading.Lock()
         self._camera_config_recovery_last_attempt = 0.0
         self._camera_config_recovery_cooldown_seconds = max(
@@ -146,7 +154,7 @@ class WebManager(BaseModule):
         super().initialize(app_context)
         self.app_context = app_context
 
-        logger.info("=== Web Manager v4.6.1 Initialisierung START ===")
+        logger.info("=== Web Manager v4.6.2 Initialisierung START ===")
 
         # Initialize Sentry if available
         if SENTRY_AVAILABLE:
@@ -164,6 +172,7 @@ class WebManager(BaseModule):
             root_dir = os.path.abspath(os.getcwd())
             conf_dir = os.path.join(root_dir, 'config')
             data_dir = os.path.join(root_dir, 'plc_data')
+            self._init_api_keys_db(conf_dir)
 
             logger.info(f"Pfade initialisiert: root={root_dir}, config={conf_dir}, data={data_dir}")
 
@@ -247,7 +256,7 @@ class WebManager(BaseModule):
                 print("  [ERROR] Flask nicht verfuegbar!")
 
             print(f"  [OK] {self.NAME} v{self.VERSION} initialisiert")
-            logger.info("=== Web Manager v4.6.1 Initialisierung ABGESCHLOSSEN ===")
+            logger.info("=== Web Manager v4.6.2 Initialisierung ABGESCHLOSSEN ===")
 
             if self.sentry:
                 self.sentry.add_breadcrumb(
@@ -486,11 +495,36 @@ class WebManager(BaseModule):
         )
         provided_key = self._extract_admin_api_key()
         loopback = self._is_loopback_request()
+        managed_ok = False
+        managed_reason = ''
+        path = str(getattr(request, 'path', '') or '')
+        method = str(getattr(request, 'method', 'GET') or 'GET').upper()
+
+        if provided_key:
+            try:
+                managed_ok, _, managed_reason = self._validate_managed_api_key(provided_key)
+            except Exception:
+                managed_ok = False
+                managed_reason = 'API-Key Validierung fehlgeschlagen'
+
+        if managed_ok:
+            return True, ''
+
+        # Bootstrap: Ersten API-Key lokal anlegen, bevor bereits ein Managed-Key existiert.
+        if (
+            path.startswith('/api/admin/apikeys')
+            and method in ('GET', 'POST')
+            and self._is_trusted_local_request()
+            and not self._has_any_managed_api_keys()
+        ):
+            return True, ''
 
         if not expected_key:
-            if loopback:
+            if self._is_trusted_local_request():
                 return True, ''
-            return False, 'SMARTHOME_ADMIN_API_KEY ist nicht gesetzt (nur Loopback erlaubt)'
+            if provided_key:
+                return False, managed_reason or 'API-Key ungültig'
+            return False, 'SMARTHOME_ADMIN_API_KEY ist nicht gesetzt (nur lokale/trusted Netze erlaubt)'
 
         allow_loopback_without_key = os.getenv(
             'SMARTHOME_ALLOW_LOOPBACK_WITHOUT_KEY',
@@ -503,7 +537,7 @@ class WebManager(BaseModule):
             return True, ''
         if not provided_key:
             return False, 'API-Key fehlt (Header X-API-Key oder Authorization: Bearer ...)'
-        return False, 'API-Key ungültig'
+        return False, managed_reason or 'API-Key ungültig'
 
     def _extract_admin_api_key(self) -> str:
         """Extrahiert Admin-API-Key aus Header/Query."""
@@ -521,6 +555,160 @@ class WebManager(BaseModule):
         """Erkennt lokale Zugriffe."""
         remote = str(request.remote_addr or '').strip().lower()
         return remote in ('127.0.0.1', '::1', 'localhost')
+
+    def _is_private_network_request(self) -> bool:
+        """
+        Erlaubt optionale lokale Netzsegmente ohne API-Key.
+        Standard fuer lokale Entwicklung: aktiviert.
+        """
+        allow_private = os.getenv(
+            'SMARTHOME_ALLOW_PRIVATE_NETWORK_WITHOUT_KEY',
+            'true'
+        ).strip().lower() in ('1', 'true', 'yes', 'on')
+        if not allow_private:
+            return False
+
+        remote_raw = str(request.remote_addr or '').strip()
+        if not remote_raw:
+            return False
+        if remote_raw.lower() == 'localhost':
+            return True
+
+        try:
+            ip = ipaddress.ip_address(remote_raw)
+        except ValueError:
+            return False
+        return bool(ip.is_private or ip.is_loopback or ip.is_link_local)
+
+    def _is_trusted_local_request(self) -> bool:
+        """Kombinierte lokale Vertrauensprüfung (Loopback + optional Private-Netze)."""
+        return self._is_loopback_request() or self._is_private_network_request()
+
+    def _api_keys_db_path(self, config_dir: str = None) -> str:
+        base = str(config_dir or os.path.join(os.path.abspath(os.getcwd()), 'config'))
+        return os.path.join(base, 'auth_keys.db')
+
+    def _init_api_keys_db(self, config_dir: str = None):
+        db_path = self._api_keys_db_path(config_dir)
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        with self._api_keys_db_lock, sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    key_prefix TEXT NOT NULL,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    level TEXT NOT NULL DEFAULT 'operator',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    expires_at INTEGER NULL,
+                    created_at INTEGER NOT NULL,
+                    created_by TEXT NULL,
+                    last_used_at INTEGER NULL,
+                    last_used_ip TEXT NULL,
+                    notes TEXT NULL
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_enabled ON api_keys(enabled)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_level ON api_keys(level)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_expires ON api_keys(expires_at)")
+            conn.commit()
+
+    @staticmethod
+    def _hash_api_key(raw_key: str) -> str:
+        return hashlib.sha256(str(raw_key or '').encode('utf-8')).hexdigest()
+
+    @staticmethod
+    def _api_key_prefix(raw_key: str) -> str:
+        key = str(raw_key or '')
+        if len(key) <= 8:
+            return key
+        return f"{key[:4]}...{key[-4:]}"
+
+    def _level_rank(self, level: str) -> int:
+        lvl = str(level or '').strip().lower()
+        return int(self._api_key_levels.get(lvl, 0))
+
+    def _required_api_key_level_for_request(self) -> str:
+        path = str(getattr(request, 'path', '') or '')
+        if path.startswith('/api/admin'):
+            return 'admin'
+        return 'operator'
+
+    def _validate_managed_api_key(self, provided_key: str):
+        key = str(provided_key or '').strip()
+        if not key:
+            return False, None, 'API-Key fehlt'
+
+        key_hash = self._hash_api_key(key)
+        db_path = self._api_keys_db_path()
+        if not os.path.exists(db_path):
+            return False, None, 'API-Key ungültig'
+
+        now = int(time.time())
+        required_level = self._required_api_key_level_for_request()
+        required_rank = self._level_rank(required_level)
+
+        with self._api_keys_db_lock, sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT id, name, key_prefix, level, enabled, expires_at
+                FROM api_keys
+                WHERE key_hash = ?
+                LIMIT 1
+                """,
+                (key_hash,)
+            ).fetchone()
+            if not row:
+                return False, None, 'API-Key ungültig'
+
+            if int(row['enabled'] or 0) != 1:
+                return False, None, 'API-Key deaktiviert'
+
+            expires_at = row['expires_at']
+            if expires_at is not None and int(expires_at) < now:
+                return False, None, 'API-Key abgelaufen'
+
+            level = str(row['level'] or 'operator').strip().lower()
+            if self._level_rank(level) < required_rank:
+                return False, None, f'API-Key Level zu niedrig (benötigt: {required_level})'
+
+            conn.execute(
+                """
+                UPDATE api_keys
+                SET last_used_at = ?, last_used_ip = ?
+                WHERE id = ?
+                """,
+                (now, str(request.remote_addr or ''), int(row['id']))
+            )
+            conn.commit()
+
+            return True, dict(row), ''
+
+    def _list_managed_api_keys(self) -> List[Dict[str, Any]]:
+        db_path = self._api_keys_db_path()
+        if not os.path.exists(db_path):
+            return []
+        with self._api_keys_db_lock, sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT id, name, key_prefix, level, enabled, expires_at, created_at, created_by, last_used_at, last_used_ip, notes
+                FROM api_keys
+                ORDER BY id DESC
+                """
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def _has_any_managed_api_keys(self) -> bool:
+        db_path = self._api_keys_db_path()
+        if not os.path.exists(db_path):
+            return False
+        with self._api_keys_db_lock, sqlite3.connect(db_path) as conn:
+            row = conn.execute("SELECT 1 FROM api_keys LIMIT 1").fetchone()
+            return bool(row)
 
     def _get_request_id(self) -> str:
         """Liefert aktuelle Request-Korrelations-ID."""
@@ -2514,6 +2702,202 @@ class WebManager(BaseModule):
                 )
             except Exception as e:
                 logger.error(f"Fehler bei POST /api/admin/service/restart-daemon: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/admin/apikeys', methods=['GET'])
+        def admin_list_api_keys():
+            """Listet verwaltete API-Keys (ohne Raw-Key-Material)."""
+            try:
+                keys = self._list_managed_api_keys()
+                now = int(time.time())
+                for item in keys:
+                    expires_at = item.get('expires_at')
+                    item['expired'] = bool(expires_at is not None and int(expires_at) < now)
+                return jsonify({'success': True, 'keys': keys})
+            except Exception as e:
+                logger.error(f"Fehler bei GET /api/admin/apikeys: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/admin/apikeys', methods=['POST'])
+        def admin_create_api_key():
+            """Erzeugt einen neuen API-Key inkl. Level und optionaler Ablaufzeit."""
+            try:
+                from modules.core.database_logger import DatabaseLogger
+                data = request.get_json(silent=True) or {}
+                name = str(data.get('name') or '').strip()
+                level = str(data.get('level') or 'operator').strip().lower()
+                notes = str(data.get('notes') or '').strip()
+                expires_hours_raw = data.get('expires_hours')
+                actor = request.headers.get('X-Admin-User') or request.remote_addr or 'unknown'
+
+                if not name:
+                    return jsonify({'success': False, 'error': 'name erforderlich'}), 400
+                if level not in self._api_key_levels:
+                    return jsonify({'success': False, 'error': 'Ungültiges level (viewer/operator/admin)'}), 400
+
+                expires_at = None
+                if expires_hours_raw not in (None, ''):
+                    try:
+                        expires_hours = float(expires_hours_raw)
+                    except Exception:
+                        return jsonify({'success': False, 'error': 'expires_hours muss numerisch sein'}), 400
+                    if expires_hours <= 0:
+                        return jsonify({'success': False, 'error': 'expires_hours muss > 0 sein'}), 400
+                    expires_at = int(time.time() + (expires_hours * 3600.0))
+
+                raw_key = f"shk_{secrets.token_urlsafe(32)}"
+                key_hash = self._hash_api_key(raw_key)
+                key_prefix = self._api_key_prefix(raw_key)
+                now = int(time.time())
+                db_path = self._api_keys_db_path()
+
+                with self._api_keys_db_lock, sqlite3.connect(db_path) as conn:
+                    cur = conn.execute(
+                        """
+                        INSERT INTO api_keys
+                        (name, key_prefix, key_hash, level, enabled, expires_at, created_at, created_by, notes)
+                        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
+                        """,
+                        (name, key_prefix, key_hash, level, expires_at, now, str(actor), notes)
+                    )
+                    key_id = int(cur.lastrowid)
+                    conn.commit()
+
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                db_logs = os.path.join(project_root, 'config', 'system_logs.db')
+                DatabaseLogger.audit_event(
+                    db_path=db_logs,
+                    action='api_key_created',
+                    actor=str(actor),
+                    details={
+                        'key_id': key_id,
+                        'name': name,
+                        'level': level,
+                        'expires_at': expires_at,
+                        'request_id': self._get_request_id()
+                    }
+                )
+
+                return jsonify({
+                    'success': True,
+                    'key': {
+                        'id': key_id,
+                        'name': name,
+                        'level': level,
+                        'key_prefix': key_prefix,
+                        'expires_at': expires_at,
+                        'created_at': now
+                    },
+                    'raw_key': raw_key
+                }), 201
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/admin/apikeys: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/admin/apikeys/<int:key_id>', methods=['PUT'])
+        def admin_update_api_key(key_id: int):
+            """Aktualisiert Metadaten/Level/Expiry eines API-Keys."""
+            try:
+                from modules.core.database_logger import DatabaseLogger
+                data = request.get_json(silent=True) or {}
+                fields = []
+                values = []
+
+                if 'name' in data:
+                    name = str(data.get('name') or '').strip()
+                    if not name:
+                        return jsonify({'success': False, 'error': 'name darf nicht leer sein'}), 400
+                    fields.append('name = ?')
+                    values.append(name)
+
+                if 'level' in data:
+                    level = str(data.get('level') or '').strip().lower()
+                    if level not in self._api_key_levels:
+                        return jsonify({'success': False, 'error': 'Ungültiges level (viewer/operator/admin)'}), 400
+                    fields.append('level = ?')
+                    values.append(level)
+
+                if 'enabled' in data:
+                    fields.append('enabled = ?')
+                    values.append(1 if bool(data.get('enabled')) else 0)
+
+                if 'notes' in data:
+                    fields.append('notes = ?')
+                    values.append(str(data.get('notes') or '').strip())
+
+                if 'expires_hours' in data:
+                    raw = data.get('expires_hours')
+                    expires_at = None
+                    if raw not in (None, ''):
+                        try:
+                            hours = float(raw)
+                        except Exception:
+                            return jsonify({'success': False, 'error': 'expires_hours muss numerisch sein'}), 400
+                        if hours <= 0:
+                            return jsonify({'success': False, 'error': 'expires_hours muss > 0 sein'}), 400
+                        expires_at = int(time.time() + (hours * 3600.0))
+                    fields.append('expires_at = ?')
+                    values.append(expires_at)
+
+                if not fields:
+                    return jsonify({'success': False, 'error': 'Keine Felder zum Aktualisieren'}), 400
+
+                values.append(int(key_id))
+                db_path = self._api_keys_db_path()
+                with self._api_keys_db_lock, sqlite3.connect(db_path) as conn:
+                    cur = conn.execute(
+                        f"UPDATE api_keys SET {', '.join(fields)} WHERE id = ?",
+                        tuple(values)
+                    )
+                    conn.commit()
+                    if cur.rowcount <= 0:
+                        return jsonify({'success': False, 'error': 'API-Key nicht gefunden'}), 404
+
+                actor = request.headers.get('X-Admin-User') or request.remote_addr or 'unknown'
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                db_logs = os.path.join(project_root, 'config', 'system_logs.db')
+                DatabaseLogger.audit_event(
+                    db_path=db_logs,
+                    action='api_key_updated',
+                    actor=str(actor),
+                    details={
+                        'key_id': int(key_id),
+                        'fields': fields,
+                        'request_id': self._get_request_id()
+                    }
+                )
+                return jsonify({'success': True})
+            except Exception as e:
+                logger.error(f"Fehler bei PUT /api/admin/apikeys/{key_id}: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/admin/apikeys/<int:key_id>', methods=['DELETE'])
+        def admin_delete_api_key(key_id: int):
+            """Löscht (revoked) einen API-Key."""
+            try:
+                from modules.core.database_logger import DatabaseLogger
+                db_path = self._api_keys_db_path()
+                with self._api_keys_db_lock, sqlite3.connect(db_path) as conn:
+                    cur = conn.execute("DELETE FROM api_keys WHERE id = ?", (int(key_id),))
+                    conn.commit()
+                    if cur.rowcount <= 0:
+                        return jsonify({'success': False, 'error': 'API-Key nicht gefunden'}), 404
+
+                actor = request.headers.get('X-Admin-User') or request.remote_addr or 'unknown'
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                db_logs = os.path.join(project_root, 'config', 'system_logs.db')
+                DatabaseLogger.audit_event(
+                    db_path=db_logs,
+                    action='api_key_deleted',
+                    actor=str(actor),
+                    details={
+                        'key_id': int(key_id),
+                        'request_id': self._get_request_id()
+                    }
+                )
+                return jsonify({'success': True})
+            except Exception as e:
+                logger.error(f"Fehler bei DELETE /api/admin/apikeys/{key_id}: {e}", exc_info=True)
                 return jsonify({'success': False, 'error': str(e)}), 500
 
         @self.app.route('/api/admin/feature-flags', methods=['POST'])
