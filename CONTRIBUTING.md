@@ -14,9 +14,13 @@
 Run before opening a PR:
 
 ```bash
-python3 -m py_compile start_web_hmi.py module_manager.py import_tpy.py
-python3 -m compileall -q modules
-venv/bin/python -m pytest -q test_web_manager_fix.py test_logging_system.py
+make smoke
+```
+
+For a full local CI-equivalent run:
+
+```bash
+make test
 ```
 
 ## PR Checklist
