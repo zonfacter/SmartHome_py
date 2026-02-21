@@ -319,3 +319,56 @@ def test_integration_admin_daemon_restart_rejection_is_audited(integration_fixtu
     assert captured["audit"][0]["actor"] == "pytest-admin"
     assert captured["audit"][0]["details"]["delay_seconds"] == 30
     assert "request_id" in captured["audit"][0]["details"]
+
+
+def test_integration_admin_log_restart_filters(integration_fixture, tmp_path):
+    client, _, _, _, _ = integration_fixture
+
+    from modules.core.database_logger import DatabaseLogger
+
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "system_logs.db")
+    marker = "pytest-restart-filter"
+    # Simuliere die realen Warn-Logs aus den Restart-Endpunkten.
+    DatabaseLogger._insert_log_entry(
+        db_path=db_path,
+        timestamp=DatabaseLogger._utc_timestamp(),
+        level="WARNING",
+        module="modules.gateway.web_manager",
+        message=f"Admin restart scheduled: req_id=abc type=app delay=2s remote=127.0.0.1 marker={marker}",
+    )
+    DatabaseLogger._insert_log_entry(
+        db_path=db_path,
+        timestamp=DatabaseLogger._utc_timestamp(),
+        level="WARNING",
+        module="modules.gateway.web_manager",
+        message=f"Admin restart scheduled: req_id=def type=daemon delay=1s remote=127.0.0.1 marker={marker}",
+    )
+    DatabaseLogger._insert_log_entry(
+        db_path=db_path,
+        timestamp=DatabaseLogger._utc_timestamp(),
+        level="WARNING",
+        module="modules.gateway.web_manager",
+        message=f"Admin restart rejected: req_id=ghi type=daemon remote=127.0.0.1 reason=disabled marker={marker}",
+    )
+
+    app_only = client.get("/api/admin/logs?limit=50&filter=restart_app")
+    assert app_only.status_code == 200
+    app_logs = app_only.get_json()
+    assert len(app_logs) >= 1
+    app_logs = [row for row in app_logs if marker in str(row.get("message", ""))]
+    assert len(app_logs) >= 1
+    assert all("type=app" in str(row.get("message", "")).lower() for row in app_logs)
+
+    daemon_only = client.get("/api/admin/logs?limit=50&filter=restart_daemon")
+    assert daemon_only.status_code == 200
+    daemon_logs = daemon_only.get_json()
+    daemon_logs = [row for row in daemon_logs if marker in str(row.get("message", ""))]
+    assert len(daemon_logs) >= 2
+    assert all("type=daemon" in str(row.get("message", "")).lower() for row in daemon_logs)
+
+    errors_only = client.get("/api/admin/logs?limit=50&filter=restart_error")
+    assert errors_only.status_code == 200
+    error_logs = errors_only.get_json()
+    error_logs = [row for row in error_logs if marker in str(row.get("message", ""))]
+    assert len(error_logs) >= 1
+    assert all("restart rejected" in str(row.get("message", "")).lower() for row in error_logs)
