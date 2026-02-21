@@ -32,6 +32,7 @@ Für den aktuellen produktiven Ablauf sind diese Dokumente die verbindliche Quel
 - `docs/04_gateway_integration.md`
 - `docs/05_api_reference.md`
 - `docs/06_api_lifecycle_policy.md`
+- `docs/07_operations_playbook.md`
 - `docs/WEB_SETUP_ROUTING_ADS_GUIDE.md`
 - `docs/STAGING_GATE.md` (Release-Gates, Canary, Go/No-Go)
 - `docs/SECURITY_INCIDENT_SENTRY_DSN.md` (Incident-Runbook & Secret-Policy)
