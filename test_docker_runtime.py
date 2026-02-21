@@ -1,3 +1,5 @@
+import signal
+
 from modules.core.service_manager import ServiceManager
 
 
@@ -13,3 +15,15 @@ def test_restart_info_exposes_container_flag(monkeypatch):
     info = ServiceManager.get_restart_info()
     assert "is_container_runtime" in info
     assert info["is_container_runtime"] is True
+
+
+def test_restart_service_uses_sigterm_in_container(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(ServiceManager, "is_container_runtime", staticmethod(lambda: True))
+    monkeypatch.setattr("os.kill", lambda pid, sig: calls.append((pid, sig)))
+
+    ok = ServiceManager.restart_service()
+    assert ok is True
+    assert len(calls) == 1
+    assert calls[0][1] == signal.SIGTERM

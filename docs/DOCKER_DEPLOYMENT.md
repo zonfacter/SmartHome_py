@@ -39,11 +39,12 @@ Damit bleiben Konfigurationen/State bei Container-Neustarts erhalten.
 ## Restart-Semantik in Docker
 
 - `POST /api/admin/service/restart`:
-  - Beendet den Hauptprozess kontrolliert.
+  - Triggert einen `SIGTERM` auf den laufenden Prozess (graceful shutdown-Pfad).
   - Docker `restart: unless-stopped` startet den Container neu.
 - `POST /api/admin/service/restart-daemon`:
   - Im Container bewusst deaktiviert.
   - API liefert klare Fehlermeldung (HTTP 400) und schreibt ein Audit-Event.
+  - Für Neustarts im Containerbetrieb sind Orchestrator-Mechanismen vorgesehen.
 
 ## Native Linux vs Docker
 
