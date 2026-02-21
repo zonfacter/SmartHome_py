@@ -47,6 +47,7 @@ class SmartHomeApp {
         this._ringWidgetConnections = {};
         this._ringWidgetHls = {};
         this._ringWidgetModes = {};
+        this._ringLiveEnabled = false;
         this._cameraAlertTimer = null;
         this._cameraAlertRestorePage = null;
         this._cameraTriggerRules = [];
@@ -1706,6 +1707,7 @@ class SmartHomeApp {
 
         // On-Demand: Starte Widget-Streams (640x360) für RTSP-Kameras
         const rtspCams = camIds.filter(id => (cameras[id].type || 'rtsp') === 'rtsp');
+        const startedRtspCams = new Set();
         this._activeCameraStreams = [];
         for (const camId of rtspCams) {
             try {
@@ -1715,6 +1717,7 @@ class SmartHomeApp {
                     body: JSON.stringify({ use_substream: true })
                 });
                 this._activeCameraStreams.push(camId);
+                startedRtspCams.add(camId);
                 console.log(`On-Demand Stream gestartet: ${camId} (SubStream)`);
             } catch (e) {
                 console.error(`Stream-Start fehlgeschlagen fuer ${camId}:`, e);
@@ -1831,22 +1834,38 @@ class SmartHomeApp {
             this._startRtspSnapshotRefresh(camId, `cam-image-${camId}`, 3500);
         });
 
-        // HLS.js Player nach Verzögerung initialisieren (FFmpeg braucht Zeit)
+        // HLS.js Player nach kurzer Verzoegerung initialisieren (FFmpeg braucht Zeit)
         setTimeout(() => {
-            for (const camId of rtspCams) {
-                const videoEl = document.getElementById(`hls-video-${camId}`);
-                if (!videoEl) continue;
-                // Stream wurde oben bereits gestartet (SubStream-Start).
-                // Hier nur noch den bekannten HLS-Pfad anhängen.
-                const hlsUrl = `/static/hls/${camId}.m3u8`;
-                this._initHlsPlayer(videoEl, hlsUrl, camId);
-            }
-        }, 3000);
+            (async () => {
+                for (const camId of rtspCams) {
+                    const videoEl = document.getElementById(`hls-video-${camId}`);
+                    if (!videoEl) continue;
+
+                    let hlsUrl = `/static/hls/${camId}.m3u8`;
+                    if (!startedRtspCams.has(camId)) {
+                        try {
+                            const startResp = await fetch(`/api/cameras/${camId}/start`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ use_substream: true })
+                            });
+                            const startData = await startResp.json();
+                            if (startResp.ok && startData.success && startData.hls_url) {
+                                hlsUrl = startData.hls_url;
+                            }
+                        } catch (e) {}
+                    }
+
+                    this._initHlsPlayer(videoEl, hlsUrl, camId);
+                }
+            })();
+        }, 1200);
 
         let ringStatus = { available: false, configured: false };
         try {
             const ringStatusResp = await fetch('/api/ring/status');
             ringStatus = await ringStatusResp.json();
+            this._ringLiveEnabled = !!ringStatus.live_enabled;
         } catch (e) {}
 
         camIds.forEach(camId => {
@@ -2098,6 +2117,8 @@ class SmartHomeApp {
 
             const newUrl = URL.createObjectURL(blob);
             img.src = newUrl;
+            const loading = document.getElementById(`hls-loading-${camId}`);
+            if (loading) loading.style.display = 'none';
             if (this._rtspSnapshotObjectUrls[key]) {
                 URL.revokeObjectURL(this._rtspSnapshotObjectUrls[key]);
             }
@@ -2160,6 +2181,19 @@ class SmartHomeApp {
         const mode = this._getRingWidgetMode(camId);
         if (!btn || !label) return;
 
+        if (!this._ringLiveEnabled) {
+            btn.setAttribute('data-mode', 'snapshot');
+            btn.disabled = true;
+            btn.classList.remove('bg-green-600', 'hover:bg-green-500');
+            btn.classList.remove('bg-orange-600', 'hover:bg-orange-500');
+            btn.classList.add('bg-gray-500');
+            label.textContent = 'Snapshot';
+            return;
+        }
+
+        btn.disabled = false;
+        btn.classList.remove('bg-gray-500');
+
         if (mode === 'live') {
             btn.setAttribute('data-mode', 'live');
             label.textContent = 'Live';
@@ -2174,6 +2208,10 @@ class SmartHomeApp {
     }
 
     async _toggleRingWidgetMode(camId) {
+        if (!this._ringLiveEnabled) {
+            this._setRingWidgetMode(camId, 'snapshot');
+            return;
+        }
         const nextMode = this._getRingWidgetMode(camId) === 'live' ? 'snapshot' : 'live';
         this._setRingWidgetMode(camId, nextMode);
         await this._applyRingWidgetMode(camId);
@@ -2277,6 +2315,7 @@ class SmartHomeApp {
             try {
                 const resp = await fetch('/api/ring/status');
                 status = await resp.json();
+                this._ringLiveEnabled = !!status.live_enabled;
             } catch (e) {
                 status = { available: false, configured: false };
             }
@@ -2290,7 +2329,7 @@ class SmartHomeApp {
         }
 
         const mode = this._getRingWidgetMode(camId);
-        if (mode === 'live') {
+        if (mode === 'live' && this._ringLiveEnabled) {
             if (loadingEl) {
                 loadingEl.innerHTML = '<div class="text-center"><i data-lucide="loader" class="w-8 h-8 mx-auto mb-2 animate-spin"></i><p class="text-sm">Ring Live wird geladen...</p></div>';
                 loadingEl.style.display = '';
@@ -2312,11 +2351,11 @@ class SmartHomeApp {
         imageEl.style.display = '';
         if (loadingEl) loadingEl.style.display = 'none';
 
-        await this._loadRingSnapshot(camId, imgElementId, 5000, 2, 1);
+        await this._loadRingSnapshot(camId, imgElementId, 9000, 1, 1, 8);
         this._startRingSnapshotRefresh(camId, imgElementId, 15000);
     }
 
-    async _loadRingSnapshot(camId, imgElementId, timeoutMs = 5000, retries = 2, delay = 1) {
+    async _loadRingSnapshot(camId, imgElementId, timeoutMs = 9000, retries = 1, delay = 1, timeoutSec = 8) {
         const key = `${camId}:${imgElementId}`;
         if (this._ringSnapshotInFlight[key]) return;
 
@@ -2328,7 +2367,7 @@ class SmartHomeApp {
         const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
         try {
-            const resp = await fetch(`/api/cameras/${camId}/snapshot?ts=${Date.now()}&retries=${retries}&delay=${delay}`, {
+            const resp = await fetch(`/api/cameras/${camId}/snapshot?ts=${Date.now()}&retries=${retries}&delay=${delay}&timeout=${timeoutSec}`, {
                 signal: controller.signal,
                 cache: 'no-store'
             });
@@ -2359,7 +2398,7 @@ class SmartHomeApp {
         }
 
         this._ringSnapshotTimers[key] = setInterval(async () => {
-            await this._loadRingSnapshot(camId, imgElementId, 5000, 2, 1);
+            await this._loadRingSnapshot(camId, imgElementId, 9000, 1, 1, 8);
         }, intervalMs);
     }
 
@@ -2729,35 +2768,41 @@ class SmartHomeApp {
             // Warte auf HLS-Segmente, dann lade mit Retry-Logik
             this._loadFullscreenHls(videoEl, camId);
         } else if (camType === 'ring') {
-            let ringStatus = { webrtc_available: false };
+            let ringStatus = { webrtc_available: false, live_enabled: false, live_on_ding_active: [] };
             try {
                 const statusResp = await fetch('/api/ring/status');
                 if (statusResp.ok) {
                     ringStatus = await statusResp.json();
+                    this._ringLiveEnabled = !!ringStatus.live_enabled;
                 }
             } catch (e) {}
 
+            const liveAllowedForCamera = !!ringStatus.live_enabled ||
+                (Array.isArray(ringStatus.live_on_ding_active) && ringStatus.live_on_ding_active.includes(camId));
+
             // Prefer backend bridge stream for fullscreen quality/latency.
-            try {
-                const bridgeResp = await fetch(`/api/cameras/${camId}/start`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                const bridgeData = await bridgeResp.json();
-                if (bridgeResp.ok && bridgeData.success && bridgeData.hls_url) {
-                    imageEl.style.display = 'none';
-                    videoEl.style.display = '';
-                    this._loadFullscreenHls(videoEl, camId, 0, bridgeData.hls_url, true);
-                    return;
+            if (liveAllowedForCamera) {
+                try {
+                    const bridgeResp = await fetch(`/api/cameras/${camId}/start`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    const bridgeData = await bridgeResp.json();
+                    if (bridgeResp.ok && bridgeData.success && bridgeData.hls_url) {
+                        imageEl.style.display = 'none';
+                        videoEl.style.display = '';
+                        this._loadFullscreenHls(videoEl, camId, 0, bridgeData.hls_url, true);
+                        return;
+                    }
+                } catch (e) {
+                    console.warn('Ring bridge start fehlgeschlagen, nutze Snapshot-Fallback:', e);
                 }
-            } catch (e) {
-                console.warn('Ring bridge start fehlgeschlagen, nutze Snapshot-Fallback:', e);
             }
 
             const preferWebrtc = this.isFeatureEnabled('ui.ring.webrtc', true)
                 && !!ringStatus.webrtc_available
                 && (localStorage.getItem('ringWebrtcPreferred') || '1') === '1';
-            if (preferWebrtc && window.RTCPeerConnection) {
+            if (liveAllowedForCamera && preferWebrtc && window.RTCPeerConnection) {
                 videoEl.style.display = '';
                 try {
                     await this._startRingWebrtc(camId, videoEl);
@@ -2765,16 +2810,16 @@ class SmartHomeApp {
                     console.warn('Ring WebRTC fehlgeschlagen, nutze Snapshot-Fallback:', e);
                     videoEl.style.display = 'none';
                     imageEl.style.display = '';
-                    await this._loadRingSnapshot(camId, 'fullscreen-image', 4500, 2, 1);
+                    await this._loadRingSnapshot(camId, 'fullscreen-image', 9000, 1, 1, 8);
                     this._fullscreenSnapshotTimer = setInterval(() => {
-                        this._loadRingSnapshot(camId, 'fullscreen-image', 4500, 2, 1);
+                        this._loadRingSnapshot(camId, 'fullscreen-image', 9000, 1, 1, 8);
                     }, 2500);
                 }
             } else {
                 imageEl.style.display = '';
-                await this._loadRingSnapshot(camId, 'fullscreen-image', 4500, 2, 1);
+                await this._loadRingSnapshot(camId, 'fullscreen-image', 9000, 1, 1, 8);
                 this._fullscreenSnapshotTimer = setInterval(() => {
-                    this._loadRingSnapshot(camId, 'fullscreen-image', 4500, 2, 1);
+                    this._loadRingSnapshot(camId, 'fullscreen-image', 9000, 1, 1, 8);
                 }, 2500);
             }
         } else {
@@ -5829,6 +5874,36 @@ class SmartHomeApp {
         if (throughputElem) {
             const throughput = data.total_throughput || 0;
             throughputElem.textContent = `${throughput.toFixed(2)} msg/s`;
+        }
+
+        // Variable Subscriptions (client-spezifisch)
+        const subsContainer = document.getElementById('monitor-subscriptions');
+        if (subsContainer) {
+            const subs = data.subscriptions || {};
+            const items = Array.isArray(subs.items) ? subs.items : [];
+            if (items.length === 0) {
+                subsContainer.innerHTML = '<p class="text-gray-500">Keine aktiven Variable-Subscriptions</p>';
+            } else {
+                const bySid = subs.by_sid || {};
+                const header = `
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="font-medium">Aktiv: ${subs.total || items.length}</div>
+                        <div class="text-xs text-gray-500">Clients: ${Object.keys(bySid).length}</div>
+                    </div>
+                `;
+                const rows = items.slice(0, 80).map((item) => `
+                    <div class="p-2 rounded bg-gray-50 dark:bg-gray-700/40 border border-gray-200 dark:border-gray-700">
+                        <div><span class="font-mono text-xs">SID:</span> <span class="font-mono text-xs">${item.sid}</span></div>
+                        <div><span class="font-mono text-xs">Widget:</span> <span class="font-mono text-xs">${item.widget_id}</span></div>
+                        <div><span class="font-mono text-xs">PLC:</span> <span class="font-mono text-xs">${item.plc_id}</span></div>
+                        <div><span class="font-mono text-xs">Var:</span> <span class="font-mono text-xs">${item.variable}</span></div>
+                    </div>
+                `).join('');
+                const truncated = items.length > 80
+                    ? `<p class="text-xs text-gray-500 mt-2">… ${items.length - 80} weitere Einträge ausgeblendet</p>`
+                    : '';
+                subsContainer.innerHTML = `${header}<div class="grid grid-cols-1 md:grid-cols-2 gap-2">${rows}</div>${truncated}`;
+            }
         }
     }
 
