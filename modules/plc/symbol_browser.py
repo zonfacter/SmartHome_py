@@ -1,10 +1,10 @@
 """
-PLC Symbol Browser v5.1.1
+PLC Symbol Browser v4.6.0
 Moderner Symbol-Browser mit DataType-basiertem TPY-Parser
 
 📁 SPEICHERORT: modules/plc/symbol_browser.py
 
-Features v5.1.1:
+Features v4.6.0:
 - ⭐ Direkte Symbol-Abfrage von PLC (pyads 3.5.0)
 - ⭐ NEUER DataType-basierter TPY-Parser (TwinCAT 2 & 3 kompatibel)
 - ⭐ Rekursive SubItem-Expansion aus DataTypes Section
@@ -14,12 +14,12 @@ Features v5.1.1:
 - ⭐ Fix: Robustes JSON-Caching gegen NoneType-Pfad-Fehler
 - ⭐ Multi-PLC Support via Connection Manager
 
-Änderungen v5.1.1:
+Änderungen v4.6.0:
 - FIX: Intelligente Duplikat-Entfernung bevorzugt Symbole mit Type
 - Problem: TPY-Dateien enthalten manche Symbole doppelt (mit/ohne Type)
 - Lösung: Priority-System wählt immer die beste Type-Information aus
 
-Änderungen v5.1.0:
+Änderungen v4.6.0:
 - TPY-Parser nutzt jetzt DataType-Map für SubItem-Expansion
 - Sollte ~14.000 Symbole finden (statt nur 751 Top-Level)
 - Kompatibel mit TwinCAT 2 TPY-Format (DataTypes + Symbols getrennt)
@@ -81,7 +81,7 @@ class PLCSymbolBrowser:
         self.symbol_cache = {}
         self.cache_timestamp = {}
 
-        # Pfad-Initialisierung (Absoluter Pfad-Fix für v5.0.5)
+        # Pfad-Initialisierung (Absoluter Pfad-Fix für v4.6.0)
         base_path = os.path.abspath(os.getcwd())
         self.cache_dir = os.path.join(base_path, 'config', 'cache')
 
@@ -215,7 +215,7 @@ class PLCSymbolBrowser:
     def save_cache_to_file(self, file_path, connection_id):
         """Speichert die Symbolliste einer Verbindung als JSON-Datei."""
         try:
-            # Sicherstellen, dass Pfad ein String ist (v5.0.5 Fix)
+            # Sicherstellen, dass Pfad ein String ist (v4.6.0 Fix)
             f_path = str(file_path)
             data = {
                 'connection_id': connection_id,

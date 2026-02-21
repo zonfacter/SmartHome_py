@@ -1,5 +1,5 @@
 /**
- * SmartHome OS v4.5 - Socket Handler
+ * SmartHome OS v4.6.0 - Socket Handler
  * WebSocket-Kommunikation mit dem DataGateway
  *
  * Features:

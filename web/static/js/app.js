@@ -654,7 +654,7 @@ class SmartHomeApp {
     initializeSocket() {
         this.socket = new SocketHandler();
 
-        // ⭐ v5.1.0: Initialize Variable Manager
+        // ⭐ v4.6.0: Initialize Variable Manager
         this.variableManager = new VariableManager(this.socket.socket);
         console.log('✅ Variable Manager initialisiert');
 
@@ -1059,7 +1059,7 @@ class SmartHomeApp {
     async loadLightingPage() {
         console.log('💡 Lade Beleuchtung...');
 
-        // ⭐ v5.1.1: Lade Widgets für diese Page
+        // ⭐ v4.6.0: Lade Widgets für diese Page
         await this.loadAndRenderWidgets('lighting');
 
         const container = document.getElementById('lighting-grid');
@@ -1159,7 +1159,7 @@ class SmartHomeApp {
     async loadClimatePage() {
         console.log('🌡️ Lade Klima...');
 
-        // ⭐ v5.1.1: Lade Widgets für diese Page
+        // ⭐ v4.6.0: Lade Widgets für diese Page
         await this.loadAndRenderWidgets('climate');
 
         const container = document.getElementById('climate-grid');
@@ -1203,7 +1203,7 @@ class SmartHomeApp {
     async loadEnergyPage() {
         console.log('⚡ Lade Energie...');
 
-        // ⭐ v5.1.1: Lade Widgets für diese Page
+        // ⭐ v4.6.0: Lade Widgets für diese Page
         await this.loadAndRenderWidgets('energy');
 
         // Energie-Widgets werden über Telemetrie aktualisiert
@@ -1214,7 +1214,7 @@ class SmartHomeApp {
         console.log('📹 Lade Kameras...');
         const scope = 'page:cameras';
 
-        // ⭐ v5.1.1: Lade Widgets für diese Page
+        // ⭐ v4.6.0: Lade Widgets für diese Page
         await this.loadAndRenderWidgets('cameras');
 
         // Grid-Layout aus localStorage laden
@@ -3430,7 +3430,7 @@ class SmartHomeApp {
         console.log('⚙️ Lade Setup...');
         const scope = 'page:setup';
 
-        // ⭐ v5.1.1: Lade Widgets für diese Page
+        // ⭐ v4.6.0: Lade Widgets für diese Page
         await this.loadAndRenderWidgets('setup');
 
         // Lade gespeicherte PLC-Konfiguration aus LocalStorage
@@ -5084,7 +5084,7 @@ class SmartHomeApp {
             this._adminLogFilter = 'all';
         }
 
-        // ⭐ v5.1.1: Lade Widgets für diese Page
+        // ⭐ v4.6.0: Lade Widgets für diese Page
         await this.loadAndRenderWidgets('admin');
 
         await this.loadPLCConfigs();
@@ -5502,7 +5502,7 @@ class SmartHomeApp {
         console.log('🎨 Lade Widgets-Seite...');
         const scope = 'page:widgets';
 
-        // ⭐ v5.1.1: Lade Widgets für diese Page
+        // ⭐ v4.6.0: Lade Widgets für diese Page
         await this.loadAndRenderWidgets('widgets');
         await this.loadCustomPages();
 
@@ -6361,7 +6361,7 @@ class SmartHomeApp {
         console.log('📊 Lade Monitor-Dashboard...');
         const scope = 'page:monitor';
 
-        // ⭐ v5.1.1: Lade Widgets für diese Page
+        // ⭐ v4.6.0: Lade Widgets für diese Page
         await this.loadAndRenderWidgets('monitor');
 
         // Initial data load
@@ -6923,7 +6923,7 @@ class SmartHomeApp {
         if (!confirm('Widget wirklich löschen?')) return;
 
         try {
-            // ⭐ v5.1.0: Unsubscribe before delete
+            // ⭐ v4.6.0: Unsubscribe before delete
             if (this.variableManager) {
                 this.variableManager.unsubscribe(widgetId);
             }
@@ -6946,7 +6946,7 @@ class SmartHomeApp {
     }
 
     // ========================================================================
-    // ⭐ v5.1.0: VARIABLE MANAGER WIDGET METHODS
+    // ⭐ v4.6.0: VARIABLE MANAGER WIDGET METHODS
     // ========================================================================
 
     /**
