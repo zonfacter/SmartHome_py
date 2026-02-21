@@ -27,6 +27,7 @@ class ConfigManager(BaseModule):
     VERSION = "1.0.0"
     DESCRIPTION = "Konfigurations-Verwaltung & Backups"
     AUTHOR = "TwinCAT Team"
+    CONFIG_SCHEMA_VERSION = 2
     
     def __init__(self):
         super().__init__()
@@ -93,6 +94,12 @@ class ConfigManager(BaseModule):
             with open(self.config_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
+            data = self._normalize_and_migrate_config(data)
+            if data.get('_migrated'):
+                data.pop('_migrated', None)
+                with open(self.config_file, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+
             # Extrahiere Daten
             self.config = data
             self.custom_lights = data.get('custom_lights', {})
@@ -106,6 +113,71 @@ class ConfigManager(BaseModule):
         except Exception as e:
             print(f"  [ERROR] Fehler beim Laden der Config: {e}")
             return False
+
+    def _normalize_and_migrate_config(self, data: Any) -> Dict:
+        """Normalisiert und migriert Konfiguration auf aktuelles Schema."""
+        if not isinstance(data, dict):
+            raise ValueError("Konfigurationsdatei muss ein JSON-Objekt sein")
+
+        schema_version_raw = data.get('schema_version', 1)
+        try:
+            schema_version = int(schema_version_raw)
+        except Exception:
+            raise ValueError(f"Ungültige schema_version: {schema_version_raw}")
+
+        if schema_version > self.CONFIG_SCHEMA_VERSION:
+            raise ValueError(
+                f"Config schema_version={schema_version} ist neuer als unterstützt "
+                f"({self.CONFIG_SCHEMA_VERSION})"
+            )
+
+        migrated = False
+        while schema_version < self.CONFIG_SCHEMA_VERSION:
+            data = self._migrate_config(data, schema_version)
+            schema_version += 1
+            migrated = True
+
+        self._validate_config_schema(data)
+        data['schema_version'] = self.CONFIG_SCHEMA_VERSION
+        data.setdefault('version', '2.0')
+        if migrated:
+            data['_migrated'] = True
+            print(f"  [INFO] Config auf Schema v{self.CONFIG_SCHEMA_VERSION} migriert")
+        return data
+
+    def _migrate_config(self, data: Dict, from_version: int) -> Dict:
+        """Führt eine einzelne, versionsgebundene Migration aus."""
+        if from_version == 1:
+            migrated = dict(data)
+            if not isinstance(migrated.get('custom_lights'), dict):
+                migrated['custom_lights'] = {}
+            if not isinstance(migrated.get('widgets'), dict):
+                migrated['widgets'] = {}
+            if not isinstance(migrated.get('theme'), str) or not migrated.get('theme'):
+                migrated['theme'] = 'blue'
+            plc = migrated.get('plc')
+            if not isinstance(plc, dict):
+                plc = {}
+            plc.setdefault('runtime_type', 'TC3')
+            plc.setdefault('port', 851 if str(plc.get('runtime_type', 'TC3')).upper() == 'TC3' else 801)
+            migrated['plc'] = plc
+            migrated['schema_version'] = 2
+            migrated['version'] = '2.0'
+            migrated['migrated_at'] = datetime.now().isoformat()
+            return migrated
+        raise ValueError(f"Keine Migration definiert für Schema v{from_version}")
+
+    def _validate_config_schema(self, data: Dict):
+        """Validiert Kernfelder der Konfiguration."""
+        if not isinstance(data.get('theme', ''), str):
+            raise ValueError("Feld 'theme' muss String sein")
+        if not isinstance(data.get('custom_lights', {}), dict):
+            raise ValueError("Feld 'custom_lights' muss Objekt sein")
+        if not isinstance(data.get('widgets', {}), dict):
+            raise ValueError("Feld 'widgets' muss Objekt sein")
+        plc = data.get('plc', {})
+        if plc is not None and not isinstance(plc, dict):
+            raise ValueError("Feld 'plc' muss Objekt sein")
     
     def save_config(self) -> bool:
         """Speichert Konfiguration"""
@@ -118,7 +190,8 @@ class ConfigManager(BaseModule):
             config_data = dict(self.config)  # Kopiere existierende Config
             
             # Aktualisiere wichtige Felder
-            config_data['version'] = config_data.get('version', '1.0')
+            config_data['version'] = config_data.get('version', '2.0')
+            config_data['schema_version'] = self.CONFIG_SCHEMA_VERSION
             config_data['theme'] = self.current_theme
             config_data['custom_lights'] = self.custom_lights
             config_data['last_modified'] = datetime.now().isoformat()
@@ -172,11 +245,13 @@ class ConfigManager(BaseModule):
     def create_default_config(self):
         """Erstellt Default-Konfiguration"""
         self.config = {
-            'version': '1.0',
+            'schema_version': self.CONFIG_SCHEMA_VERSION,
+            'version': '2.0',
             'theme': 'blue',
             'plc': {
                 'ams_net_id': '192.168.2.162.1.1',
-                'port': 801  # TwinCAT 2 (TC2PLC1 = 801, TC3PLC1 = 851)
+                'port': 851,  # TwinCAT 2 (TC2PLC1 = 801, TC3PLC1 = 851)
+                'runtime_type': 'TC3'
             },
             'custom_lights': {},
             'widgets': {},  # ⭐ v5.1.2: Widget-Section hinzugefügt
@@ -345,7 +420,8 @@ class ConfigManager(BaseModule):
         """Exportiert Config in Datei"""
         try:
             export_data = {
-                'version': '1.0',
+                'schema_version': self.CONFIG_SCHEMA_VERSION,
+                'version': '2.0',
                 'theme': self.current_theme,
                 'custom_lights': self.custom_lights,
                 'layout': self.layout,
@@ -367,6 +443,9 @@ class ConfigManager(BaseModule):
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 import_data = json.load(f)
+
+            import_data = self._normalize_and_migrate_config(import_data)
+            import_data.pop('_migrated', None)
             
             # Backup erstellen vor Import
             self.create_backup()
@@ -375,6 +454,7 @@ class ConfigManager(BaseModule):
             self.custom_lights = import_data.get('custom_lights', {})
             self.current_theme = import_data.get('theme', 'blue')
             self.layout = import_data.get('layout', {})
+            self.config = dict(import_data)
             
             # Speichere
             self.save_config()
