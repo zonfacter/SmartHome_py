@@ -21,3 +21,4 @@ sentry-sdk==2.49.0
 # Optional
 requests==2.32.4
 ring_doorbell==0.9.13
+python-dotenv==1.0.1
