@@ -65,6 +65,8 @@ jobs:
       - name: Prepare env file
         run: |
           cp .env.example .env
+          mkdir -p config plc_data web/static/hls
+          chmod -R 777 config plc_data web/static/hls
 
       - name: Build and start compose
         run: |
