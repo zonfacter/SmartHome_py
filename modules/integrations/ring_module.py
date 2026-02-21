@@ -334,10 +334,25 @@ def list_ring_cameras() -> Dict[str, Any]:
             return {"success": False, "error": str(e)}
 
 
-async def _async_get_snapshot(device_id: str, retries: int = 3, delay: int = 1) -> Optional[bytes]:
+async def _async_get_snapshot(
+    device_id: str,
+    retries: int = 3,
+    delay: int = 1,
+    prefer_cached: bool = True,
+) -> Optional[bytes]:
     auth, http_session = await _async_with_auth()
     try:
         target_id = str(device_id)
+        if prefer_cached:
+            # Fast path: latest available snapshot is usually much quicker than
+            # waiting for a freshly generated snapshot timestamp.
+            img = await auth.async_query(
+                f"{API_URI}{SNAPSHOT_ENDPOINT.format(target_id)}",
+                raise_for_status=False,
+            )
+            if img and img.status_code == 200 and img.content:
+                return img.content
+
         payload = {"doorbot_ids": [int(target_id)]}
         await auth.async_query(
             f"{API_URI}{SNAPSHOT_TIMESTAMP_ENDPOINT}",
@@ -366,14 +381,32 @@ async def _async_get_snapshot(device_id: str, retries: int = 3, delay: int = 1) 
         await _close_http_session(http_session)
 
 
-def get_ring_snapshot(device_id: str, retries: int = 3, delay: int = 1) -> Dict[str, Any]:
+def get_ring_snapshot(
+    device_id: str,
+    retries: int = 3,
+    delay: int = 1,
+    timeout_seconds: Optional[int] = None,
+    prefer_cached: bool = True,
+) -> Dict[str, Any]:
     if not RING_AVAILABLE:
         return {"success": False, "error": "ring_doorbell nicht installiert"}
 
     with _LOCK:
         try:
-            timeout = max(45, (retries * delay) + 30)
-            data = _RUNTIME.run(_async_get_snapshot(device_id, retries=retries, delay=delay), timeout=timeout)
+            computed_timeout = (max(1, int(retries)) * max(1, int(delay))) + 6
+            if timeout_seconds is None:
+                timeout = max(8, min(12, computed_timeout))
+            else:
+                timeout = max(4, min(int(timeout_seconds), 30))
+            data = _RUNTIME.run(
+                _async_get_snapshot(
+                    device_id,
+                    retries=retries,
+                    delay=delay,
+                    prefer_cached=prefer_cached,
+                ),
+                timeout=timeout,
+            )
             if not data:
                 return {"success": False, "error": "Kein Snapshot von Ring erhalten"}
             return {"success": True, "content": data}
@@ -427,11 +460,11 @@ def get_ring_latest_ding(device_id: str) -> Dict[str, Any]:
     if not RING_AVAILABLE:
         return {"success": False, "error": "ring_doorbell nicht installiert"}
 
-    with _LOCK:
-        try:
-            return _RUNTIME.run(_async_get_latest_ding(device_id), timeout=60)
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+    try:
+        # Keep timeout bounded so event polling cannot starve foreground snapshot calls.
+        return _RUNTIME.run(_async_get_latest_ding(device_id), timeout=12)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 async def _async_start_webrtc(device_id: str, sdp_offer: str, keep_alive_timeout: int = 30) -> Dict[str, Any]:

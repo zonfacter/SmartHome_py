@@ -92,6 +92,7 @@ class WebManager(BaseModule):
         self._ring_event_active = False
         self._ring_last_event_ids = {}
         self._ring_doorbell_until = {}
+        self._ring_live_until = {}
         self._ring_doorbell_pulse_seconds = 10.0
         self._camera_trigger_rules = []
         self._camera_trigger_state = {}
@@ -131,6 +132,8 @@ class WebManager(BaseModule):
             'stream_health_ratio': float(os.getenv('SLO_STREAM_HEALTH_RATIO', '0.99'))
         }
         self._feature_flags = self._load_feature_flags()
+        # Socket-spezifische Widget-Subscriptions (sid -> set(scoped_widget_id))
+        self._sid_widget_subscriptions = {}
 
     def initialize(self, app_context: Any):
         """Initialisiert das Modul und erzwingt absolute Pfade für alle Manager."""
@@ -2356,13 +2359,42 @@ class WebManager(BaseModule):
         @self.app.route('/api/monitor/dataflow')
         def get_dataflow_stats():
             """Echtzeit-Datenfluss-Statistiken"""
+            ws_clients = len(self.connected_clients)
+            subscriptions = []
+            by_sid = {}
+            if self.variable_manager:
+                try:
+                    rows = self.variable_manager.get_subscription_snapshot()
+                    for row in rows:
+                        scoped_id = str(row.get('widget_id') or '')
+                        if ':' in scoped_id:
+                            sid, widget_id = scoped_id.split(':', 1)
+                        else:
+                            sid, widget_id = 'legacy', scoped_id
+                        item = {
+                            'sid': sid,
+                            'widget_id': widget_id,
+                            'plc_id': row.get('plc_id', 'plc_001'),
+                            'variable': row.get('variable', '')
+                        }
+                        subscriptions.append(item)
+                        by_sid[sid] = by_sid.get(sid, 0) + 1
+                except Exception:
+                    subscriptions = []
+                    by_sid = {}
+
             stats = {
                 'protocols': {},
                 'total_throughput': 0,
-                'active_connections': 0,
+                'active_connections': ws_clients,
                 'timestamp': time.time(),
                 'timestamp_utc': self._utc_iso(),
-                'hardware': {}
+                'hardware': {},
+                'subscriptions': {
+                    'total': len(subscriptions),
+                    'items': subscriptions,
+                    'by_sid': by_sid
+                }
             }
 
             # Hardware-Daten
@@ -2403,6 +2435,11 @@ class WebManager(BaseModule):
                     }
                 except Exception:
                     pass
+            stats['protocols']['websocket'] = {
+                'name': 'WebSocket',
+                'active_clients': ws_clients,
+                'messages_sent': 0
+            }
 
             return jsonify(stats)
 
@@ -2531,10 +2568,32 @@ class WebManager(BaseModule):
         def ring_status():
             try:
                 from modules.integrations.ring_module import get_ring_status
-                return jsonify(get_ring_status())
+                status = get_ring_status()
+                status['live_enabled'] = _is_ring_live_enabled()
+                status['live_on_ding'] = _is_ring_live_on_ding_enabled()
+                status['live_on_ding_seconds'] = _ring_live_on_ding_seconds()
+                status['live_on_ding_active'] = [
+                    cam_id for cam_id, until in self._ring_live_until.items()
+                    if until and time.time() < float(until)
+                ]
+                return jsonify(status)
             except Exception as e:
                 logger.error(f"Fehler bei GET /api/ring/status: {e}", exc_info=True)
                 return jsonify({'available': False, 'configured': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/gateway/ring-live-settings', methods=['GET', 'POST'])
+        def gateway_ring_live_settings():
+            """Gateway-Parameter fuer Ring-Live-Freigabe (Klingel/Trigger)."""
+            try:
+                if request.method == 'GET':
+                    return jsonify({'success': True, 'settings': self._load_gateway_settings()})
+
+                payload = request.get_json(silent=True) or {}
+                saved = self._save_gateway_settings(payload)
+                return jsonify({'success': True, 'settings': saved})
+            except Exception as e:
+                logger.error(f"Fehler bei /api/gateway/ring-live-settings: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
 
         @self.app.route('/api/ring/auth', methods=['POST'])
         def ring_auth():
@@ -2619,6 +2678,49 @@ class WebManager(BaseModule):
             path = _cameras_config_path()
             with open(path, 'w') as f:
                 json.dump(config, f, indent=2)
+
+        def _feature_flags_path():
+            return os.path.join(os.path.abspath(os.getcwd()), 'config', 'feature_flags.json')
+
+        def _load_feature_flags():
+            path = _feature_flags_path()
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        if isinstance(data, dict):
+                            return data
+                except Exception:
+                    pass
+            return {'flags': {}}
+
+        def _is_ring_live_enabled() -> bool:
+            flags_doc = _load_feature_flags()
+            flags = flags_doc.get('flags', {}) if isinstance(flags_doc, dict) else {}
+            # Conservative default: explicit opt-in required for Ring live sessions.
+            return bool(flags.get('ui.ring.webrtc', False))
+
+        def _is_ring_live_on_ding_enabled() -> bool:
+            settings = self._load_gateway_settings()
+            ring_live = settings.get('ring_live', {}) if isinstance(settings, dict) else {}
+            if 'on_ding_enabled' in ring_live:
+                return bool(ring_live.get('on_ding_enabled'))
+            flags_doc = _load_feature_flags()
+            flags = flags_doc.get('flags', {}) if isinstance(flags_doc, dict) else {}
+            return bool(flags.get('ui.ring.live_on_ding', True))
+
+        def _ring_live_on_ding_seconds() -> int:
+            settings = self._load_gateway_settings()
+            ring_live = settings.get('ring_live', {}) if isinstance(settings, dict) else {}
+            return max(5, min(int(ring_live.get('on_ding_seconds', 30)), 300))
+
+        def _is_ring_live_allowed_for_camera(cam_id: str) -> bool:
+            if _is_ring_live_enabled():
+                return True
+            if not _is_ring_live_on_ding_enabled():
+                return False
+            until = self._ring_live_until.get(cam_id)
+            return bool(until and time.time() < float(until))
 
         @self.app.route('/api/routing/config', methods=['GET', 'POST'])
         def routing_config():
@@ -2875,14 +2977,26 @@ class WebManager(BaseModule):
                         return jsonify({'error': 'Ring device_id fehlt in Kamera-Konfiguration'}), 400
 
                     from modules.integrations.ring_module import get_ring_snapshot
-                    retries = request.args.get('retries', default=8, type=int)
-                    delay = request.args.get('delay', default=2, type=int)
-                    retries = max(1, min(retries, 20))
-                    delay = max(1, min(delay, 10))
+                    retries = request.args.get('retries', default=2, type=int)
+                    delay = request.args.get('delay', default=1, type=int)
+                    timeout = request.args.get('timeout', default=8, type=int)
+                    prefer_cached = request.args.get('prefer_cached', default=1, type=int)
+                    retries = max(1, min(retries, 6))
+                    delay = max(1, min(delay, 3))
+                    timeout = max(4, min(timeout, 20))
+                    prefer_cached = bool(prefer_cached)
 
-                    result = get_ring_snapshot(str(ring_device_id), retries=retries, delay=delay)
+                    result = get_ring_snapshot(
+                        str(ring_device_id),
+                        retries=retries,
+                        delay=delay,
+                        timeout_seconds=timeout,
+                        prefer_cached=prefer_cached
+                    )
                     if not result.get('success'):
-                        return jsonify({'error': result.get('error', 'Snapshot fehlgeschlagen')}), 500
+                        error_msg = str(result.get('error', 'Snapshot fehlgeschlagen'))
+                        status = 504 if 'timeout' in error_msg.lower() else 500
+                        return jsonify({'error': error_msg}), status
                     image_data = result.get('content')
                 elif cam_type == 'rtsp':
                     stream_url = cam_cfg.get('substream_url') or cam_cfg.get('url')
@@ -2923,6 +3037,8 @@ class WebManager(BaseModule):
                     return jsonify({'success': False, 'error': 'Kamera nicht gefunden'}), 404
                 if cam_cfg.get('type') != 'ring':
                     return jsonify({'success': False, 'error': 'Nur fuer Ring-Kameras'}), 400
+                if not _is_ring_live_allowed_for_camera(cam_id):
+                    return jsonify({'success': False, 'error': 'Ring-Live ist deaktiviert (nur bei Klingel-Trigger oder via Feature-Flag erlaubt)'}), 403
 
                 data = request.json or {}
                 sdp_offer = data.get('offer')
@@ -3133,6 +3249,9 @@ class WebManager(BaseModule):
 
                 cam_type = (cam_cfg.get('type') or 'rtsp').lower()
                 if cam_type == 'ring':
+                    if not _is_ring_live_allowed_for_camera(cam_id):
+                        return jsonify({'error': 'Ring-Live ist deaktiviert (nur bei Klingel-Trigger oder via Feature-Flag erlaubt)'}), 403
+
                     ring_cfg = cam_cfg.get('ring') or {}
                     ring_device_id = ring_cfg.get('device_id')
                     if not ring_device_id:
@@ -3582,6 +3701,7 @@ class WebManager(BaseModule):
             client_id = request.sid
             with self.lock:
                 self.connected_clients.add(client_id)
+                self._sid_widget_subscriptions.setdefault(client_id, set())
             print(f"  🔌 Client verbunden: {client_id} (Total: {len(self.connected_clients)})")
 
             # Sende initial alle Telemetrie-Daten
@@ -3594,6 +3714,15 @@ class WebManager(BaseModule):
         def handle_disconnect():
             """Client getrennt"""
             client_id = request.sid
+            # Cleanup aller client-spezifischen Variable-Subscriptions
+            if self.variable_manager:
+                try:
+                    with self.lock:
+                        scoped_widget_ids = list(self._sid_widget_subscriptions.pop(client_id, set()))
+                    for scoped_widget_id in scoped_widget_ids:
+                        self.variable_manager.unsubscribe_widget(scoped_widget_id)
+                except Exception as e:
+                    logger.debug(f"Subscription-Cleanup fehlgeschlagen ({client_id}): {e}")
             with self.lock:
                 self.connected_clients.discard(client_id)
             print(f"  🔌 Client getrennt: {client_id} (Total: {len(self.connected_clients)})")
@@ -3619,6 +3748,7 @@ class WebManager(BaseModule):
                 return
 
             try:
+                client_id = request.sid
                 widget_id = data.get('widget_id')
                 variable = data.get('variable')
                 plc_id = data.get('plc_id', 'plc_001')
@@ -3627,21 +3757,36 @@ class WebManager(BaseModule):
                     emit('error', {'message': 'widget_id und variable erforderlich'})
                     return
 
+                scoped_widget_id = f"{client_id}:{widget_id}"
                 # Subscribe Widget
-                self.variable_manager.subscribe_widget(widget_id, variable, plc_id)
+                self.variable_manager.subscribe_widget(scoped_widget_id, variable, plc_id)
+                with self.lock:
+                    self._sid_widget_subscriptions.setdefault(client_id, set()).add(scoped_widget_id)
 
                 # Sende aktuellen Wert sofort zurück
                 cached = self.variable_manager.get_cached_value(variable, plc_id)
                 if cached:
                     value, timestamp = cached
                     symbol_info = self.variable_manager.get_symbol_info(variable, plc_id)
-                    emit('variable_update', {
+                    payload = {
                         'widget_id': widget_id,
                         'variable': variable,
                         'value': value,
                         'timestamp': timestamp,
                         'type': symbol_info.symbol_type if symbol_info else 'UNKNOWN',
                         'plc_id': plc_id
+                    }
+                    # Legacy single-update event + canonical batch format.
+                    emit('variable_update', payload)
+                    emit('variable_updates', {
+                        plc_id: {
+                            variable: {
+                                'value': value,
+                                'timestamp': timestamp,
+                                'type': payload['type'],
+                                'plc_id': plc_id
+                            }
+                        }
                     })
 
                 logger.info(f"📌 Widget {widget_id} subscribed to {plc_id}/{variable}")
@@ -3672,14 +3817,22 @@ class WebManager(BaseModule):
                 return
 
             try:
+                client_id = request.sid
                 widget_id = data.get('widget_id')
 
                 if not widget_id:
                     emit('error', {'message': 'widget_id erforderlich'})
                     return
 
+                scoped_widget_id = f"{client_id}:{widget_id}"
                 # Unsubscribe Widget
-                self.variable_manager.unsubscribe_widget(widget_id)
+                self.variable_manager.unsubscribe_widget(scoped_widget_id)
+                with self.lock:
+                    sid_set = self._sid_widget_subscriptions.get(client_id)
+                    if sid_set is not None:
+                        sid_set.discard(scoped_widget_id)
+                        if not sid_set:
+                            self._sid_widget_subscriptions.pop(client_id, None)
 
                 logger.info(f"📌 Widget {widget_id} unsubscribed")
 
@@ -3943,6 +4096,71 @@ class WebManager(BaseModule):
     def _camera_trigger_config_path(self) -> str:
         return os.path.join(os.path.abspath(os.getcwd()), 'config', 'camera_triggers.json')
 
+    def _gateway_settings_path(self) -> str:
+        return os.path.join(os.path.abspath(os.getcwd()), 'config', 'gateway_settings.json')
+
+    def _default_gateway_settings(self) -> Dict[str, Any]:
+        return {
+            "version": "1.0",
+            "ring_live": {
+                "on_ding_enabled": True,
+                "on_ding_seconds": 30,
+                "on_trigger_enabled": True,
+                "on_trigger_use_rule_duration": True,
+                "on_trigger_seconds": 30
+            }
+        }
+
+    def _load_gateway_settings(self) -> Dict[str, Any]:
+        path = self._gateway_settings_path()
+        data = {}
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f) or {}
+                    if isinstance(loaded, dict):
+                        data = loaded
+            except Exception as e:
+                logger.warning(f"Konnte gateway_settings.json nicht laden: {e}")
+
+        defaults = self._default_gateway_settings()
+        ring_live = data.get('ring_live') if isinstance(data.get('ring_live'), dict) else {}
+        merged = {
+            "version": str(data.get('version') or defaults['version']),
+            "ring_live": {
+                "on_ding_enabled": bool(ring_live.get("on_ding_enabled", defaults["ring_live"]["on_ding_enabled"])),
+                "on_ding_seconds": max(5, min(int(ring_live.get("on_ding_seconds", defaults["ring_live"]["on_ding_seconds"])), 300)),
+                "on_trigger_enabled": bool(ring_live.get("on_trigger_enabled", defaults["ring_live"]["on_trigger_enabled"])),
+                "on_trigger_use_rule_duration": bool(ring_live.get("on_trigger_use_rule_duration", defaults["ring_live"]["on_trigger_use_rule_duration"])),
+                "on_trigger_seconds": max(5, min(int(ring_live.get("on_trigger_seconds", defaults["ring_live"]["on_trigger_seconds"])), 300)),
+            }
+        }
+        return merged
+
+    def _save_gateway_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        merged = self._default_gateway_settings()
+        if isinstance(settings, dict):
+            merged = self._load_gateway_settings()
+            incoming = settings.get('ring_live') if isinstance(settings.get('ring_live'), dict) else settings
+            if isinstance(incoming, dict):
+                ring_live = merged['ring_live']
+                if 'on_ding_enabled' in incoming:
+                    ring_live['on_ding_enabled'] = bool(incoming.get('on_ding_enabled'))
+                if 'on_ding_seconds' in incoming:
+                    ring_live['on_ding_seconds'] = max(5, min(int(incoming.get('on_ding_seconds')), 300))
+                if 'on_trigger_enabled' in incoming:
+                    ring_live['on_trigger_enabled'] = bool(incoming.get('on_trigger_enabled'))
+                if 'on_trigger_use_rule_duration' in incoming:
+                    ring_live['on_trigger_use_rule_duration'] = bool(incoming.get('on_trigger_use_rule_duration'))
+                if 'on_trigger_seconds' in incoming:
+                    ring_live['on_trigger_seconds'] = max(5, min(int(incoming.get('on_trigger_seconds')), 300))
+
+        path = self._gateway_settings_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(merged, f, indent=2, ensure_ascii=False)
+        return merged
+
     @staticmethod
     def _camera_trigger_schema_version() -> str:
         return "2.0"
@@ -4190,9 +4408,24 @@ class WebManager(BaseModule):
                     continue
                 duration = int(rule.get('duration_seconds') or 30)
                 self._camera_trigger_last_fired[rule_id] = now
+                cam_type = str(rule.get('camera_type') or 'ring').strip().lower()
+
+                # Optional: Ring-Live-Freigabe auch bei beliebigen Gateway-Triggern.
+                if cam_type == 'ring':
+                    try:
+                        ring_live_cfg = self._load_gateway_settings().get('ring_live', {})
+                        if bool(ring_live_cfg.get('on_trigger_enabled', True)):
+                            if bool(ring_live_cfg.get('on_trigger_use_rule_duration', True)):
+                                live_seconds = max(5, min(duration, 300))
+                            else:
+                                live_seconds = max(5, min(int(ring_live_cfg.get('on_trigger_seconds', 30)), 300))
+                            self._ring_live_until[cam_id] = now + live_seconds
+                    except Exception:
+                        pass
+
                 self.broadcast_event('camera_alert', {
                     'cam_id': cam_id,
-                    'type': str(rule.get('camera_type') or 'ring'),
+                    'type': cam_type,
                     'source': 'camera_trigger_rule',
                     'trigger_rule_id': rule_id,
                     'trigger_variable': key,
@@ -4254,6 +4487,9 @@ class WebManager(BaseModule):
                     if until and time.time() >= until:
                         self._ring_doorbell_until.pop(cam_id, None)
                         self._set_ring_doorbell_state(cam_id, cam_name, self._ring_last_event_ids.get(cam_id), None, False)
+                    live_until = self._ring_live_until.get(cam_id)
+                    if live_until and time.time() >= live_until:
+                        self._ring_live_until.pop(cam_id, None)
 
                     try:
                         from modules.integrations.ring_module import get_ring_latest_ding
@@ -4275,6 +4511,9 @@ class WebManager(BaseModule):
                         self._ring_last_event_ids[cam_id] = event_id
                         ding_ts = event.get('ding_ts')
                         self._ring_doorbell_until[cam_id] = time.time() + self._ring_doorbell_pulse_seconds
+                        if self._load_gateway_settings().get('ring_live', {}).get('on_ding_enabled', True):
+                            ding_window = max(5, min(int(self._load_gateway_settings().get('ring_live', {}).get('on_ding_seconds', 30)), 300))
+                            self._ring_live_until[cam_id] = time.time() + ding_window
                         self._set_ring_doorbell_state(cam_id, cam_name, event_id, ding_ts, True)
 
                 time.sleep(2.0)

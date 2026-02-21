@@ -422,6 +422,26 @@ class VariableManager:
             'unique_plcs': len(set(plc_id for plc_id, _ in self.symbols.keys()))
         }
 
+    def get_subscription_snapshot(self) -> list:
+        """
+        Liefert eine flache Momentaufnahme aller Widget-Subscriptions.
+
+        Returns:
+            Liste von Dicts: {widget_id, plc_id, variable}
+        """
+        items = []
+        for widget_id, key in self.widget_mappings.items():
+            try:
+                plc_id, variable = key
+                items.append({
+                    'widget_id': str(widget_id),
+                    'plc_id': str(plc_id),
+                    'variable': str(variable)
+                })
+            except Exception:
+                continue
+        return items
+
     def clear_cache(self, max_age_seconds: float = 60.0):
         """
         Löscht alte Cache-Einträge

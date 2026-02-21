@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] - 2026-02-21
+
+### 🚀 Added
+
+#### Ring Live Policy & Gateway-Parametrisierung
+- **Neue API**: `GET/POST /api/gateway/ring-live-settings`
+  - Datei: `modules/gateway/web_manager.py`
+- **Neue Konfiguration**: `config/gateway_settings.json`
+  - `ring_live.on_ding_enabled`
+  - `ring_live.on_ding_seconds`
+  - `ring_live.on_trigger_enabled`
+  - `ring_live.on_trigger_use_rule_duration`
+  - `ring_live.on_trigger_seconds`
+- **Ring-Status erweitert** (`/api/ring/status`):
+  - `live_enabled`
+  - `live_on_ding`
+  - `live_on_ding_seconds`
+  - `live_on_ding_active`
+
+#### Monitor-Erweiterung für Variable Subscriptions
+- **Monitor-API erweitert** (`/api/monitor/dataflow`):
+  - `protocols.websocket.active_clients`
+  - `subscriptions.total`
+  - `subscriptions.by_sid`
+  - `subscriptions.items[]` (sid/widget/plc/variable)
+- **Monitor-UI erweitert**:
+  - Neuer Bereich: *Variable Subscriptions (pro Client)*
+  - Dateien: `web/templates/index.html`, `web/static/js/app.js`
+
+### 🔧 Changed
+
+#### Ring Snapshot/Live Verhalten
+- Ring-Snapshots nutzen bevorzugt vorhandene Snapshots (schneller Initial-Frame).
+  - Datei: `modules/integrations/ring_module.py`
+- Frontend-Ring-Snapshot-Requests übergeben explizite Timeout-Parameter.
+  - Datei: `web/static/js/app.js`
+- Ring-Live ist standardmäßig deaktiviert und nur per Policy erlaubt
+  (globales Flag oder zeitlich begrenzte Trigger-Freigabe).
+  - Datei: `modules/gateway/web_manager.py`
+- Feature-Flags angepasst:
+  - `ui.ring.webrtc=false`
+  - `ui.ring.live_on_ding=true`
+  - Datei: `config/feature_flags.json`
+
+#### RTSP Widget-Startpfad
+- Doppelter Start von RTSP-Streams beim Laden der Kameraseite entfernt.
+- Snapshot blendet Loading-Overlay unmittelbar nach erstem Bild aus.
+  - Datei: `web/static/js/app.js`
+
+#### Service-Start & Deployment
+- `web_server_ctl.sh` robuster beim PID-Matching (keine Fehl-Erkennung mehr).
+  - Datei: `scripts/web_server_ctl.sh`
+- Systemd-Unit robuster:
+  - Interpreter-Fallback `venv/.venv`
+  - präziseres `ExecStartPre`-Matching
+  - Datei: `deploy/systemd/smarthome-web.service`
+
+### 🐛 Fixed
+
+#### PLC-Subscriptions nach Reload / neuem Client
+- Event-Mismatch behoben:
+  - Backend sendet kompatibel `variable_update` + `variable_updates` beim Initialwert
+  - Datei: `modules/gateway/web_manager.py`
+- Frontend verarbeitet beide Formate und macht Re-Subscribe auf Socket-Reconnect.
+  - Datei: `web/static/js/variable-manager.js`
+- Subscriptions jetzt client-spezifisch (`sid:widget_id`) und kollisionsfrei bei mehreren Browsern.
+  - Cleanup bei Disconnect inklusive.
+  - Datei: `modules/gateway/web_manager.py`
+- VariableManager liefert Snapshot für Monitoring.
+  - Datei: `modules/plc/variable_manager.py`
+
 ## [4.5.3] - 2026-01-04
 
 ### 🎉 Major Features
