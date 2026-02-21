@@ -430,14 +430,17 @@ class WidgetManagerV5 {
         document.getElementById('widget-plc-type').value = valueBinding.plc_type || 'BOOL';
         document.getElementById('widget-icon').value = widget.config?.icon || '';
 
-        modal?.classList.remove('hidden');
-        modal?.dataset.editId = widgetId;
+        if (modal) {
+            modal.classList.remove('hidden');
+            modal.dataset.editId = widgetId;
+        }
     }
 
     closeModal() {
         const modal = document.getElementById('widget-modal');
-        modal?.classList.add('hidden');
-        delete modal?.dataset.editId;
+        if (!modal) return;
+        modal.classList.add('hidden');
+        delete modal.dataset.editId;
     }
 
     async saveWidget() {

@@ -66,6 +66,11 @@ class SmartHomeApp {
             'ui.page.admin': true,
             'ui.ring.webrtc': true
         };
+        this.customPages = {};
+        this.uiSettings = {
+            default_page: 'dashboard',
+            kiosk_default: false
+        };
 
         // Initialisierung
         this.init();
@@ -90,15 +95,21 @@ class SmartHomeApp {
         requestAnimationFrame(() => this.showPage('dashboard'));
 
         // Nicht-kritische Initialisierung in Idle-Phase verlagern.
-        const bootDeferred = () => {
+        const bootDeferred = async () => {
+            await this.loadUISettings();
+            await this.loadCustomPages();
+            this.applyKioskMode(this.uiSettings.kiosk_default === true);
+            if ((this.uiSettings.default_page || 'dashboard') !== 'dashboard') {
+                this.showPage(this.uiSettings.default_page || 'dashboard');
+            }
             this.initializeSocket();
             this.loadSystemStatus();
             this._loadDevTestScenarios();
         };
         if (typeof window.requestIdleCallback === 'function') {
-            window.requestIdleCallback(() => bootDeferred(), { timeout: 1500 });
+            window.requestIdleCallback(() => { bootDeferred(); }, { timeout: 1500 });
         } else {
-            setTimeout(() => bootDeferred(), 0);
+            setTimeout(() => { bootDeferred(); }, 0);
         }
 
         console.log('✅ SmartHome App bereit');
@@ -282,22 +293,7 @@ class SmartHomeApp {
     // ========================================================================
 
     setupEventListeners() {
-        // Sidebar-Navigation (Desktop/Tablet)
-        const navButtons = document.querySelectorAll('[data-page]');
-        console.log(`🔍 Gefundene Navigation-Buttons: ${navButtons.length}`);
-
-        navButtons.forEach(btn => {
-            const page = btn.getAttribute('data-page');
-            console.log(`  ➜ Button für Seite: ${page}`);
-            this._bindScopedListener(btn, 'click', (e) => {
-                e.preventDefault();
-                console.log(`🖱️ Click auf: ${page}`);
-                this.showPage(page);
-
-                // Mobile-Menü schließen
-                this.closeMobileMenu();
-            }, { scope: 'global', key: `nav:${page}:click` });
-        });
+        this.bindNavigationButtons();
 
         // Mobile-Hamburger-Menü
         const hamburger = document.getElementById('hamburger-btn');
@@ -342,6 +338,115 @@ class SmartHomeApp {
         } else {
             console.warn('⚠️ PLC-Disconnect-Button NICHT gefunden');
         }
+
+        const fullscreenSidebar = document.getElementById('fullscreen-toggle-sidebar');
+        if (fullscreenSidebar) {
+            this._bindScopedListener(fullscreenSidebar, 'click', () => this.toggleFullscreenMode(), { scope: 'global', key: 'fullscreen:sidebar' });
+        }
+        const fullscreenMobile = document.getElementById('fullscreen-toggle-mobile');
+        if (fullscreenMobile) {
+            this._bindScopedListener(fullscreenMobile, 'click', () => this.toggleFullscreenMode(), { scope: 'global', key: 'fullscreen:mobile' });
+        }
+        const kioskSidebar = document.getElementById('kiosk-toggle-sidebar');
+        if (kioskSidebar) {
+            this._bindScopedListener(kioskSidebar, 'click', () => this.toggleKioskMode(), { scope: 'global', key: 'kiosk:sidebar' });
+        }
+        const kioskMobile = document.getElementById('kiosk-toggle-mobile');
+        if (kioskMobile) {
+            this._bindScopedListener(kioskMobile, 'click', () => this.toggleKioskMode(), { scope: 'global', key: 'kiosk:mobile' });
+        }
+    }
+
+    bindNavigationButtons() {
+        const navButtons = document.querySelectorAll('[data-page]');
+        console.log(`🔍 Gefundene Navigation-Buttons: ${navButtons.length}`);
+        navButtons.forEach((btn, index) => {
+            const page = btn.getAttribute('data-page');
+            this._bindScopedListener(btn, 'click', (e) => {
+                e.preventDefault();
+                this.showPage(page);
+                this.closeMobileMenu();
+            }, { scope: 'global', key: `nav:${page}:click:${index}` });
+        });
+    }
+
+    async loadCustomPages() {
+        try {
+            const response = await fetch('/api/pages');
+            const data = await response.json();
+            this.customPages = data.pages || {};
+            this.renderCustomPageNavigation();
+            this.refreshWidgetPageOptions();
+            this.refreshPanelSettingsUI();
+        } catch (error) {
+            console.warn('⚠️ Seiten konnten nicht geladen werden:', error.message);
+        }
+    }
+
+    async loadUISettings() {
+        try {
+            const response = await fetch('/api/ui-settings');
+            if (!response.ok) return;
+            const data = await response.json();
+            this.uiSettings = {
+                default_page: data.default_page || 'dashboard',
+                kiosk_default: !!data.kiosk_default
+            };
+        } catch (error) {
+            console.warn('⚠️ UI-Settings konnten nicht geladen werden:', error.message);
+        }
+    }
+
+    renderCustomPageNavigation() {
+        const container = document.getElementById('nav-dynamic-pages');
+        if (!container) return;
+        const pages = Object.values(this.customPages || {}).sort((a, b) => {
+            const oa = Number(a?.order ?? 9999);
+            const ob = Number(b?.order ?? 9999);
+            if (oa !== ob) return oa - ob;
+            return String(a?.name || a?.id || '').localeCompare(String(b?.name || b?.id || ''));
+        });
+        if (pages.length === 0) {
+            container.innerHTML = '<p class="px-4 py-2 text-xs text-gray-500">Keine Räume angelegt</p>';
+            return;
+        }
+        container.innerHTML = pages.map(page => `
+            <a href="#" data-page="${this.escapeHtml(page.id)}" class="nav-link flex items-center space-x-3 px-4 py-2 rounded-lg">
+                <i data-lucide="${this.escapeHtml(page.icon || 'layout-grid')}" class="w-4 h-4"></i>
+                <span>${this.escapeHtml(page.name || page.id)}</span>
+            </a>
+        `).join('');
+        this.bindNavigationButtons();
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    toggleFullscreenMode() {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch((error) => {
+                console.warn('Vollbild konnte nicht aktiviert werden:', error.message);
+            });
+        } else {
+            document.exitFullscreen().catch(() => {});
+        }
+    }
+
+    toggleKioskMode() {
+        const isEnabled = document.body.classList.contains('kiosk-mode');
+        this.applyKioskMode(!isEnabled);
+    }
+
+    applyKioskMode(enabled) {
+        document.body.classList.toggle('kiosk-mode', !!enabled);
+        const iconName = enabled ? 'panel-top-open' : 'panel-top-close';
+        [
+            ['kiosk-toggle-sidebar', 'w-4 h-4'],
+            ['kiosk-toggle-mobile', 'w-5 h-5']
+        ].forEach(([id, size]) => {
+            const btn = document.getElementById(id);
+            if (!btn) return;
+            btn.innerHTML = `<i data-lucide="${iconName}" class="${size}"></i>`;
+        });
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
     _bindScopedListener(el, event, handler, { scope = 'global', key = null, options = undefined } = {}) {
@@ -379,6 +484,7 @@ class SmartHomeApp {
 
     showPage(pageName) {
         console.log(`🔄 Zeige Seite: ${pageName}`);
+        this.ensureDynamicPage(pageName);
         if (!this.isFeatureEnabled(`ui.page.${pageName}`, true)) {
             this.showToast(`Feature für Seite '${pageName}' ist aktuell deaktiviert.`, { level: 'info' });
             pageName = 'dashboard';
@@ -404,6 +510,11 @@ class SmartHomeApp {
             targetPage.classList.add('active');
             this.currentPage = pageName;
             console.log(`✅ Seite '${pageName}' ist jetzt aktiv`);
+            const mobileTitle = document.getElementById('page-title-mobile');
+            if (mobileTitle) {
+                const customName = this.customPages?.[pageName]?.name;
+                mobileTitle.textContent = customName || pageName.charAt(0).toUpperCase() + pageName.slice(1);
+            }
 
             // Navigation-Buttons aktualisieren
             document.querySelectorAll('[data-page]').forEach(btn => {
@@ -458,7 +569,32 @@ class SmartHomeApp {
             case 'camera-wall':
                 this.loadCameraWallPage();
                 break;
+            default:
+                if (this.customPages && this.customPages[pageName]) {
+                    this.loadAndRenderWidgets(pageName);
+                }
+                break;
         }
+    }
+
+    ensureDynamicPage(pageName) {
+        if (!this.customPages || !this.customPages[pageName]) return;
+        const existing = document.getElementById(`${pageName}-page`);
+        if (existing) return;
+
+        const main = document.querySelector('main');
+        if (!main) return;
+
+        const title = this.customPages[pageName]?.name || pageName;
+        const page = document.createElement('div');
+        page.id = `${pageName}-page`;
+        page.className = 'page page-container p-6';
+        page.innerHTML = `
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 hidden md:block">${this.escapeHtml(title)}</h1>
+            <div id="${this.escapeHtml(pageName)}-widgets-dynamic" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6"></div>
+            <div data-legacy-page="${this.escapeHtml(pageName)}" class="text-sm text-gray-500 dark:text-gray-400">Keine Widgets auf dieser Seite.</div>
+        `;
+        main.appendChild(page);
     }
 
     toggleMobileMenu() {
@@ -828,6 +964,16 @@ class SmartHomeApp {
         }
     }
 
+    escapeHtml(value) {
+        if (value === null || value === undefined) return '';
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     updateBlob(key) {
         // Aktualisiere Blob-referenzierende Elemente (z.B. Bilder)
         const img = document.querySelector(`img[data-blob="${key}"]`);
@@ -872,7 +1018,7 @@ class SmartHomeApp {
 
     setupDashboardQuickActions() {
         // Schnellzugriff-Buttons im Dashboard
-        const quickActions = document.querySelectorAll('#dashboard-page .grid button');
+        const quickActions = document.querySelectorAll('#dashboard-page [data-legacy-page="dashboard"] .grid button');
         if (!quickActions || quickActions.length === 0) return;
 
         quickActions.forEach((btn, index) => {
@@ -883,7 +1029,7 @@ class SmartHomeApp {
 
             // Entferne alte Event-Listener
             btn.replaceWith(btn.cloneNode(true));
-            const newBtn = document.querySelectorAll('#dashboard-page .grid button')[index];
+            const newBtn = document.querySelectorAll('#dashboard-page [data-legacy-page="dashboard"] .grid button')[index];
 
             newBtn.addEventListener('click', () => {
                 console.log(`🎯 Schnellzugriff: ${actionName}`);
@@ -5358,8 +5504,10 @@ class SmartHomeApp {
 
         // ⭐ v5.1.1: Lade Widgets für diese Page
         await this.loadAndRenderWidgets('widgets');
+        await this.loadCustomPages();
 
         await this.loadWidgetList();
+        this.renderRoomList();
 
         // Event Listeners
         const addBtn = document.getElementById('add-widget-btn');
@@ -5368,6 +5516,8 @@ class SmartHomeApp {
         const cancelBtn = document.getElementById('cancel-widget-edit');
         const testBtn = document.getElementById('test-binding-btn');
         const browseBtn = document.getElementById('browse-symbols-btn');
+        const addRoomBtn = document.getElementById('add-room-btn');
+        const savePanelBtn = document.getElementById('save-panel-settings-btn');
 
         if (addBtn) {
             this._bindScopedListener(addBtn, 'click', () => this.openWidgetEditor(), { scope, key: 'widgets:add-open-editor' });
@@ -5395,6 +5545,19 @@ class SmartHomeApp {
         if (browseBtn) {
             this._bindScopedListener(browseBtn, 'click', () => this.browseSymbols(), { scope, key: 'widgets:browse-symbols' });
         }
+        if (addRoomBtn) {
+            this._bindScopedListener(addRoomBtn, 'click', () => this.createRoomPage(), { scope, key: 'widgets:add-room' });
+        }
+        if (savePanelBtn) {
+            this._bindScopedListener(savePanelBtn, 'click', () => this.savePanelSettings(), { scope, key: 'widgets:save-panel-settings' });
+        }
+
+        const iconInput = document.getElementById('widget-icon');
+        if (iconInput) {
+            this._bindScopedListener(iconInput, 'input', () => {
+                this.updateWidgetIconPreview(iconInput.value || 'box');
+            }, { scope, key: 'widgets:icon-preview' });
+        }
 
         // ⭐ v5.1.2: Widget-Type Change Handler (Switch-Config anzeigen/verstecken)
         const widgetTypeSelect = document.getElementById('widget-type');
@@ -5417,14 +5580,266 @@ class SmartHomeApp {
                 pulseDurationContainer.style.display = (mode === 'pulse') ? 'block' : 'none';
             }, { scope, key: 'widgets:switch-mode-change' });
         }
+
+        this.refreshPanelSettingsUI();
+        this.renderWidgetIconQuickpick();
+    }
+
+    getAvailablePageOptions() {
+        const staticPages = [
+            ['dashboard', 'Dashboard'],
+            ['lighting', 'Beleuchtung'],
+            ['climate', 'Klima'],
+            ['energy', 'Energie'],
+            ['cameras', 'Kameras'],
+            ['monitor', 'Monitor'],
+            ['widgets', 'Widgets']
+        ];
+        const dynamicPages = Object.values(this.customPages || {})
+            .sort((a, b) => Number(a?.order ?? 9999) - Number(b?.order ?? 9999))
+            .map(page => [page.id, `Raum: ${page.name}`]);
+        return [...staticPages, ...dynamicPages];
+    }
+
+    refreshWidgetPageOptions(selectedPage = '') {
+        const select = document.getElementById('widget-page');
+        if (!select) return;
+        select.innerHTML = this.getAvailablePageOptions().map(([id, label]) =>
+            `<option value="${this.escapeHtml(id)}">${this.escapeHtml(label)}</option>`
+        ).join('');
+        if (selectedPage) {
+            select.value = selectedPage;
+        }
+    }
+
+    refreshPanelSettingsUI() {
+        const select = document.getElementById('panel-start-page');
+        const kioskCheckbox = document.getElementById('panel-kiosk-default');
+        if (select) {
+            select.innerHTML = this.getAvailablePageOptions().map(([id, label]) =>
+                `<option value="${this.escapeHtml(id)}">${this.escapeHtml(label)}</option>`
+            ).join('');
+            select.value = this.uiSettings?.default_page || 'dashboard';
+        }
+        if (kioskCheckbox) {
+            kioskCheckbox.checked = !!this.uiSettings?.kiosk_default;
+        }
+    }
+
+    renderRoomList() {
+        const container = document.getElementById('room-list');
+        if (!container) return;
+        const pages = Object.values(this.customPages || {}).sort((a, b) => {
+            const oa = Number(a?.order ?? 9999);
+            const ob = Number(b?.order ?? 9999);
+            if (oa !== ob) return oa - ob;
+            return String(a?.name || a?.id || '').localeCompare(String(b?.name || b?.id || ''));
+        });
+        if (pages.length === 0) {
+            container.innerHTML = '<p class="text-sm text-gray-500 dark:text-gray-400">Noch keine Räume angelegt.</p>';
+            return;
+        }
+        container.innerHTML = pages.map(page => `
+            <div class="room-list-item p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-between"
+                 data-page-id="${this.escapeHtml(page.id)}" draggable="true">
+                <div class="flex items-center gap-2">
+                    <button class="room-drag-handle p-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 cursor-grab" title="Ziehen">
+                        <i data-lucide="grip-vertical" class="w-4 h-4"></i>
+                    </button>
+                    <i data-lucide="${this.escapeHtml(page.icon || 'layout-grid')}" class="w-4 h-4 text-blue-500"></i>
+                    <span class="text-sm font-medium text-gray-800 dark:text-gray-200">${this.escapeHtml(page.name)}</span>
+                    <span class="text-xs text-gray-500">(${this.escapeHtml(page.id)})</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button class="room-move-up-btn px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-600" data-page-id="${this.escapeHtml(page.id)}">↑</button>
+                    <button class="room-move-down-btn px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-600" data-page-id="${this.escapeHtml(page.id)}">↓</button>
+                    <button class="room-edit-btn px-3 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700" data-page-id="${this.escapeHtml(page.id)}">Bearbeiten</button>
+                    <button class="room-open-btn px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700" data-page-id="${this.escapeHtml(page.id)}">Öffnen</button>
+                    <button class="room-delete-btn px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700" data-page-id="${this.escapeHtml(page.id)}">Löschen</button>
+                </div>
+            </div>
+        `).join('');
+
+        container.querySelectorAll('.room-open-btn').forEach(btn => {
+            btn.addEventListener('click', () => this.showPage(btn.dataset.pageId));
+        });
+        container.querySelectorAll('.room-delete-btn').forEach(btn => {
+            btn.addEventListener('click', () => this.deleteRoomPage(btn.dataset.pageId));
+        });
+        container.querySelectorAll('.room-edit-btn').forEach(btn => {
+            btn.addEventListener('click', () => this.editRoomPage(btn.dataset.pageId));
+        });
+        container.querySelectorAll('.room-move-up-btn').forEach(btn => {
+            btn.addEventListener('click', () => this.moveRoomByStep(btn.dataset.pageId, -1));
+        });
+        container.querySelectorAll('.room-move-down-btn').forEach(btn => {
+            btn.addEventListener('click', () => this.moveRoomByStep(btn.dataset.pageId, 1));
+        });
+        this.setupRoomDnD(container);
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    setupRoomDnD(container) {
+        let draggingId = null;
+        container.querySelectorAll('.room-list-item').forEach(item => {
+            item.addEventListener('dragstart', () => {
+                draggingId = item.dataset.pageId;
+                item.classList.add('opacity-40');
+            });
+            item.addEventListener('dragend', () => {
+                draggingId = null;
+                item.classList.remove('opacity-40');
+            });
+            item.addEventListener('dragover', (e) => {
+                if (!draggingId) return;
+                e.preventDefault();
+            });
+            item.addEventListener('drop', async (e) => {
+                if (!draggingId) return;
+                e.preventDefault();
+                const source = container.querySelector(`.room-list-item[data-page-id="${draggingId}"]`);
+                if (!source || source === item) return;
+                container.insertBefore(source, item);
+                await this.persistRoomOrderFromDom(container);
+            });
+        });
+    }
+
+    async moveRoomByStep(pageId, delta) {
+        const container = document.getElementById('room-list');
+        if (!container) return;
+        const items = Array.from(container.querySelectorAll('.room-list-item'));
+        const current = items.find(el => el.dataset.pageId === pageId);
+        if (!current) return;
+        const index = items.indexOf(current);
+        const targetIndex = index + delta;
+        if (targetIndex < 0 || targetIndex >= items.length) return;
+        const target = items[targetIndex];
+        if (delta < 0) {
+            container.insertBefore(current, target);
+        } else {
+            container.insertBefore(target, current);
+        }
+        await this.persistRoomOrderFromDom(container);
+    }
+
+    async persistRoomOrderFromDom(container) {
+        const orderedIds = Array.from(container.querySelectorAll('.room-list-item'))
+            .map(el => el.dataset.pageId)
+            .filter(Boolean);
+        await this.persistRoomOrder(orderedIds);
+    }
+
+    async persistRoomOrder(orderedIds) {
+        try {
+            const response = await fetch('/api/pages/reorder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ordered_ids: orderedIds })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                this.showToast(data.error || 'Raum-Reihenfolge konnte nicht gespeichert werden.', { level: 'error' });
+                return;
+            }
+            await this.loadCustomPages();
+            this.renderRoomList();
+        } catch (error) {
+            this.showToast(`Raum-Reihenfolge konnte nicht gespeichert werden: ${error.message}`, { level: 'error' });
+        }
+    }
+
+    async createRoomPage() {
+        const nameInput = document.getElementById('new-room-name');
+        const iconInput = document.getElementById('new-room-icon');
+        const name = (nameInput?.value || '').trim();
+        const icon = (iconInput?.value || 'layout-grid').trim() || 'layout-grid';
+        if (!name) {
+            this.showToast('Bitte einen Raumnamen eingeben.', { level: 'error' });
+            return;
+        }
+        try {
+            const response = await fetch('/api/pages', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, icon })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                this.showToast(data.error || 'Seite konnte nicht erstellt werden.', { level: 'error' });
+                return;
+            }
+            if (nameInput) nameInput.value = '';
+            if (iconInput) iconInput.value = '';
+            await this.loadCustomPages();
+            this.renderRoomList();
+            this.refreshPanelSettingsUI();
+            this.showToast(`Seite "${name}" erstellt.`, { level: 'success' });
+        } catch (error) {
+            this.showToast(`Seite konnte nicht erstellt werden: ${error.message}`, { level: 'error' });
+        }
+    }
+
+    async editRoomPage(pageId) {
+        const current = this.customPages?.[pageId];
+        if (!current) return;
+        const newName = prompt('Neuer Name für die Seite:', current.name || pageId);
+        if (newName === null) return;
+        const trimmedName = newName.trim();
+        if (!trimmedName) {
+            this.showToast('Name darf nicht leer sein.', { level: 'error' });
+            return;
+        }
+        const newIcon = prompt('Lucide-Icon (z. B. home, building, panel-left):', current.icon || 'layout-grid');
+        if (newIcon === null) return;
+        const trimmedIcon = (newIcon || '').trim() || 'layout-grid';
+        try {
+            const response = await fetch(`/api/pages/${encodeURIComponent(pageId)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: trimmedName, icon: trimmedIcon })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                this.showToast(data.error || 'Seite konnte nicht bearbeitet werden.', { level: 'error' });
+                return;
+            }
+            await this.loadCustomPages();
+            this.renderRoomList();
+            this.refreshPanelSettingsUI();
+            this.showToast(`Seite "${trimmedName}" aktualisiert.`, { level: 'success' });
+        } catch (error) {
+            this.showToast(`Seite konnte nicht bearbeitet werden: ${error.message}`, { level: 'error' });
+        }
+    }
+
+    async deleteRoomPage(pageId) {
+        if (!confirm(`Seite "${pageId}" wirklich löschen? Widgets werden auf Dashboard verschoben.`)) return;
+        try {
+            const response = await fetch(`/api/pages/${encodeURIComponent(pageId)}`, { method: 'DELETE' });
+            const data = await response.json();
+            if (!response.ok) {
+                this.showToast(data.error || 'Seite konnte nicht gelöscht werden.', { level: 'error' });
+                return;
+            }
+            await this.loadCustomPages();
+            this.renderRoomList();
+            this.refreshPanelSettingsUI();
+            const dynamicPage = document.getElementById(`${pageId}-page`);
+            if (dynamicPage) dynamicPage.remove();
+            if (this.currentPage === pageId) this.showPage('dashboard');
+            this.showToast(`Seite "${pageId}" gelöscht.`, { level: 'success' });
+        } catch (error) {
+            this.showToast(`Seite konnte nicht gelöscht werden: ${error.message}`, { level: 'error' });
+        }
     }
 
     async loadWidgetList() {
         try {
             const response = await fetch('/api/widgets');
             const data = await response.json();
-
-            this.renderWidgetList(data.widgets || {});
+            this._widgetStore = data.widgets || {};
+            this.renderWidgetList(this._widgetStore);
         } catch (error) {
             console.error('❌ Fehler beim Laden der Widgets:', error);
         }
@@ -5434,48 +5849,210 @@ class SmartHomeApp {
         const container = document.getElementById('widget-list');
         if (!container) return;
 
-        if (Object.keys(widgets).length === 0) {
+        const allWidgets = Object.entries(widgets || {}).map(([id, widget]) => ({ ...widget, id }));
+        if (allWidgets.length === 0) {
             container.innerHTML = '<p class="text-gray-500 dark:text-gray-400">Keine Widgets konfiguriert. Erstelle ein neues Widget!</p>';
             return;
         }
 
-        container.innerHTML = '';
+        const byPage = {};
+        allWidgets.forEach(widget => {
+            const page = widget.page || 'dashboard';
+            byPage[page] = byPage[page] || [];
+            byPage[page].push(widget);
+        });
 
-        for (const [id, widget] of Object.entries(widgets)) {
-            const card = document.createElement('div');
-            card.className = 'p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900';
+        const pages = ['dashboard', 'lighting', 'climate', 'energy', 'cameras', 'monitor', 'widgets'];
+        const extraPages = Object.keys(byPage).filter(page => !pages.includes(page)).sort();
+        const orderedPages = [...pages, ...extraPages];
+        const sortWidgets = (arr) => arr.sort((a, b) => {
+            const orderA = Number(a.position?.order ?? 9999);
+            const orderB = Number(b.position?.order ?? 9999);
+            if (orderA !== orderB) return orderA - orderB;
+            return (a.title || '').localeCompare(b.title || '');
+        });
 
-            const bindingsHtml = Object.entries(widget.bindings || {})
-                .map(([key, binding]) => `<div class="text-xs text-gray-500 dark:text-gray-400">
-                    <i data-lucide="link" class="w-3 h-3 inline"></i> ${key}: ${binding.variable} (${binding.plc_type})
-                </div>`)
-                .join('');
-
-            card.innerHTML = `
-                <div class="flex items-start justify-between">
-                    <div class="flex-1">
-                        <div class="flex items-center space-x-3 mb-2">
-                            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${widget.title}</h3>
-                            <span class="px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 rounded">${widget.type}</span>
-                            <span class="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded">${widget.page}</span>
+        container.innerHTML = orderedPages
+            .filter(page => Array.isArray(byPage[page]) && byPage[page].length > 0)
+            .map(page => {
+                const pageWidgets = sortWidgets(byPage[page]);
+                const itemsHtml = pageWidgets.map(widget => {
+                    const bindingsHtml = Object.entries(widget.bindings || {})
+                        .map(([key, binding]) => `<div class="text-xs text-gray-500 dark:text-gray-400">${this.escapeHtml(key)}: ${this.escapeHtml(binding.variable || '')} (${this.escapeHtml(binding.plc_type || '-')})</div>`)
+                        .join('');
+                    const locked = !!widget.config?.locked;
+                    const icon = widget.config?.icon || 'box';
+                    return `
+                        <div class="widget-list-item p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900"
+                             data-widget-id="${this.escapeHtml(widget.id)}"
+                             data-page="${this.escapeHtml(page)}"
+                             draggable="${locked ? 'false' : 'true'}">
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="flex items-start gap-3 min-w-0 flex-1">
+                                    <button class="widget-drag-handle p-2 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 ${locked ? 'opacity-40 cursor-not-allowed' : 'cursor-grab'}" title="${locked ? 'Fixiert' : 'Ziehen zum Sortieren'}">
+                                        <i data-lucide="grip-vertical" class="w-4 h-4"></i>
+                                    </button>
+                                    <div class="w-9 h-9 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 flex items-center justify-center">
+                                        <i data-lucide="${this.escapeHtml(icon)}" class="w-4 h-4"></i>
+                                    </div>
+                                    <div class="min-w-0 flex-1">
+                                        <div class="flex items-center flex-wrap gap-2 mb-1">
+                                            <h3 class="text-sm font-semibold text-gray-900 dark:text-white truncate">${this.escapeHtml(widget.title || widget.id)}</h3>
+                                            <span class="px-2 py-0.5 text-xs rounded bg-gray-200 dark:bg-gray-700">${this.escapeHtml(widget.type || '-')}</span>
+                                            ${locked ? '<span class="px-2 py-0.5 text-xs rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Fixiert</span>' : ''}
+                                        </div>
+                                        ${bindingsHtml || '<div class="text-xs text-gray-400">Keine Variablen verknüpft</div>'}
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-1">
+                                    <button class="widget-move-up-btn p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" data-widget-id="${this.escapeHtml(widget.id)}" title="Nach oben" ${locked ? 'disabled' : ''}>
+                                        <i data-lucide="arrow-up" class="w-4 h-4"></i>
+                                    </button>
+                                    <button class="widget-move-down-btn p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" data-widget-id="${this.escapeHtml(widget.id)}" title="Nach unten" ${locked ? 'disabled' : ''}>
+                                        <i data-lucide="arrow-down" class="w-4 h-4"></i>
+                                    </button>
+                                    <button class="widget-toggle-lock-btn p-2 text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/30 rounded" data-widget-id="${this.escapeHtml(widget.id)}" title="${locked ? 'Fixierung lösen' : 'Fixieren'}">
+                                        <i data-lucide="${locked ? 'lock' : 'unlock'}" class="w-4 h-4"></i>
+                                    </button>
+                                    <button class="widget-edit-btn p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded" data-widget-id="${this.escapeHtml(widget.id)}" title="Bearbeiten">
+                                        <i data-lucide="edit" class="w-4 h-4"></i>
+                                    </button>
+                                    <button class="widget-delete-config-btn p-2 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 rounded" data-widget-id="${this.escapeHtml(widget.id)}" title="Löschen">
+                                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                        ${bindingsHtml || '<div class="text-xs text-gray-400">Keine Variablen verknüpft</div>'}
-                    </div>
-                    <div class="flex items-center space-x-2">
-                        <button onclick="app.editWidget('${id}')" class="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded" title="Bearbeiten">
-                            <i data-lucide="edit" class="w-4 h-4"></i>
-                        </button>
-                        <button onclick="app.deleteWidget('${id}')" class="p-2 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 rounded" title="Löschen">
-                            <i data-lucide="trash-2" class="w-4 h-4"></i>
-                        </button>
-                    </div>
-                </div>
-            `;
+                    `;
+                }).join('');
 
-            container.appendChild(card);
+                return `
+                    <section class="widget-page-group mb-4" data-page="${this.escapeHtml(page)}">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase">${this.escapeHtml(page)}</h3>
+                            <span class="text-xs text-gray-500">${pageWidgets.length} Widgets</span>
+                        </div>
+                        <div class="widget-page-list space-y-2" data-page="${this.escapeHtml(page)}">${itemsHtml}</div>
+                    </section>
+                `;
+            }).join('');
+
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+        this.setupWidgetListInteractions();
+    }
+
+    setupWidgetListInteractions() {
+        const container = document.getElementById('widget-list');
+        if (!container) return;
+
+        let draggingId = null;
+
+        container.querySelectorAll('.widget-list-item').forEach(item => {
+            const widgetId = item.dataset.widgetId;
+            const locked = item.getAttribute('draggable') !== 'true';
+            if (!locked) {
+                item.addEventListener('dragstart', (e) => {
+                    draggingId = widgetId;
+                    item.classList.add('opacity-40');
+                    e.dataTransfer.effectAllowed = 'move';
+                });
+                item.addEventListener('dragend', () => {
+                    draggingId = null;
+                    item.classList.remove('opacity-40');
+                });
+            }
+        });
+
+        container.querySelectorAll('.widget-page-list').forEach(list => {
+            list.addEventListener('dragover', (e) => {
+                if (!draggingId) return;
+                e.preventDefault();
+            });
+            list.addEventListener('drop', async (e) => {
+                if (!draggingId) return;
+                e.preventDefault();
+                const targetItem = e.target.closest('.widget-list-item');
+                const draggedItem = container.querySelector(`.widget-list-item[data-widget-id="${draggingId}"]`);
+                if (!draggedItem || !targetItem || draggedItem === targetItem) return;
+                if (targetItem.getAttribute('draggable') !== 'true') return;
+                targetItem.parentNode.insertBefore(draggedItem, targetItem);
+                await this.persistWidgetOrderForPage(list.dataset.page);
+            });
+        });
+
+        container.querySelectorAll('.widget-edit-btn').forEach(btn => {
+            btn.addEventListener('click', () => this.editWidget(btn.dataset.widgetId));
+        });
+        container.querySelectorAll('.widget-delete-config-btn').forEach(btn => {
+            btn.addEventListener('click', () => this.deleteWidgetConfig(btn.dataset.widgetId));
+        });
+        container.querySelectorAll('.widget-move-up-btn').forEach(btn => {
+            btn.addEventListener('click', async () => this.moveWidgetByStep(btn.dataset.widgetId, -1));
+        });
+        container.querySelectorAll('.widget-move-down-btn').forEach(btn => {
+            btn.addEventListener('click', async () => this.moveWidgetByStep(btn.dataset.widgetId, 1));
+        });
+        container.querySelectorAll('.widget-toggle-lock-btn').forEach(btn => {
+            btn.addEventListener('click', async () => this.toggleWidgetLock(btn.dataset.widgetId));
+        });
+    }
+
+    async moveWidgetByStep(widgetId, delta) {
+        const item = document.querySelector(`.widget-list-item[data-widget-id="${widgetId}"]`);
+        if (!item) return;
+        const list = item.closest('.widget-page-list');
+        if (!list) return;
+
+        const items = Array.from(list.querySelectorAll('.widget-list-item'));
+        const index = items.indexOf(item);
+        const targetIndex = index + delta;
+        if (targetIndex < 0 || targetIndex >= items.length) return;
+        const target = items[targetIndex];
+        if (target.getAttribute('draggable') !== 'true') return;
+
+        if (delta < 0) {
+            list.insertBefore(item, target);
+        } else {
+            list.insertBefore(target, item);
         }
+        await this.persistWidgetOrderForPage(list.dataset.page);
+    }
 
-        lucide.createIcons();
+    async persistWidgetOrderForPage(page) {
+        const list = document.querySelector(`.widget-page-list[data-page="${page}"]`);
+        if (!list) return;
+        const items = Array.from(list.querySelectorAll('.widget-list-item'));
+        try {
+            const updates = items.map((item, index) => {
+                const widgetId = item.dataset.widgetId;
+                const current = this._widgetStore?.[widgetId] || {};
+                const position = { ...(current.position || {}), order: index };
+                return fetch(`/api/widgets/${widgetId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ position })
+                });
+            });
+            await Promise.all(updates);
+            await this.loadWidgetList();
+            await this.loadAndRenderWidgets(page);
+        } catch (error) {
+            console.error('Reihenfolge konnte nicht gespeichert werden:', error);
+            this.showToast('Reihenfolge konnte nicht gespeichert werden.', { level: 'error' });
+        }
+    }
+
+    async toggleWidgetLock(widgetId) {
+        const widget = this._widgetStore?.[widgetId];
+        if (!widget) return;
+        const config = { ...(widget.config || {}), locked: !widget.config?.locked };
+        await fetch(`/api/widgets/${widgetId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ config })
+        });
+        await this.loadWidgetList();
+        await this.loadAndRenderWidgets(widget.page || this.currentPage);
     }
 
     openWidgetEditor(widgetId = null) {
@@ -5485,10 +6062,21 @@ class SmartHomeApp {
         // Reset form
         document.getElementById('widget-form').reset();
         document.getElementById('widget-edit-id').value = widgetId || '';
+        this.refreshWidgetPageOptions('dashboard');
+        const iconInput = document.getElementById('widget-icon');
+        if (iconInput) iconInput.value = 'box';
+        const lockInput = document.getElementById('widget-locked');
+        if (lockInput) lockInput.checked = false;
+        this.updateWidgetIconPreview('box');
 
         if (widgetId) {
             // Load existing widget data
             this.loadWidgetForEdit(widgetId);
+        } else {
+            const switchConfigSection = document.getElementById('switch-config-section');
+            const pulseDurationContainer = document.getElementById('pulse-duration-container');
+            if (switchConfigSection) switchConfigSection.style.display = 'block';
+            if (pulseDurationContainer) pulseDurationContainer.style.display = 'none';
         }
 
         modal.classList.remove('hidden');
@@ -5503,7 +6091,11 @@ class SmartHomeApp {
             if (widget) {
                 document.getElementById('widget-title').value = widget.title;
                 document.getElementById('widget-type').value = widget.type;
+                this.refreshWidgetPageOptions(widget.page || 'dashboard');
                 document.getElementById('widget-page').value = widget.page;
+                document.getElementById('widget-icon').value = widget.config?.icon || 'box';
+                document.getElementById('widget-locked').checked = !!widget.config?.locked;
+                this.updateWidgetIconPreview(widget.config?.icon || 'box');
 
                 // Load bindings
                 if (widget.bindings && widget.bindings.value) {
@@ -5554,6 +6146,8 @@ class SmartHomeApp {
         const title = document.getElementById('widget-title').value;
         const type = document.getElementById('widget-type').value;
         const page = document.getElementById('widget-page').value;
+        const icon = (document.getElementById('widget-icon')?.value || 'box').trim() || 'box';
+        const locked = !!document.getElementById('widget-locked')?.checked;
 
         // Bindings
         const bindings = {};
@@ -5591,6 +6185,8 @@ class SmartHomeApp {
                 config.pulse_duration = pulseDuration;
             }
         }
+        config.icon = icon;
+        config.locked = locked;
 
         const widgetData = {
             title,
@@ -5599,6 +6195,11 @@ class SmartHomeApp {
             bindings,
             config
         };
+
+        if (widgetId) {
+            const current = this._widgetStore?.[widgetId] || {};
+            widgetData.position = current.position || {};
+        }
 
         try {
             let response;
@@ -5621,6 +6222,7 @@ class SmartHomeApp {
             if (response.ok) {
                 this.closeWidgetEditor();
                 await this.loadWidgetList();
+                await this.loadAndRenderWidgets(page);
             } else {
                 alert('Fehler beim Speichern');
             }
@@ -5630,11 +6232,38 @@ class SmartHomeApp {
         }
     }
 
+    async savePanelSettings() {
+        const select = document.getElementById('panel-start-page');
+        const kioskCheckbox = document.getElementById('panel-kiosk-default');
+        const defaultPage = select?.value || 'dashboard';
+        const kioskDefault = !!kioskCheckbox?.checked;
+        try {
+            const response = await fetch('/api/ui-settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ default_page: defaultPage, kiosk_default: kioskDefault })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                this.showToast(data.error || 'Panel-Einstellungen konnten nicht gespeichert werden.', { level: 'error' });
+                return;
+            }
+            this.uiSettings = {
+                default_page: data.default_page || defaultPage,
+                kiosk_default: !!data.kiosk_default
+            };
+            this.applyKioskMode(this.uiSettings.kiosk_default);
+            this.showToast('Panel-Einstellungen gespeichert.', { level: 'success' });
+        } catch (error) {
+            this.showToast(`Panel-Einstellungen konnten nicht gespeichert werden: ${error.message}`, { level: 'error' });
+        }
+    }
+
     async editWidget(widgetId) {
         this.openWidgetEditor(widgetId);
     }
 
-    async deleteWidget(widgetId) {
+    async deleteWidgetConfig(widgetId) {
         if (!confirm('Widget wirklich löschen?')) return;
 
         try {
@@ -5644,6 +6273,7 @@ class SmartHomeApp {
 
             if (response.ok) {
                 await this.loadWidgetList();
+                await this.loadAndRenderWidgets(this.currentPage);
             } else {
                 alert('Fehler beim Löschen');
             }
@@ -5651,6 +6281,38 @@ class SmartHomeApp {
             console.error('Fehler:', error);
             alert('Fehler beim Löschen');
         }
+    }
+
+    renderWidgetIconQuickpick() {
+        const container = document.getElementById('widget-icon-quickpick');
+        if (!container) return;
+        const icons = [
+            'lightbulb', 'power', 'toggle-left', 'thermometer', 'droplets',
+            'wind', 'zap', 'battery', 'gauge', 'activity',
+            'camera', 'shield', 'home', 'settings', 'box'
+        ];
+        container.innerHTML = icons.map(icon => `
+            <button type="button" class="widget-icon-pick-btn px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700" data-icon="${icon}">
+                <i data-lucide="${icon}" class="w-4 h-4 inline mr-1"></i>${icon}
+            </button>
+        `).join('');
+        container.querySelectorAll('.widget-icon-pick-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const icon = btn.dataset.icon || 'box';
+                const input = document.getElementById('widget-icon');
+                if (input) input.value = icon;
+                this.updateWidgetIconPreview(icon);
+            });
+        });
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    updateWidgetIconPreview(iconName) {
+        const preview = document.getElementById('widget-icon-preview');
+        if (!preview) return;
+        const safeIcon = this.escapeHtml(iconName || 'box');
+        preview.innerHTML = `<i data-lucide="${safeIcon}" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>`;
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
     async testVariableBinding() {
@@ -6048,9 +6710,9 @@ class SmartHomeApp {
 
     async loadAndRenderWidgets(pageName) {
         console.log(`🎨 Lade Widgets für Page: ${pageName}`);
+        this.ensureDynamicPage(pageName);
 
         try {
-            // Hole alle Widgets vom Server
             const response = await fetch('/api/widgets');
             if (!response.ok) {
                 console.error('Fehler beim Laden der Widgets:', response.status);
@@ -6058,48 +6720,37 @@ class SmartHomeApp {
             }
 
             const data = await response.json();
-            console.log('🔍 Server Response:', data);  // ⭐ v5.1.2 DEBUG
-
-            // Backend sendet: {"widgets": {...}} oder {"widgets": []}
-            // Konvertiere Object zu Array
             let widgets = [];
             if (data.widgets) {
                 if (Array.isArray(data.widgets)) {
                     widgets = data.widgets;
                 } else if (typeof data.widgets === 'object') {
-                    // Object zu Array konvertieren
                     widgets = Object.values(data.widgets);
                 }
             }
 
-            console.log(`📦 ${widgets.length} Widgets geladen`, widgets);
+            const pageWidgets = widgets
+                .filter(w => (w.page || 'dashboard') === pageName)
+                .sort((a, b) => {
+                    const orderA = Number(a.position?.order ?? 9999);
+                    const orderB = Number(b.position?.order ?? 9999);
+                    if (orderA !== orderB) return orderA - orderB;
+                    return (a.title || '').localeCompare(b.title || '');
+                });
 
-            // Filtere Widgets für diese Page
-            const pageWidgets = widgets.filter(w => w.page === pageName);
-            console.log(`🎯 ${pageWidgets.length} Widgets für ${pageName}`);
-
-            // Finde Container für Widgets
-            const container = document.getElementById(`${pageName}-page`);
+            const container = this.getDynamicWidgetContainer(pageName);
             if (!container) {
-                console.error(`Container #${pageName}-page nicht gefunden`);
+                console.error(`Widget-Container für ${pageName} nicht gefunden`);
                 return;
             }
 
-            // ⭐ v5.1.2: Container muss position: relative haben für absolute Widgets
-            if (window.getComputedStyle(container).position === 'static') {
-                container.style.position = 'relative';
-            }
-            // Mindesthöhe setzen damit Widgets Platz haben
-            container.style.minHeight = '600px';
-
-            // Entferne alte Widgets
             container.querySelectorAll('[data-widget-id]').forEach(w => w.remove());
 
-            // Rendere jedes Widget
             pageWidgets.forEach(widget => {
                 this.renderWidget(widget, container);
             });
 
+            this.setLegacyPageVisibility(pageName, pageWidgets.length === 0);
             console.log(`✅ ${pageWidgets.length} Widgets gerendert`);
 
         } catch (error) {
@@ -6107,24 +6758,40 @@ class SmartHomeApp {
         }
     }
 
-    renderWidget(widget, container) {
-        // Erstelle Widget-Element
-        const widgetEl = document.createElement('div');
-        widgetEl.className = 'widget bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg';
-        widgetEl.setAttribute('data-widget-id', widget.id);
-        widgetEl.style.position = 'absolute';
-        // ⭐ v5.1.2: Default-Position (50, 50) statt (0, 0) damit Widget sichtbar ist
-        widgetEl.style.left = (widget.position?.x || 50) + 'px';
-        widgetEl.style.top = (widget.position?.y || 50) + 'px';
-        widgetEl.style.minWidth = '200px';
-        widgetEl.style.cursor = 'move';
-        widgetEl.style.zIndex = '10';  // ⭐ v5.1.2: Über anderen Elementen
+    getDynamicWidgetContainer(pageName) {
+        let container = document.getElementById(`${pageName}-widgets-dynamic`);
+        if (container) return container;
+        const page = document.getElementById(`${pageName}-page`);
+        if (!page) return null;
+        container = document.createElement('div');
+        container.id = `${pageName}-widgets-dynamic`;
+        container.className = 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6';
+        page.insertBefore(container, page.firstChild.nextSibling);
+        return container;
+    }
 
-        // ⭐ v5.1.2: Variable-Binding Setup mit Feedback-Support
+    setLegacyPageVisibility(pageName, showLegacy) {
+        const page = document.getElementById(`${pageName}-page`);
+        if (!page) return;
+        page.querySelectorAll(`[data-legacy-page="${pageName}"]`).forEach(el => {
+            if (showLegacy) {
+                el.classList.remove('hidden');
+            } else {
+                el.classList.add('hidden');
+            }
+        });
+    }
+
+    renderWidget(widget, container) {
+        const icon = widget.config?.icon || 'box';
+        const locked = !!widget.config?.locked;
+        const widgetEl = document.createElement('div');
+        widgetEl.className = 'widget bg-white dark:bg-gray-800 p-4 rounded-lg shadow border border-gray-200 dark:border-gray-700';
+        widgetEl.setAttribute('data-widget-id', widget.id);
+        widgetEl.setAttribute('data-widget-type', widget.type || '');
+
         if (widget.bindings && widget.bindings.value && widget.bindings.value.variable && this.variableManager) {
             const plcId = widget.plc_id || 'plc_001';
-
-            // Für Switch-Widgets: Subscribe zu Feedback-Variable (falls vorhanden) oder Control-Variable
             const feedbackVar = widget.bindings.feedback?.variable;
             const controlVar = widget.bindings.value.variable;
             const subscribeVar = feedbackVar || controlVar;
@@ -6138,29 +6805,27 @@ class SmartHomeApp {
                 },
                 plcId
             );
-
-            if (feedbackVar) {
-                console.log(`📌 Widget ${widget.id} subscribed to FEEDBACK ${plcId}/${feedbackVar} (Control: ${controlVar})`);
-            } else {
-                console.log(`📌 Widget ${widget.id} subscribed to ${plcId}/${subscribeVar} (${widget.bindings.value.plc_type})`);
-            }
         }
 
-        // Widget-Typ spezifisches Rendering
+        const safeTitle = this.escapeHtml(widget.title || widget.id);
+        const safeVar = this.escapeHtml(widget.bindings?.value?.variable || 'Keine Variable');
+        const safeFeedback = this.escapeHtml(widget.bindings?.feedback?.variable || '');
+
         switch(widget.type) {
             case 'switch':
             case 'boolean':
-                // ⭐ v5.1.2: Switch-Widget mit Feedback-Support
                 const switchValue = widget.value || false;
-                const varName = widget.bindings?.value?.variable || 'Keine Variable';
-                const feedbackVar = widget.bindings?.feedback?.variable || null;
-                const switchMode = widget.config?.mode || 'toggle';  // 'toggle', 'pulse'
-                const pulseDuration = widget.config?.pulse_duration || 500;  // ms
+                const switchMode = widget.config?.mode || 'toggle';
+                const pulseDuration = widget.config?.pulse_duration || 500;
 
                 widgetEl.innerHTML = `
                     <div class="widget-header flex justify-between items-center mb-2">
-                        <h3 class="text-sm font-bold text-gray-900 dark:text-white">${widget.title}</h3>
-                        <button class="text-xs text-red-500 hover:text-red-700" onclick="app.deleteWidget('${widget.id}')">✕</button>
+                        <div class="flex items-center gap-2 min-w-0">
+                            <i data-lucide="${this.escapeHtml(icon)}" class="w-4 h-4 text-blue-500"></i>
+                            <h3 class="text-sm font-bold text-gray-900 dark:text-white truncate">${safeTitle}</h3>
+                            ${locked ? '<i data-lucide="lock" class="w-3.5 h-3.5 text-amber-500"></i>' : ''}
+                        </div>
+                        <button class="text-xs text-red-500 hover:text-red-700" onclick="app.deleteWidgetConfig('${widget.id}')">✕</button>
                     </div>
                     <div class="widget-body">
                         <div class="flex items-center space-x-3">
@@ -6174,8 +6839,8 @@ class SmartHomeApp {
                             </button>
                             <div class="flex-1">
                                 <div class="text-xs text-gray-600 dark:text-gray-400">
-                                    <div class="font-medium">Steuerung: ${varName}</div>
-                                    ${feedbackVar ? `<div class="text-xs text-gray-500 mt-1">Feedback: ${feedbackVar}</div>` : ''}
+                                    <div class="font-medium">Steuerung: ${safeVar}</div>
+                                    ${safeFeedback ? `<div class="text-xs text-gray-500 mt-1">Feedback: ${safeFeedback}</div>` : ''}
                                     ${switchMode === 'pulse' ? `<div class="text-xs text-blue-500 mt-1">⚡ Impulse (${pulseDuration}ms)</div>` : ''}
                                 </div>
                             </div>
@@ -6187,15 +6852,19 @@ class SmartHomeApp {
             case 'number':
                 widgetEl.innerHTML = `
                     <div class="widget-header flex justify-between items-center mb-2">
-                        <h3 class="text-sm font-bold text-gray-900 dark:text-white">${widget.title}</h3>
-                        <button class="text-xs text-red-500 hover:text-red-700" onclick="app.deleteWidget('${widget.id}')">✕</button>
+                        <div class="flex items-center gap-2 min-w-0">
+                            <i data-lucide="${this.escapeHtml(icon)}" class="w-4 h-4 text-blue-500"></i>
+                            <h3 class="text-sm font-bold text-gray-900 dark:text-white truncate">${safeTitle}</h3>
+                            ${locked ? '<i data-lucide="lock" class="w-3.5 h-3.5 text-amber-500"></i>' : ''}
+                        </div>
+                        <button class="text-xs text-red-500 hover:text-red-700" onclick="app.deleteWidgetConfig('${widget.id}')">✕</button>
                     </div>
                     <div class="widget-body">
                         <div class="text-3xl font-bold text-blue-600 dark:text-blue-400">
                             ${widget.value || 0}
                         </div>
                         <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            ${widget.variable || 'Keine Variable'}
+                            ${safeVar}
                         </div>
                     </div>
                 `;
@@ -6204,8 +6873,12 @@ class SmartHomeApp {
             case 'gauge':
                 widgetEl.innerHTML = `
                     <div class="widget-header flex justify-between items-center mb-2">
-                        <h3 class="text-sm font-bold text-gray-900 dark:text-white">${widget.title}</h3>
-                        <button class="text-xs text-red-500 hover:text-red-700" onclick="app.deleteWidget('${widget.id}')">✕</button>
+                        <div class="flex items-center gap-2 min-w-0">
+                            <i data-lucide="${this.escapeHtml(icon)}" class="w-4 h-4 text-blue-500"></i>
+                            <h3 class="text-sm font-bold text-gray-900 dark:text-white truncate">${safeTitle}</h3>
+                            ${locked ? '<i data-lucide="lock" class="w-3.5 h-3.5 text-amber-500"></i>' : ''}
+                        </div>
+                        <button class="text-xs text-red-500 hover:text-red-700" onclick="app.deleteWidgetConfig('${widget.id}')">✕</button>
                     </div>
                     <div class="widget-body">
                         <div class="w-24 h-24 mx-auto">
@@ -6217,7 +6890,7 @@ class SmartHomeApp {
                             </svg>
                         </div>
                         <div class="text-center mt-2 text-sm text-gray-600 dark:text-gray-400">
-                            ${widget.variable || 'Keine Variable'}
+                            ${safeVar}
                         </div>
                     </div>
                 `;
@@ -6226,19 +6899,24 @@ class SmartHomeApp {
             default:
                 widgetEl.innerHTML = `
                     <div class="widget-header flex justify-between items-center mb-2">
-                        <h3 class="text-sm font-bold text-gray-900 dark:text-white">${widget.title}</h3>
-                        <button class="text-xs text-red-500 hover:text-red-700" onclick="app.deleteWidget('${widget.id}')">✕</button>
+                        <div class="flex items-center gap-2 min-w-0">
+                            <i data-lucide="${this.escapeHtml(icon)}" class="w-4 h-4 text-blue-500"></i>
+                            <h3 class="text-sm font-bold text-gray-900 dark:text-white truncate">${safeTitle}</h3>
+                            ${locked ? '<i data-lucide="lock" class="w-3.5 h-3.5 text-amber-500"></i>' : ''}
+                        </div>
+                        <button class="text-xs text-red-500 hover:text-red-700" onclick="app.deleteWidgetConfig('${widget.id}')">✕</button>
                     </div>
                     <div class="widget-body">
                         <div class="text-xs text-gray-500">
-                            Typ: ${widget.type}<br>
-                            Variable: ${widget.variable || 'Keine'}
+                            Typ: ${this.escapeHtml(widget.type || '-')}<br>
+                            Variable: ${safeVar}
                         </div>
                     </div>
                 `;
         }
 
         container.appendChild(widgetEl);
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
     async deleteWidget(widgetId) {
@@ -6294,17 +6972,18 @@ class SmartHomeApp {
 
             // Update CSS Classes
             if (boolValue) {
-                toggleBtn.classList.remove('bg-gray-300');
+                toggleBtn.classList.remove('bg-gray-300', 'bg-gray-400', 'dark:bg-gray-600');
                 toggleBtn.classList.add('bg-green-500');
             } else {
                 toggleBtn.classList.remove('bg-green-500');
-                toggleBtn.classList.add('bg-gray-300');
+                toggleBtn.classList.add('bg-gray-400', 'dark:bg-gray-600');
             }
 
-            // Update Icon
-            const iconSpan = toggleBtn.querySelector('span');
-            if (iconSpan) {
-                iconSpan.textContent = boolValue ? '✓' : '✕';
+            // Update Label
+            const spans = toggleBtn.querySelectorAll('span');
+            if (spans[0]) spans[0].textContent = boolValue ? '●' : '○';
+            if (spans[1]) {
+                spans[1].textContent = boolValue ? 'ON' : 'OFF';
             }
 
             console.log(`🔄 Widget ${widgetId} updated: ${value}`);

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SmartHome OS v4.5.3 - Web-HMI Starter
+SmartHome OS v4.6.0 - Web-HMI Starter
 Startet das Web-Interface fuer iPhone/Tablet/Desktop
 
 Usage:
@@ -27,7 +27,7 @@ def main():
     args = parser.parse_args()
 
     # ========================================================================
-    # LOGGING SETUP (v4.5.3 + Sentry)
+    # LOGGING SETUP (v4.6.0 + Sentry)
     # ========================================================================
     from modules.core.database_logger import DatabaseLogger
 
@@ -55,7 +55,7 @@ def main():
         print(f"  [WARNING] Sentry-Initialisierung fehlgeschlagen: {e}")
 
     print("=" * 60)
-    print("SmartHome OS v4.5.3 - Web-HMI")
+    print("SmartHome OS v4.6.0 - Web-HMI")
     print("=" * 60)
     print()
 

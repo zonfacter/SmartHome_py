@@ -6,7 +6,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="mobile-web-app-capable" content="yes">
-    <title>SmartHome OS v4.5</title>
+    <title>SmartHome OS v4.6.0</title>
 
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🏠</text></svg>">
@@ -35,6 +35,15 @@
     <style>
         .page { display: none; }
         .page.active { display: block; }
+        body.kiosk-mode aside,
+        body.kiosk-mode header,
+        body.kiosk-mode nav.fixed.bottom-0 {
+            display: none !important;
+        }
+        body.kiosk-mode main {
+            margin-left: 0 !important;
+            padding-bottom: 0 !important;
+        }
     </style>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
@@ -51,7 +60,7 @@
                 </div>
                 <div>
                     <h1 class="text-lg font-bold text-gray-900 dark:text-white">SmartHome</h1>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">OS v4.5</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">OS v4.6.0</p>
                 </div>
             </div>
         </div>
@@ -98,6 +107,10 @@
                 <i data-lucide="shield" class="w-5 h-5"></i>
                 <span>Admin</span>
             </a>
+            <div class="pt-3 mt-2 border-t border-gray-200 dark:border-gray-700">
+                <p class="px-4 pb-2 text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Räume</p>
+                <div id="nav-dynamic-pages" class="space-y-1"></div>
+            </div>
         </nav>
 
         <!-- Footer -->
@@ -107,9 +120,17 @@
                     <div id="sidebar-status" class="w-2 h-2 rounded-full bg-gray-400"></div>
                     <span class="text-xs text-gray-600 dark:text-gray-400">Getrennt</span>
                 </div>
-                <button id="theme-toggle-sidebar" class="theme-toggle p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
-                    <i data-lucide="sun" class="w-4 h-4"></i>
-                </button>
+                <div class="flex items-center space-x-1">
+                    <button id="kiosk-toggle-sidebar" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700" title="Kiosk-Modus">
+                        <i data-lucide="panel-top-close" class="w-4 h-4"></i>
+                    </button>
+                    <button id="fullscreen-toggle-sidebar" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700" title="Vollbild">
+                        <i data-lucide="maximize" class="w-4 h-4"></i>
+                    </button>
+                    <button id="theme-toggle-sidebar" class="theme-toggle p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                        <i data-lucide="sun" class="w-4 h-4"></i>
+                    </button>
+                </div>
             </div>
         </div>
     </aside>
@@ -129,16 +150,26 @@
                     <i data-lucide="menu" class="w-6 h-6"></i>
                 </button>
                 <h2 id="page-title-mobile" class="font-semibold text-gray-900 dark:text-white">Dashboard</h2>
-                <button id="theme-toggle-mobile" class="theme-toggle p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
-                    <i data-lucide="sun" class="w-5 h-5"></i>
-                </button>
+                <div class="flex items-center space-x-1">
+                    <button id="kiosk-toggle-mobile" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700" title="Kiosk-Modus">
+                        <i data-lucide="panel-top-close" class="w-5 h-5"></i>
+                    </button>
+                    <button id="fullscreen-toggle-mobile" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700" title="Vollbild">
+                        <i data-lucide="maximize" class="w-5 h-5"></i>
+                    </button>
+                    <button id="theme-toggle-mobile" class="theme-toggle p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                        <i data-lucide="sun" class="w-5 h-5"></i>
+                    </button>
+                </div>
             </div>
         </header>
 
         <!-- Dashboard Page -->
         <div id="dashboard-page" class="page page-container active p-6">
             <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 hidden md:block">Dashboard</h1>
+            <div id="dashboard-widgets-dynamic" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6"></div>
 
+            <div data-legacy-page="dashboard">
             <!-- Stats Cards -->
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                 <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
@@ -200,29 +231,39 @@
                     </button>
                 </div>
             </div>
+            </div>
         </div>
 
         <!-- Lighting Page -->
         <div id="lighting-page" class="page page-container p-6">
             <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 hidden md:block">Beleuchtung</h1>
+            <div id="lighting-widgets-dynamic" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6"></div>
+            <div data-legacy-page="lighting">
             <div id="lighting-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <p class="text-gray-500">Lade Lichter...</p>
+            </div>
             </div>
         </div>
 
         <!-- Climate Page -->
         <div id="climate-page" class="page page-container p-6">
             <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 hidden md:block">Klima</h1>
+            <div id="climate-widgets-dynamic" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6"></div>
+            <div data-legacy-page="climate">
             <div id="climate-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <p class="text-gray-500">Lade Klimadaten...</p>
+            </div>
             </div>
         </div>
 
         <!-- Energy Page -->
         <div id="energy-page" class="page page-container p-6">
             <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 hidden md:block">Energie</h1>
+            <div id="energy-widgets-dynamic" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6"></div>
+            <div data-legacy-page="energy">
             <div id="energy-grid" class="space-y-4">
                 <p class="text-gray-500">Lade Energiedaten...</p>
+            </div>
             </div>
         </div>
 
@@ -1063,6 +1104,44 @@
                     <!-- Wird dynamisch gefüllt -->
                 </div>
             </div>
+
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Seiten / Räume</h2>
+                    <div class="flex items-center space-x-2">
+                        <input id="new-room-name" type="text" placeholder="z.B. EG Flur"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        <input id="new-room-icon" type="text" placeholder="Icon"
+                            class="w-28 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        <button id="add-room-btn" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                            <i data-lucide="plus" class="w-4 h-4 inline mr-1"></i> Seite
+                        </button>
+                    </div>
+                </div>
+                <div id="room-list" class="space-y-2"></div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Panel-Modus</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Startseite</label>
+                        <select id="panel-start-page"
+                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"></select>
+                    </div>
+                    <div class="flex items-end">
+                        <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                            <input id="panel-kiosk-default" type="checkbox" class="rounded">
+                            Kiosk standardmäßig aktiv
+                        </label>
+                    </div>
+                    <div class="flex items-end">
+                        <button id="save-panel-settings-btn" class="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
+                            <i data-lucide="save" class="w-4 h-4 inline mr-1"></i> Panel-Einstellungen speichern
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Widget Editor Modal (versteckt) -->
@@ -1097,6 +1176,18 @@
                         </div>
 
                         <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Icon</label>
+                            <div class="flex items-center space-x-2">
+                                <input type="text" id="widget-icon" placeholder="z.B. lightbulb"
+                                    class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                                <div id="widget-icon-preview" class="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+                                    <i data-lucide="box" class="w-5 h-5 text-gray-500"></i>
+                                </div>
+                            </div>
+                            <div id="widget-icon-quickpick" class="mt-2 flex flex-wrap gap-2"></div>
+                        </div>
+
+                        <div>
                             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Seite</label>
                             <select id="widget-page" required
                                 class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
@@ -1104,7 +1195,23 @@
                                 <option value="lighting">Beleuchtung</option>
                                 <option value="climate">Klima</option>
                                 <option value="energy">Energie</option>
+                                <option value="cameras">Kameras</option>
+                                <option value="monitor">Monitor</option>
+                                <option value="widgets">Widgets</option>
                             </select>
+                        </div>
+
+                        <div class="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
+                            <div>
+                                <p class="text-sm font-medium text-gray-800 dark:text-gray-200">Widget fixieren</p>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">Fixierte Widgets werden bei der Sortierung nicht verschoben.</p>
+                            </div>
+                            <label class="inline-flex items-center cursor-pointer">
+                                <input id="widget-locked" type="checkbox" class="sr-only peer">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:bg-blue-600 relative">
+                                    <span class="absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform peer-checked:translate-x-5"></span>
+                                </div>
+                            </label>
                         </div>
 
                         <!-- Variable Bindings Section -->

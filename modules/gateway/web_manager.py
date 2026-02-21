@@ -60,7 +60,7 @@ class WebManager(BaseModule):
     """
 
     NAME = "web_manager"
-    VERSION = "1.0.0"
+    VERSION = "1.1.0"
     DESCRIPTION = "Flask + SocketIO Web-HMI Server"
     AUTHOR = "TwinCAT Team"
     API_MAJOR_VERSION = "1"
@@ -1251,6 +1251,176 @@ class WebManager(BaseModule):
                 return jsonify({'success': True})
             else:
                 return jsonify({'error': 'Widget nicht gefunden'}), 404
+
+        @self.app.route('/api/pages', methods=['GET', 'POST'])
+        def handle_pages():
+            """Verwaltet dynamische Seiten/Räume für das Frontend."""
+            config_mgr = self.app_context.module_manager.get_module('config_manager')
+            if not config_mgr:
+                return jsonify({'error': 'Config Manager nicht verfügbar'}), 503
+
+            pages = config_mgr.get_config_value('pages', {})
+            if not isinstance(pages, dict):
+                pages = {}
+
+            if request.method == 'GET':
+                return jsonify({'pages': pages})
+
+            data = request.json or {}
+            name = str(data.get('name') or '').strip()
+            icon = str(data.get('icon') or 'layout-grid').strip() or 'layout-grid'
+            page_id_raw = str(data.get('id') or '').strip().lower()
+
+            if not name:
+                return jsonify({'error': 'Feld name erforderlich'}), 400
+
+            if page_id_raw:
+                page_id = ''.join(ch for ch in page_id_raw if ch.isalnum() or ch in ('-', '_'))
+            else:
+                base = ''.join(ch for ch in name.lower().replace(' ', '-') if ch.isalnum() or ch in ('-', '_'))
+                page_id = base or 'room'
+
+            if not page_id:
+                return jsonify({'error': 'Ungültige ID'}), 400
+            if page_id in ('dashboard', 'lighting', 'climate', 'energy', 'cameras', 'camera-wall', 'setup', 'widgets', 'monitor', 'admin'):
+                return jsonify({'error': 'Seiten-ID ist reserviert'}), 400
+            if page_id in pages:
+                return jsonify({'error': 'Seite existiert bereits'}), 409
+
+            pages[page_id] = {
+                'id': page_id,
+                'name': name,
+                'icon': icon,
+                'order': max([int((p or {}).get('order', -1)) for p in pages.values()] + [-1]) + 1,
+                'created': time.time(),
+                'modified': time.time()
+            }
+            config_mgr.set_config_value('pages', pages)
+            config_mgr.save_config()
+            return jsonify({'success': True, 'page': pages[page_id]}), 201
+
+        @self.app.route('/api/pages/reorder', methods=['POST'])
+        def reorder_pages():
+            """Persistiert die Reihenfolge dynamischer Seiten."""
+            config_mgr = self.app_context.module_manager.get_module('config_manager')
+            if not config_mgr:
+                return jsonify({'error': 'Config Manager nicht verfügbar'}), 503
+
+            data = request.json or {}
+            ordered_ids = data.get('ordered_ids', [])
+            if not isinstance(ordered_ids, list):
+                return jsonify({'error': 'ordered_ids muss eine Liste sein'}), 400
+
+            pages = config_mgr.get_config_value('pages', {})
+            if not isinstance(pages, dict):
+                pages = {}
+
+            seen = set()
+            normalized = []
+            for page_id in ordered_ids:
+                pid = str(page_id or '').strip()
+                if not pid or pid in seen:
+                    continue
+                if pid in pages:
+                    normalized.append(pid)
+                    seen.add(pid)
+
+            for pid in pages.keys():
+                if pid not in seen:
+                    normalized.append(pid)
+
+            now = time.time()
+            for idx, pid in enumerate(normalized):
+                pages[pid]['order'] = idx
+                pages[pid]['modified'] = now
+
+            config_mgr.set_config_value('pages', pages)
+            config_mgr.save_config()
+            return jsonify({'success': True, 'ordered_ids': normalized})
+
+        @self.app.route('/api/pages/<page_id>', methods=['PUT', 'DELETE'])
+        def update_delete_page(page_id):
+            """Aktualisiert/Löscht eine dynamische Seite."""
+            config_mgr = self.app_context.module_manager.get_module('config_manager')
+            if not config_mgr:
+                return jsonify({'error': 'Config Manager nicht verfügbar'}), 503
+
+            pages = config_mgr.get_config_value('pages', {})
+            if not isinstance(pages, dict):
+                pages = {}
+
+            if page_id not in pages:
+                return jsonify({'error': 'Seite nicht gefunden'}), 404
+
+            if request.method == 'DELETE':
+                widgets = config_mgr.get_config_value('widgets', {})
+                if isinstance(widgets, dict):
+                    for widget in widgets.values():
+                        if isinstance(widget, dict) and widget.get('page') == page_id:
+                            widget['page'] = 'dashboard'
+                            widget['modified'] = time.time()
+                    config_mgr.set_config_value('widgets', widgets)
+
+                del pages[page_id]
+                config_mgr.set_config_value('pages', pages)
+                config_mgr.save_config()
+                return jsonify({'success': True, 'reassigned_widgets_to': 'dashboard'})
+
+            data = request.json or {}
+            name = str(data.get('name') or pages[page_id].get('name') or '').strip()
+            icon = str(data.get('icon') or pages[page_id].get('icon') or 'layout-grid').strip() or 'layout-grid'
+            if not name:
+                return jsonify({'error': 'Feld name erforderlich'}), 400
+
+            pages[page_id].update({
+                'name': name,
+                'icon': icon,
+                'modified': time.time()
+            })
+            config_mgr.set_config_value('pages', pages)
+            config_mgr.save_config()
+            return jsonify({'success': True, 'page': pages[page_id]})
+
+        @self.app.route('/api/ui-settings', methods=['GET', 'PUT'])
+        def ui_settings():
+            """Persistente UI-Einstellungen (z. B. Startseite/Kiosk)."""
+            config_mgr = self.app_context.module_manager.get_module('config_manager')
+            if not config_mgr:
+                return jsonify({'error': 'Config Manager nicht verfügbar'}), 503
+
+            settings = config_mgr.get_config_value('ui_settings', {})
+            if not isinstance(settings, dict):
+                settings = {}
+
+            if request.method == 'GET':
+                return jsonify({
+                    'default_page': settings.get('default_page', 'dashboard'),
+                    'kiosk_default': bool(settings.get('kiosk_default', False))
+                })
+
+            data = request.json or {}
+            default_page = str(data.get('default_page') or settings.get('default_page') or 'dashboard').strip()
+            kiosk_default = bool(data.get('kiosk_default', settings.get('kiosk_default', False)))
+
+            pages = config_mgr.get_config_value('pages', {})
+            if not isinstance(pages, dict):
+                pages = {}
+            allowed_pages = {
+                'dashboard', 'lighting', 'climate', 'energy', 'cameras',
+                'camera-wall', 'setup', 'widgets', 'monitor', 'admin'
+            }
+            allowed_pages.update(pages.keys())
+            if default_page not in allowed_pages:
+                return jsonify({'error': 'Ungültige default_page'}), 400
+
+            new_settings = {
+                'default_page': default_page,
+                'kiosk_default': kiosk_default,
+                'modified': time.time()
+            }
+            config_mgr.set_config_value('ui_settings', new_settings)
+            config_mgr.save_config()
+            return jsonify({'success': True, **new_settings})
 
         @self.app.route('/api/debug/config', methods=['GET'])
         def debug_config():

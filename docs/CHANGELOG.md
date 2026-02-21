@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🚀 Added
 
+#### Räume/Seiten & Panel-Modus (UX)
+- **Neue API**: `GET/POST /api/pages`, `PUT/DELETE /api/pages/<page_id>`, `POST /api/pages/reorder`
+  - Persistente Raum-/Seitenverwaltung inkl. Sortierreihenfolge.
+  - Datei: `modules/gateway/web_manager.py`
+- **Neue API**: `GET/PUT /api/ui-settings`
+  - Persistente Panel-Einstellungen (`default_page`, `kiosk_default`).
+  - Datei: `modules/gateway/web_manager.py`
+- **Widgets-Seite erweitert**:
+  - Raumverwaltung (anlegen, bearbeiten, löschen, sortieren per Drag&Drop und Up/Down)
+  - Panel-Einstellungen (Startseite, Kiosk-Default)
+  - Dateien: `web/templates/index.html`, `web/static/js/app.js`
+- **Navigation erweitert**:
+  - Dynamische Raum-Navigation im Sidebar-Menü
+  - Dynamische Seitenerzeugung im Frontend für neue Räume
+  - Dateien: `web/templates/index.html`, `web/static/js/app.js`
+- **Kiosk-/Vollbild-Bedienung**:
+  - Vollbild-Button für Desktop/Mobile Header
+  - Kiosk-Mode-Toggle (UI-Chrome ausblendbar)
+  - Dateien: `web/templates/index.html`, `web/static/js/app.js`
+
 #### Ring Live Policy & Gateway-Parametrisierung
 - **Neue API**: `GET/POST /api/gateway/ring-live-settings`
   - Datei: `modules/gateway/web_manager.py`
@@ -55,6 +75,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Doppelter Start von RTSP-Streams beim Laden der Kameraseite entfernt.
 - Snapshot blendet Loading-Overlay unmittelbar nach erstem Bild aus.
   - Datei: `web/static/js/app.js`
+
+#### Widget-Editor UX
+- Widgets rendern in dedizierten dynamischen Seiten-Containern statt absolutem Overlay.
+- Widget-Liste gruppiert nach Seite inkl. persistenter Sortierung (`position.order`).
+- Lock/Fixieren pro Widget und Icon-Picker mit Live-Vorschau.
+- Legacy/hardcodierte Demo-Bereiche werden ausgeblendet, sobald echte Widgets für die Seite existieren.
+  - Dateien: `web/static/js/app.js`, `web/templates/index.html`
 
 #### Service-Start & Deployment
 - `web_server_ctl.sh` robuster beim PID-Matching (keine Fehl-Erkennung mehr).

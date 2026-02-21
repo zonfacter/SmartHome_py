@@ -71,6 +71,19 @@ Nur hier gelistete Endpunkte gelten als dokumentierter API-Stand.
 - `GET /api/camera-triggers/export`
 - `POST /api/camera-triggers/import`
 
+## Widgets / UI Layout
+- `GET /api/widgets`
+- `POST /api/widgets`
+- `PUT /api/widgets/<widget_id>`
+- `DELETE /api/widgets/<widget_id>`
+- `GET /api/pages`
+- `POST /api/pages`
+- `PUT /api/pages/<page_id>`
+- `DELETE /api/pages/<page_id>`
+- `POST /api/pages/reorder`
+- `GET /api/ui-settings`
+- `PUT /api/ui-settings`
+
 ## Admin
 - `GET /api/admin/plcs`
 - `POST /api/admin/plcs`
