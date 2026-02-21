@@ -20,6 +20,7 @@ Diese Dateien sind der verbindliche Stand fuer Betrieb, Integration und API:
 - `docs/13_feature_flags_rollout.md`
 - `docs/14_ux_notifications.md`
 - `docs/15_error_recovery_actions.md`
+- `docs/16_frontend_performance.md`
 - `docs/DOCKER_DEPLOYMENT.md`
 - `docs/STAGING_GATE.md`
 - `docs/SECURITY_INCIDENT_SENTRY_DSN.md`
