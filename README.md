@@ -39,6 +39,7 @@ Für den aktuellen produktiven Ablauf sind diese Dokumente die verbindliche Quel
 - `docs/09_module_boundaries_ownership.md`
 - `docs/10_blue_green_atomic_deployment.md`
 - `docs/11_caching_strategy.md`
+- `docs/12_config_migrations.md`
 - `docs/WEB_SETUP_ROUTING_ADS_GUIDE.md`
 - `docs/STAGING_GATE.md` (Release-Gates, Canary, Go/No-Go)
 - `docs/SECURITY_INCIDENT_SENTRY_DSN.md` (Incident-Runbook & Secret-Policy)
