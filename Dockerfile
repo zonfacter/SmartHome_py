@@ -9,9 +9,16 @@ WORKDIR /app
 RUN groupadd --system --gid 10001 smarthome \
     && useradd --system --uid 10001 --gid 10001 --create-home smarthome
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt /app/requirements.txt
+COPY package.json /app/package.json
+COPY package-lock.json /app/package-lock.json
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r /app/requirements.txt
+    && pip install --no-cache-dir -r /app/requirements.txt \
+    && npm ci --omit=dev --ignore-scripts
 
 COPY . /app
 
