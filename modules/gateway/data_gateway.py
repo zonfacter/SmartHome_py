@@ -1,10 +1,10 @@
 """
-Data Gateway Module v5.0.0
+Data Gateway Module v4.6.0
 Universal Data Router für alle Datenquellen
 
 📁 SPEICHERORT: modules/gateway/data_gateway.py
 
-Features v5.0:
+Features v4.6.0:
 - ⭐ Universal Data Router mit route_data()
 - ⭐ Routing-Engine mit deklarativen Regeln (routing.json)
 - ⭐ Spam-Protection & Circuit Breaker
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 class DataGateway(BaseModule):
     """
-    Data Gateway v5.0.0
+    Data Gateway v4.6.0
 
     Universal Data Router für alle Datenquellen:
     - ADS (TwinCAT PLC)
@@ -46,7 +46,7 @@ class DataGateway(BaseModule):
     - RS485/CAN
     - Plugins
 
-    Features v5.0:
+    Features v4.6.0:
     - Universal Data Router mit route_data()
     - Routing-Engine mit deklarativen Regeln
     - Spam-Protection & Circuit Breaker
@@ -57,7 +57,7 @@ class DataGateway(BaseModule):
     """
 
     NAME = "data_gateway"
-    VERSION = "5.0.0"
+    VERSION = "4.6.0"
     DESCRIPTION = "Universal Data Router für alle Datenquellen"
     AUTHOR = "TwinCAT Team"
     DEPENDENCIES = []  # Optionale Dependencies werden zur Laufzeit geprüft
@@ -138,13 +138,13 @@ class DataGateway(BaseModule):
         self.blob_cache_size = 0
         self.telemetry_cache = {}  # key -> value
 
-        # ⭐ v5.0: Routing-Engine
+        # ⭐ v4.6.0: Routing-Engine
         self.routing_engine = None
         self.routes = []
         self.subscribers = defaultdict(list)  # pattern -> [callbacks]
         self.dead_letter_queue = OrderedDict()  # dlq_id -> entry
 
-        # ⭐ v5.0: Spam-Protection
+        # ⭐ v4.6.0: Spam-Protection
         self.source_stats = defaultdict(lambda: {
             'packet_count': 0,
             'last_reset': time.time(),
@@ -254,7 +254,7 @@ class DataGateway(BaseModule):
         print(f"     📊 Telemetrie-Cache-Limit: {self.telemetry_cache_limit} (Prune-Batch: {self.telemetry_prune_batch})")
         print(f"     🔁 Poll-Variablen-Limit/Zyklus: {self.max_subscribed_variables_per_poll}")
 
-        # ⭐ v5.0: Lade Routing-Konfiguration
+        # ⭐ v4.6.0: Lade Routing-Konfiguration
         self._load_routing_config()
 
         # Synchronisiere Widget-Subscriptions (behebt UNKNOWN-Variablen)
@@ -286,7 +286,7 @@ class DataGateway(BaseModule):
         """Erstellt Standard routing.json Template"""
         default_config = {
             "version": "1.0",
-            "description": "Routing-Konfiguration für SmartHome Edge OS v5.0",
+            "description": "Routing-Konfiguration für SmartHome Edge OS v4.6.0",
             "routes": [
                 {
                     "id": "example_passthrough",
@@ -463,12 +463,12 @@ class DataGateway(BaseModule):
         return caps
 
     # ========================================================================
-    # ⭐ v5.0: UNIVERSAL DATA ROUTER
+    # ⭐ v4.6.0: UNIVERSAL DATA ROUTER
     # ========================================================================
 
     def route_data(self, source_id: str, tag: str, value: Any, metadata: Dict = None) -> bool:
         """
-        Universal Data Router - Herzstück des v5.0 Systems
+        Universal Data Router - Herzstück des v4.6.0 Systems
 
         Empfängt Datenpunkte von beliebigen Quellen und routet sie gemäß
         der Routing-Konfiguration (routing.json) an Ziele.
@@ -1490,7 +1490,7 @@ class DataGateway(BaseModule):
         }
 
     # ============================================================
-    # VARIABLE POLLING SYSTEM (v5.1.0)
+    # VARIABLE POLLING SYSTEM (v4.6.0)
     # ============================================================
 
     def start_variable_polling(self, variable_manager, socketio, poll_interval=0.5):
@@ -1734,7 +1734,7 @@ class DataGateway(BaseModule):
 
             # Schreibe zu PLC
             if self.plc and getattr(self.plc, 'connected', False):
-                # ⭐ v5.1.2: plc_type aus Symbol-Info verwenden
+                # ⭐ v4.6.0: plc_type aus Symbol-Info verwenden
                 plc_type = symbol_info.symbol_type
 
                 # Wenn type als String vorliegt, mappe zu pyads PLCTYPE Konstanten

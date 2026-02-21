@@ -1,4 +1,4 @@
-# Upgrade v4.5.0 → v4.5.3 - VOLLSTÄNDIG
+# Upgrade v4.5.0 → v4.6.0 - VOLLSTÄNDIG
 
 **Datum**: 04.01.2026
 **Status**: ✅ ALLE FEATURES IMPLEMENTIERT
@@ -267,7 +267,7 @@ start_web_hmi.py                      (+18 Zeilen)
 
 ---
 
-## 🔧 Migration von v4.5.0 → v4.5.3
+## 🔧 Migration von v4.5.0 → v4.6.0
 
 ### Automatisch (kein Action erforderlich)
 - ✅ DatabaseLogger wird automatisch beim Start initialisiert

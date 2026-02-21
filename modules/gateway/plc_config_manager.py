@@ -1,10 +1,10 @@
 """
-PLC Configuration Manager v5.0.8
+PLC Configuration Manager v4.6.0.8
 Verwaltet mehrere PLC-Konfigurationen, TPY-Dateien und das HMI-Layout.
 
 📁 SPEICHERORT: modules/gateway/plc_config_manager.py
 
-Änderungen v5.0.8:
+Änderungen v4.6.0.8:
 - ✅ Fix: Absolute Pfadsicherheit durch __file__ Referenz (behebt NoneType Error auf Host-Systemen)
 - ✅ Vollständige Implementierung aller Management-Methoden (add, update, delete, get)
 - ✅ Robuste JSON-Handling Logik für HMI-Widgets und TPY-Dateien

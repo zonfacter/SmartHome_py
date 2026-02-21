@@ -1,10 +1,10 @@
 """
-PLC Connection Module v5.0.0
+PLC Connection Module v4.6.0
 Multi-Instance PLC-Verbindung für Connection Manager
 
 📁 SPEICHERORT: modules/core/plc_connection.py
 
-Features v5.0:
+Features v4.6.0:
 - ⭐ Multi-Instance Support (mehrere PLCs parallel)
 - ⭐ Integration mit Connection Manager
 - ⭐ BaseConnection Interface
@@ -39,7 +39,7 @@ except ImportError:
 
 class PLCConnection(BaseConnection):
     """
-    PLC Connection v5.0.0
+    PLC Connection v4.6.0
 
     Implementiert BaseConnection für TwinCAT/ADS-Verbindungen.
     Unterstützt mehrere parallele PLC-Verbindungen über Connection Manager.

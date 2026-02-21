@@ -1,4 +1,4 @@
-# Critical Fixes v5.1.2 - Widget Display & Variable Binding
+# Critical Fixes v4.6.0 - Widget Display & Variable Binding
 
 **Datum:** 11. Januar 2026
 **Status:** ✅ **3 CRITICAL BUGS FIXED**
@@ -234,13 +234,13 @@ console.log('Frontend Stats:', app.variableManager.getStatistics());
 
 ## 📊 Impact
 
-### Vorher (v5.1.1)
+### Vorher (v4.6.0)
 - 🔴 Widgets werden nicht angezeigt (außer auf Dashboard)
 - 🔴 Variable Binding funktioniert nicht (falsches Feld)
 - 🔴 PUT Endpoint 405 Error
 - 🟠 UDINT angezeigt statt BOOL
 
-### Nachher (v5.1.2)
+### Nachher (v4.6.0)
 - ✅ Widgets erscheinen auf allen Pages
 - ✅ Variable Binding funktioniert
 - ✅ PUT Endpoint verfügbar
@@ -262,14 +262,14 @@ Nach Browser-Reload prüfen:
 
 ## 📚 Vollständige Dokumentation
 
-- **v5.1.1 Fixes:** `FIXES_v5_1_1.md`
+- **v4.6.0 Fixes:** `FIXES_v5_1_1.md`
 - **Variable Manager:** `VARIABLE_MANAGER_FINAL.md`
 - **Test-Examples:** `TEST_WIDGET_EXAMPLE.md`
 
 ---
 
 **Status:** ✅ **READY FOR TESTING!**
-**Version:** v5.1.2
+**Version:** v4.6.0
 **Erstellt:** 11. Januar 2026
 
 🎉 **Widgets funktionieren jetzt auf allen Pages!**

@@ -523,4 +523,4 @@ python main.py
 **Version**: 1.0.0
 **Autor**: TwinCAT Team
 **Lizenz**: MIT
-**Min. OS Version**: 5.0.0
+**Min. OS Version**: 4.6.0

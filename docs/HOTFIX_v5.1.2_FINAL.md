@@ -1,6 +1,6 @@
-# 🔧 Hotfix v5.1.2 - FINAL - Alle Routen funktional
+# 🔧 Hotfix v4.6.0 - FINAL - Alle Routen funktional
 
-## Probleme behoben (v5.1.1 → v5.1.2)
+## Probleme behoben (v4.6.0 → v4.6.0)
 
 ### 1. ❌ `/api/widgets` (POST) - 405 Method Not Allowed
 **Problem:** Route akzeptierte nur GET, Frontend brauchte POST zum Widget-Erstellen
@@ -51,7 +51,7 @@ if not self.plc_config_manager:
 
 ---
 
-## 📋 Vollständige API-Routen-Liste (v5.1.2)
+## 📋 Vollständige API-Routen-Liste (v4.6.0)
 
 | # | Route | Methods | Status | Beschreibung |
 |---|-------|---------|--------|--------------|
@@ -178,9 +178,9 @@ python start_web_hmi.py
 
 ---
 
-## 📊 Vergleich v5.1.1 → v5.1.2
+## 📊 Vergleich v4.6.0 → v4.6.0
 
-| Metrik | v5.1.1 | v5.1.2 |
+| Metrik | v4.6.0 | v4.6.0 |
 |--------|--------|--------|
 | API-Routen | 14 | 16 |
 | 404-Fehler | 3 | 0 ✅ |
@@ -195,18 +195,18 @@ python start_web_hmi.py
 
 ## 🎯 Status: PRODUCTION READY
 
-**Version:** v5.1.2 FINAL
+**Version:** v4.6.0 FINAL
 **Datum:** 2026-01-06 19:15
 **Zeilen Code:** ~650
 **API-Routen:** 16/16 funktional
 
-### ✅ Behält alle v5.1.0 Features:
+### ✅ Behält alle v4.6.0 Features:
 - Race-Condition-Fix
 - Umfangreiches Logging (Console + SQLite + Sentry)
 - Sentry Error-Tracking
 - Detailliertes API-Logging
 
-### ✅ Behebt alle v5.1.1 Probleme:
+### ✅ Behebt alle v4.6.0 Probleme:
 - TPY-Upload funktioniert
 - Widget-Erstellung funktioniert
 - Latenz-Messung funktioniert
@@ -223,12 +223,12 @@ python start_web_hmi.py
 python start_web_hmi.py
 
 # 2. Erwartete Console-Ausgabe:
-=== Web Manager v5.1.0 Initialisierung START ===
+=== Web Manager v4.6.0 Initialisierung START ===
 Pfade initialisiert: root=..., config=..., data=...
 PLCConfigManager bereit: config_file=...
 Flask App bereit
 [OK] web_manager v1.0.0 initialisiert
-=== Web Manager v5.1.0 Initialisierung ABGESCHLOSSEN ===
+=== Web Manager v4.6.0 Initialisierung ABGESCHLOSSEN ===
 
 ▶️  Web-Server startet auf http://0.0.0.0:5000
 
@@ -242,7 +242,7 @@ Flask App bereit
 
 ## 📝 Change Log
 
-### v5.1.2 (2026-01-06 19:15) - FINAL
+### v4.6.0 (2026-01-06 19:15) - FINAL
 - ✅ **NEU:** `/api/plc/symbols/upload` - TPY-Datei-Upload
 - ✅ **NEU:** `/api/monitor/latency` - Latenz-Messung
 - ✅ **FIX:** `/api/widgets` unterstützt POST-Method
@@ -250,11 +250,11 @@ Flask App bereit
 - ✅ Improved Error-Handling in allen Routen
 - ✅ Logging für alle Upload/Create-Operationen
 
-### v5.1.1 (2026-01-06 18:50) - Hotfix
+### v4.6.0 (2026-01-06 18:50) - Hotfix
 - ✅ 9 fehlende API-Routen wiederhergestellt
 - ✅ Behoben: 404-Fehler für Telemetry, Dependencies, etc.
 
-### v5.1.0 (2026-01-06 18:00)
+### v4.6.0 (2026-01-06 18:00)
 - ✅ Race-Condition-Fix
 - ✅ Logging-System (Console + SQLite + Sentry)
 - ❌ API-Routen zu stark vereinfacht (BEHOBEN)

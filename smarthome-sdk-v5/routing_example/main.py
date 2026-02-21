@@ -1,6 +1,6 @@
 """
 Routing Example Plugin v1.0
-Demonstriert die Nutzung des Universal Data Routers (v5.0)
+Demonstriert die Nutzung des Universal Data Routers (v4.6.0)
 
 Features:
 - Publizieren von Daten via route_data()

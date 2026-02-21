@@ -1,8 +1,8 @@
-# 🔧 Hotfix v5.1.1 - API-Routen wiederhergestellt
+# 🔧 Hotfix v4.6.0 - API-Routen wiederhergestellt
 
 ## Problem
 
-Nach dem v5.1.0 Fix waren **die meisten API-Routen entfernt**, was zu 404-Fehlern im Frontend führte:
+Nach dem v4.6.0 Fix waren **die meisten API-Routen entfernt**, was zu 404-Fehlern im Frontend führte:
 
 ```
 Failed to load resource: the server responded with a status of 404 (NOT FOUND)
@@ -18,7 +18,7 @@ Failed to load resource: the server responded with a status of 404 (NOT FOUND)
 
 ## Lösung
 
-Alle fehlenden API-Routen wurden wiederhergestellt, **MIT Beibehaltung des v5.1.0 Fixes**:
+Alle fehlenden API-Routen wurden wiederhergestellt, **MIT Beibehaltung des v4.6.0 Fixes**:
 - ✅ Race-Condition-Fix bleibt aktiv
 - ✅ Logging-System bleibt intakt
 - ✅ Sentry-Integration bleibt aktiv
@@ -26,7 +26,7 @@ Alle fehlenden API-Routen wurden wiederhergestellt, **MIT Beibehaltung des v5.1.
 
 ---
 
-## 📋 Wiederhergestellte API-Routen (v5.1.1)
+## 📋 Wiederhergestellte API-Routen (v4.6.0)
 
 | Route | Method | Beschreibung | Frontend-Page |
 |-------|--------|--------------|---------------|
@@ -102,7 +102,7 @@ http://localhost:5000
 ### ✅ Setup-Page
 - PLC-Connect-Button funktioniert
 - Abhängigkeiten werden geprüft
-- Setup-Button speichert Config (mit v5.1.0 Fix)
+- Setup-Button speichert Config (mit v4.6.0 Fix)
 
 ### ✅ Admin-Page
 - Zeigt alle PLCs an
@@ -116,9 +116,9 @@ http://localhost:5000
 
 ---
 
-## 🔧 Vergleich v5.1.0 → v5.1.1
+## 🔧 Vergleich v4.6.0 → v4.6.0
 
-| Feature | v5.1.0 | v5.1.1 |
+| Feature | v4.6.0 | v4.6.0 |
 |---------|--------|--------|
 | Race-Condition-Fix | ✅ | ✅ |
 | Logging-System | ✅ | ✅ |
@@ -142,7 +142,7 @@ Die aktualisierte `web_manager.py` ist **production ready**:
 
 **Wichtig:** Die Datei ist nun eine **optimierte Hybrid-Version**:
 - Enthält alle essentiellen API-Routen für Frontend
-- Behält v5.1.0 Race-Condition-Fix
+- Behält v4.6.0 Race-Condition-Fix
 - Behält Logging & Sentry
 - Entfernt: Nur Legacy-/Duplizierte Routen
 
@@ -150,16 +150,16 @@ Die aktualisierte `web_manager.py` ist **production ready**:
 
 ## 📝 Change Log
 
-### v5.1.1 (2026-01-06 - Hotfix)
+### v4.6.0 (2026-01-06 - Hotfix)
 - ✅ **Wiederhergestellt:** 9 fehlende API-Routen
 - ✅ **Behoben:** 404-Fehler im Frontend
-- ✅ **Beibehalten:** Alle v5.1.0 Fixes & Logging
+- ✅ **Beibehalten:** Alle v4.6.0 Fixes & Logging
 
-### v5.1.0 (2026-01-06)
+### v4.6.0 (2026-01-06)
 - ✅ Race-Condition-Fix
 - ✅ Umfangreiches Logging-System
 - ✅ Sentry-Integration
-- ❌ API-Routen zu stark vereinfacht (BEHOBEN in v5.1.1)
+- ❌ API-Routen zu stark vereinfacht (BEHOBEN in v4.6.0)
 
 ### v1.0.0 (Original)
 - ⚠️ Race-Condition vorhanden
@@ -170,7 +170,7 @@ Die aktualisierte `web_manager.py` ist **production ready**:
 
 ## ✅ Status
 
-**v5.1.1 ist die empfohlene Production-Version:**
+**v4.6.0 ist die empfohlene Production-Version:**
 - ✅ Race-Condition behoben
 - ✅ Logging vollständig
 - ✅ API vollständig funktional
@@ -201,4 +201,4 @@ Bei Problemen:
 3. Prüfe `config/system_logs.db`
 4. Prüfe Sentry Dashboard
 
-**Version:** v5.1.1 (2026-01-06 18:50)
+**Version:** v4.6.0 (2026-01-06 18:50)

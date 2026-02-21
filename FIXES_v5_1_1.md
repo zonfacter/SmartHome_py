@@ -1,4 +1,4 @@
-# Critical Fixes v5.1.1 - COMPLETE
+# Critical Fixes v4.6.0 - COMPLETE
 
 **Datum:** 11. Januar 2026 10:00 Uhr
 **Status:** ✅ **5 CRITICAL BUGS FIXED**
@@ -134,7 +134,7 @@ http://localhost:5000
 const w = {
     id: 'test_v511',
     type: 'boolean',
-    title: 'v5.1.1 Test',
+    title: 'v4.6.0 Test',
     variable: 'Light.Light_EG_WZ.bOn',
     position: {x: 50, y: 50}
 };
@@ -181,14 +181,14 @@ fetch('/api/variables/statistics')
 
 ## 📊 Impact
 
-### Vorher (v5.1.0)
+### Vorher (v4.6.0)
 - 🔴 Server crasht endlos (Polling-Thread)
 - 🔴 Keine Symbole registriert (dict-Fehler)
 - 🔴 Frontend crasht (TypeError)
 - 🔴 Polling schlägt fehl (Connection-Check)
 - 🟠 API-Mismatch (Backend ↔ Frontend)
 
-### Nachher (v5.1.1)
+### Nachher (v4.6.0)
 - ✅ Server läuft stabil
 - ✅ 1769 Symbole registriert
 - ✅ Frontend rendert Widgets
@@ -217,7 +217,7 @@ Nach Server-Neustart prüfen:
 ---
 
 **Status:** ✅ **READY FOR TESTING!**
-**Version:** v5.1.1
+**Version:** v4.6.0
 **Erstellt:** 11. Januar 2026 10:00 Uhr
 
 🎉 **Alle kritischen Fehler behoben - Server neu starten!**

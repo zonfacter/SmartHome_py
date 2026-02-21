@@ -1,7 +1,7 @@
-# SmartHome Edge OS v5.0 - Roadmap Status Report
+# SmartHome Edge OS v4.6.0 - Roadmap Status Report
 
 **Datum:** 2026-01-05
-**Version:** v5.0.0
+**Version:** v4.6.0
 **Prüfungsumfang:** Phase 4.3 bis Phase 10
 
 ---

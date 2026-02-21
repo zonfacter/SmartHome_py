@@ -651,7 +651,7 @@ else:
 
 **Current Status**: No authentication (local network only)
 
-**Planned (v5.0)**:
+**Planned (v4.6.0)**:
 - OAuth2/JWT token-based auth
 - Role-based access control (Admin/Operator/Viewer)
 - API key management for external integrations
@@ -891,7 +891,7 @@ server {
 - Better scalability
 - Plugin hot-reload without restart
 
-#### 2. Microservices Architecture (v5.0)
+#### 2. Microservices Architecture (v4.6.0)
 
 ```
 ┌────────────┐  ┌────────────┐  ┌────────────┐

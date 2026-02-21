@@ -158,5 +158,5 @@ GET    /api/widgets/values                - Live-Werte aller gebundenen Variable
 
 **Autor**: Claude Sonnet 4.5
 **Datum**: 04.01.2026
-**Version**: SmartHome OS v4.5
+**Version**: SmartHome OS v4.6.0
 **Platform**: Windows 11, Python 3.13

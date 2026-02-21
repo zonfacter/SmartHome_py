@@ -1,6 +1,6 @@
-# 🔧 Hotfix v5.1.4 - Feature-Fixes (FFmpeg, TPY-Parsing, Symbol-Count)
+# 🔧 Hotfix v4.6.0 - Feature-Fixes (FFmpeg, TPY-Parsing, Symbol-Count)
 
-## Probleme behoben (v5.1.3 → v5.1.4)
+## Probleme behoben (v4.6.0 → v4.6.0)
 
 ### 1. ✅ FFmpeg nicht erkannt
 **Problem:** Frontend zeigte "FFmpeg ✗ Nicht installiert", obwohl FFmpeg vorhanden war
@@ -175,7 +175,7 @@ def handle_admin_plcs():
 
 ## Vergleich: Vorher vs. Jetzt
 
-### Frontend Console (Vorher - v5.1.3):
+### Frontend Console (Vorher - v4.6.0):
 ```javascript
 app.js:1090 ✓ undefined Symbole geladen        // ❌ undefined
 app.js:1365 ✅ undefined Symbole geladen        // ❌ undefined
@@ -186,7 +186,7 @@ FFmpeg (Streams)
 ✗ Nicht installiert                              // ❌ Falsch!
 ```
 
-### Frontend Console (Jetzt - v5.1.4):
+### Frontend Console (Jetzt - v4.6.0):
 ```javascript
 app.js:1090 ✓ 128 Symbole geladen               // ✅ Korrekt!
 app.js:1365 ✅ 42 Symbole geladen                // ✅ Korrekt!
@@ -324,7 +324,7 @@ python start_web_hmi.py
 | Datei | Änderungen | Zeilen geändert |
 |-------|-----------|-----------------|
 | `modules/gateway/web_manager.py` | FFmpeg-Check + TPY-Parsing + Symbol-Count + POST-Support | ~80 Zeilen |
-| `HOTFIX_v5.1.4_FEATURES.md` | **NEU** - Diese Dokumentation | - |
+| `HOTFIX_v4.6.0_FEATURES.md` | **NEU** - Diese Dokumentation | - |
 
 ---
 
@@ -332,7 +332,7 @@ python start_web_hmi.py
 
 ### ⚠️ `/api/plc/symbols` - Response-Format geändert
 
-**Vorher (v5.1.3):**
+**Vorher (v4.6.0):**
 ```json
 [
   {"name": "MAIN.counter", "type": "INT"},
@@ -340,7 +340,7 @@ python start_web_hmi.py
 ]
 ```
 
-**Jetzt (v5.1.4):**
+**Jetzt (v4.6.0):**
 ```json
 {
   "symbols": [
@@ -366,7 +366,7 @@ const count = response.count || symbols.length;
 
 ### ✅ `/api/plc/symbols/upload` - Neue Response-Properties
 
-**Vorher (v5.1.2):**
+**Vorher (v4.6.0):**
 ```json
 {
   "success": true,
@@ -376,7 +376,7 @@ const count = response.count || symbols.length;
 }
 ```
 
-**Jetzt (v5.1.4):**
+**Jetzt (v4.6.0):**
 ```json
 {
   "success": true,
@@ -391,7 +391,7 @@ const count = response.count || symbols.length;
 
 ### ✅ `/api/system/dependencies` - Neue FFmpeg-Property
 
-**Vorher (v5.1.3):**
+**Vorher (v4.6.0):**
 ```json
 {
   "pyads": {"available": true, "description": "PLC-Kommunikation"},
@@ -399,7 +399,7 @@ const count = response.count || symbols.length;
 }
 ```
 
-**Jetzt (v5.1.4):**
+**Jetzt (v4.6.0):**
 ```json
 {
   "pyads": {"available": true, "description": "PLC-Kommunikation"},
@@ -418,7 +418,7 @@ const count = response.count || symbols.length;
 
 ## Change Log
 
-### v5.1.4 (2026-01-06 21:50) - Feature-Fixes
+### v4.6.0 (2026-01-06 21:50) - Feature-Fixes
 - ✅ **NEU:** FFmpeg-Detection in `/api/system/dependencies`
 - ✅ **NEU:** TPY-Parsing mit XML-Support (Symbol-Count)
 - ✅ **FIX:** `/api/plc/symbols` gibt jetzt `count` zurück
@@ -426,19 +426,19 @@ const count = response.count || symbols.length;
 - ✅ Logging für alle Symbol-Operationen
 - ⚠️ **BREAKING:** `/api/plc/symbols` Response-Format geändert (Array → Objekt)
 
-### v5.1.3 (2026-01-06 20:00)
+### v4.6.0 (2026-01-06 20:00)
 - ✅ ConfigManager Race-Condition behoben
 - ✅ Unicode-Encoding behoben
 
-### v5.1.2 (2026-01-06 19:15)
+### v4.6.0 (2026-01-06 19:15)
 - ✅ TPY-Upload-Route hinzugefügt (ohne Parsing)
 - ✅ Widget POST-Support
 - ✅ Latenz-Messung
 
-### v5.1.1 (2026-01-06 18:50)
+### v4.6.0 (2026-01-06 18:50)
 - ✅ 9 fehlende API-Routen wiederhergestellt
 
-### v5.1.0 (2026-01-06 18:00)
+### v4.6.0 (2026-01-06 18:00)
 - ✅ PLCConfigManager Race-Condition behoben
 - ✅ Sentry-Integration
 
@@ -446,7 +446,7 @@ const count = response.count || symbols.length;
 
 ## Status: PRODUCTION READY ✅
 
-**Version:** v5.1.4 (2026-01-06 21:50)
+**Version:** v4.6.0 (2026-01-06 21:50)
 **Kritikalität:** MEDIUM (Feature-Enhancements)
 **Deployment:** PRODUCTION READY
 
@@ -471,4 +471,4 @@ Bei Problemen:
 3. Prüfe `config/system_logs.db`
 4. Teste API-Endpoints mit curl/Postman
 
-**Version:** v5.1.4 FINAL (2026-01-06 21:50)
+**Version:** v4.6.0 FINAL (2026-01-06 21:50)

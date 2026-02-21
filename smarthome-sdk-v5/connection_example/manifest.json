@@ -6,7 +6,7 @@
   "description": "Zeigt wie man eigene Verbindungstypen (Hardware) erstellt und in den Connection Manager integriert.",
   "category": "Examples",
   "icon": "wifi",
-  "min_os_version": "5.0.0",
+  "min_os_version": "4.6.0",
   "dependencies": [],
   "config_schema": {
     "host": "string",

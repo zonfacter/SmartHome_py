@@ -1,6 +1,6 @@
 """
 Test-Script für Logging-System (SQLite + Sentry)
-Testet alle Logging-Komponenten des v5.1.0 Fixes
+Testet alle Logging-Komponenten des v4.6.0 Fixes
 """
 
 import os
@@ -250,7 +250,7 @@ def test_plc_config_manager_logging():
 def main():
     """Führt alle Logging-Tests aus"""
     print("\n" + "=" * 60)
-    print("LOGGING SYSTEM TEST SUITE v5.1.0")
+    print("LOGGING SYSTEM TEST SUITE v4.6.0")
     print("=" * 60 + "\n")
 
     results = []

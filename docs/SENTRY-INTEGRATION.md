@@ -1,6 +1,6 @@
 # Sentry Error-Tracking Integration
 
-**Version:** v5.0.0
+**Version:** v4.6.0
 **Status:** Implementiert (Phase 9)
 
 ---

@@ -254,7 +254,7 @@ class ConfigManager(BaseModule):
                 'runtime_type': 'TC3'
             },
             'custom_lights': {},
-            'widgets': {},  # ⭐ v5.1.2: Widget-Section hinzugefügt
+            'widgets': {},  # ⭐ v4.6.0: Widget-Section hinzugefügt
             'created': datetime.now().isoformat()
         }
 

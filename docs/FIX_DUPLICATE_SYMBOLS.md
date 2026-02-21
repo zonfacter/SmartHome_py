@@ -1,7 +1,7 @@
-# Fix: Intelligente Duplikat-Entfernung v5.1.1
+# Fix: Intelligente Duplikat-Entfernung v4.6.0
 
 **Datum:** 10. Januar 2026
-**Version:** symbol_browser.py v5.1.1
+**Version:** symbol_browser.py v4.6.0
 **Status:** ✅ IMPLEMENTIERT
 
 ---
@@ -31,7 +31,7 @@ Nach dem TPY-Upload zeigten Symbole im Frontend:
 </Symbol>
 ```
 
-**Alte Duplikat-Entfernung (v5.1.0):**
+**Alte Duplikat-Entfernung (v4.6.0):**
 ```python
 if full_name and full_name not in seen_names:
     unique_symbols.append((full_name, sym_elem, sym_type))
@@ -77,7 +77,7 @@ Light.Light_OG_Floor
 
 ## Lösung: Priority-basierte Duplikat-Entfernung
 
-### Neue Logik (v5.1.1)
+### Neue Logik (v4.6.0)
 
 ```python
 # Entferne Duplikate (INTELLIGENTE Duplikat-Entfernung)
@@ -188,7 +188,7 @@ unique_symbols = [(name, elem, typ) for name, (elem, typ, _) in symbol_map.items
     ...
 ```
 
-**Ohne Type-Information (v5.1.0 - alt):**
+**Ohne Type-Information (v4.6.0 - alt):**
 ```
 🔵 Light.Light_EG_WZ (UNKNOWN)  ← Flach, keine Kinder
 🔵 Light.Light_EG_WZ_EZ (UNKNOWN)
@@ -252,7 +252,7 @@ del config\cache\symbol_cache.json
 
 ### `modules/plc/symbol_browser.py`
 
-**Lines 1-26:** Version-Header aktualisiert (v5.1.1)
+**Lines 1-26:** Version-Header aktualisiert (v4.6.0)
 
 **Lines 368-401:** Intelligente Duplikat-Entfernung:
 - Priority-System implementiert
@@ -287,7 +287,7 @@ Ohne diese Logik: **Erste Symbol wird immer behalten** (egal ob schlechtere Qual
 
 ## Vergleich: Vorher vs. Nachher
 
-| Aspekt | v5.1.0 | v5.1.1 |
+| Aspekt | v4.6.0 | v4.6.0 |
 |--------|--------|--------|
 | **Symbole geladen** | 1.769 | 1.769 |
 | **Light.Light_EG_WZ Type** | UNKNOWN ❌ | FB_Light ✅ |

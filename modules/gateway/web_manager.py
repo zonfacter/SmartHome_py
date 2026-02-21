@@ -3820,7 +3820,7 @@ class WebManager(BaseModule):
                 if not plc:
                     return jsonify({'status': 'error', 'message': 'PLC nicht verfügbar'}), 503
 
-                # ⭐ v5.1.2: Hole plc_type aus Symbol-Info
+                # ⭐ v4.6.0: Hole plc_type aus Symbol-Info
                 symbol_info = self.variable_manager.get_symbol_info(variable, plc_id)
                 if not symbol_info:
                     return jsonify({'status': 'error', 'message': 'Symbol nicht gefunden'}), 404

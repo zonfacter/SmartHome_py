@@ -5559,7 +5559,7 @@ class SmartHomeApp {
             }, { scope, key: 'widgets:icon-preview' });
         }
 
-        // ⭐ v5.1.2: Widget-Type Change Handler (Switch-Config anzeigen/verstecken)
+        // ⭐ v4.6.0: Widget-Type Change Handler (Switch-Config anzeigen/verstecken)
         const widgetTypeSelect = document.getElementById('widget-type');
         const switchConfigSection = document.getElementById('switch-config-section');
 
@@ -5570,7 +5570,7 @@ class SmartHomeApp {
             }, { scope, key: 'widgets:type-change' });
         }
 
-        // ⭐ v5.1.2: Switch-Mode Change Handler (Pulse-Duration anzeigen/verstecken)
+        // ⭐ v4.6.0: Switch-Mode Change Handler (Pulse-Duration anzeigen/verstecken)
         const switchModeSelect = document.getElementById('switch-mode');
         const pulseDurationContainer = document.getElementById('pulse-duration-container');
 
@@ -6103,13 +6103,13 @@ class SmartHomeApp {
                     document.getElementById('binding-value-type').value = widget.bindings.value.plc_type || 'BOOL';
                 }
 
-                // ⭐ v5.1.2: Load Feedback-Variable
+                // ⭐ v4.6.0: Load Feedback-Variable
                 if (widget.bindings && widget.bindings.feedback) {
                     document.getElementById('binding-feedback-var').value = widget.bindings.feedback.variable || '';
                     document.getElementById('binding-feedback-type').value = widget.bindings.feedback.plc_type || 'BOOL';
                 }
 
-                // ⭐ v5.1.2: Load Switch-Config
+                // ⭐ v4.6.0: Load Switch-Config
                 if (widget.type === 'switch' && widget.config) {
                     document.getElementById('switch-mode').value = widget.config.mode || 'toggle';
                     if (widget.config.pulse_duration) {
@@ -6162,7 +6162,7 @@ class SmartHomeApp {
             };
         }
 
-        // ⭐ v5.1.2: Feedback-Variable
+        // ⭐ v4.6.0: Feedback-Variable
         const feedbackVar = document.getElementById('binding-feedback-var')?.value;
         const feedbackType = document.getElementById('binding-feedback-type')?.value;
 
@@ -6174,7 +6174,7 @@ class SmartHomeApp {
             };
         }
 
-        // ⭐ v5.1.2: Switch-Config (Mode & Pulse Duration)
+        // ⭐ v4.6.0: Switch-Config (Mode & Pulse Duration)
         const config = {};
         if (type === 'switch') {
             const mode = document.getElementById('switch-mode')?.value || 'toggle';
@@ -7072,7 +7072,7 @@ class SmartHomeApp {
     }
 
     /**
-     * ⭐ v5.1.2: Toggle Switch Widget mit Feedback & Impulse-Support
+     * ⭐ v4.6.0: Toggle Switch Widget mit Feedback & Impulse-Support
      *
      * @param {string} widgetId - Widget-ID
      * @param {string} mode - 'toggle' oder 'pulse'

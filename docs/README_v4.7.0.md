@@ -102,7 +102,7 @@ Admin → Variable Explorer
 |-------|--------------|
 | `QUICK_START_INTEGRATION.md` | ⚡ 10-Minuten Integrations-Guide |
 | `INSTALLATION_v4.7.0.md` | 📖 Vollständige Installations- & Nutzungsanleitung |
-| `FEATURE_ROADMAP.md` | 🗺️ Roadmap bis v5.0 |
+| `FEATURE_ROADMAP.md` | 🗺️ Roadmap bis v4.6.0 |
 | `IMPLEMENTATION_SUMMARY_v4.7.0.md` | 📝 Technische Implementierungs-Details |
 
 ---
@@ -210,7 +210,7 @@ GET    /api/monitor/latency      # Latenz-Messung
 - 👥 User-Management
 - 📱 Mobile-Responsive Optimierungen
 
-### **v5.0 (Vision):**
+### **v4.6.0 (Vision):**
 - 🤖 Auto-Widget-Generator (KI)
 - 📱 Native Mobile App
 - 🎨 Theme-Editor
@@ -248,7 +248,7 @@ Contributions welcome! Bitte:
 - ✅ SQLite Logging
 - ✅ Monitor-Dashboard Fixes
 
-### **v4.5.3 (2025-12-20):**
+### **v4.6.0 (2025-12-20):**
 - PLC-Kommunikation verbessert
 - Widget-System Grundlage
 - Dark Mode

@@ -1,11 +1,11 @@
-# 🚀 SmartHome Edge OS - Plugin SDK (v5.0)
+# 🚀 SmartHome Edge OS - Plugin SDK (v4.6.0)
 
 Willkommen beim offiziellen SDK für das SmartHome Edge Gateway. Dieses SDK ermöglicht es dir, eigene Hardware (BMS, Sensoren, Wechselrichter) sicher und modular zu integrieren.
 
-## 🎯 Was ist neu in v5.0?
+## 🎯 Was ist neu in v4.6.0?
 
 ### ⭐ Universal Data Router
-Das Herzstück von v5.0 - alle Daten fließen zentral durch den Router:
+Das Herzstück von v4.6.0 - alle Daten fließen zentral durch den Router:
 - **Einheitliches Routing**: BMS → PLC, MQTT → Widgets, Plugin → Node-RED
 - **Deklarative Konfiguration**: routing.json definiert alle Datenflüsse
 - **Pattern-Matching**: Subscribe auf `plc_001.*` oder `bt.bms_001.voltage`
@@ -343,7 +343,7 @@ my_plugin/
   "description": "Plugin-Beschreibung",
   "category": "Sensors",
   "icon": "activity",
-  "min_os_version": "5.0.0",
+  "min_os_version": "4.6.0",
   "dependencies": [],
   "config_schema": {
     "poll_interval": "number",
@@ -404,6 +404,6 @@ assert full_path.startswith("plc_001.")  # Sollte True sein
 
 ---
 
-**Version**: 5.0.0
+**Version**: 4.6.0
 **Stand**: 2026-01-04
 **Lizenz**: MIT

@@ -1,10 +1,10 @@
 """
-BMS Parser v5.0.0
+BMS Parser v4.6.0
 Plugin-System für Battery Management System Parser
 
 📁 SPEICHERORT: modules/bluetooth/bms_parser.py
 
-Features v5.0:
+Features v4.6.0:
 - ⭐ Plugin-System für verschiedene BMS-Protokolle
 - ⭐ BaseBMSParser abstrakte Klasse
 - ⭐ Auto-Discovery & Registration

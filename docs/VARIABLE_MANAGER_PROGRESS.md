@@ -2,7 +2,7 @@
 
 **Datum:** 11. Januar 2026 03:15 Uhr
 **Status:** 🚧 IN PROGRESS (Phase 1-3 von 4 abgeschlossen)
-**Version:** v5.1.0
+**Version:** v4.6.0
 
 ---
 
@@ -93,7 +93,7 @@ while polling_active:
 - ✅ Polling Thread gestartet (2 Hz)
 
 ```python
-# ⭐ v5.1.0: Initialize Variable Manager
+# ⭐ v4.6.0: Initialize Variable Manager
 logger.info("Initialisiere Variable Manager...")
 self.variable_manager = create_variable_manager()
 
@@ -199,7 +199,7 @@ constructor(socket) {
 
 **Änderung in `initializeSocket()`:**
 ```javascript
-// ⭐ v5.1.0: Initialize Variable Manager
+// ⭐ v4.6.0: Initialize Variable Manager
 this.variableManager = new VariableManager(this.socket.socket);
 console.log('✅ Variable Manager initialisiert');
 ```
@@ -209,7 +209,7 @@ console.log('✅ Variable Manager initialisiert');
 **Änderung in `web/templates/index.html`:**
 ```html
 <script src="/static/js/socket_handler.js"></script>
-<script src="/static/js/variable-manager.js"></script> <!-- ⭐ v5.1.0 -->
+<script src="/static/js/variable-manager.js"></script> <!-- ⭐ v4.6.0 -->
 <script src="/static/js/app.js"></script>
 ```
 

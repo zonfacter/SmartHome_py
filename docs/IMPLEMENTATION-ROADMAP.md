@@ -1,4 +1,4 @@
-# SmartHome Edge OS v5.0 - Implementierungs-Roadmap
+# SmartHome Edge OS v4.6.0 - Implementierungs-Roadmap
 ## Fehlende Features & Priorisierung
 
 **Datum:** 2026-01-05

@@ -452,7 +452,7 @@ DataGateway → route_data() → MQTT-Publish
 ### 12.2 Dokumentation
 **Ziele:**
 - README.md aktualisieren
-- CHANGELOG.md für v5.0 erstellen
+- CHANGELOG.md für v4.6.0 erstellen
 - API-Dokumentation (Swagger/OpenAPI)
 - Plugin-Entwickler-Guide
 - Installations-Anleitung für verschiedene Plattformen
@@ -478,9 +478,9 @@ DataGateway → route_data() → MQTT-Publish
 
 ---
 
-## Ergebnis v5.0
+## Ergebnis v4.6.0
 
-Durch v5.0 entsteht ein **Edge-Betriebssystem für industrielle Hausautomatisierung**:
+Durch v4.6.0 entsteht ein **Edge-Betriebssystem für industrielle Hausautomatisierung**:
 
 ✅ **Hardware-Unabhängigkeit:**
 - Läuft auf Windows, Linux, Docker
@@ -520,5 +520,5 @@ Durch v5.0 entsteht ein **Edge-Betriebssystem für industrielle Hausautomatisier
 
 **Stand:** 2026-01-04
 **Aktuelle Version:** 4.7.x
-**Zielversion:** 5.0.0
+**Zielversion:** 4.6.0
 **Erwartete Fertigstellung:** Q2 2026

@@ -3,7 +3,7 @@
 **Datum:** 11. Januar 2026
 **Status:** ✅ VOLLSTÄNDIG IMPLEMENTIERT UND GETESTET
 **Versionen:**
-- symbol_browser.py v5.1.1
+- symbol_browser.py v4.6.0
 - app.js (TreeView mit Sortierung)
 
 ---
@@ -14,13 +14,13 @@
 
 **Root Cause:** TwinCAT 2 TPY-Format speichert SubItems NICHT direkt unter `<Symbol>`, sondern in separater `<DataTypes>` Section.
 
-**Lösung:** DataType-basierter Parser mit rekursiver Expansion (v5.1.0)
+**Lösung:** DataType-basierter Parser mit rekursiver Expansion (v4.6.0)
 
 ### Problem 2: Symbole hatten Type "UNKNOWN" statt "FB_Light" ❌
 
 **Root Cause:** TPY-Datei enthält manche Symbole doppelt (einmal mit Type, einmal ohne). Alte Duplikat-Entfernung behielt das erste Symbol (oft ohne Type).
 
-**Lösung:** Priority-basierte Duplikat-Entfernung bevorzugt Symbole mit Type (v5.1.1)
+**Lösung:** Priority-basierte Duplikat-Entfernung bevorzugt Symbole mit Type (v4.6.0)
 
 ### Problem 3: TreeView zeigte nur 1 Ebene (flache Liste) ❌
 
@@ -132,7 +132,7 @@
 
 ---
 
-## 2. Backend-Implementierung (symbol_browser.py v5.1.1)
+## 2. Backend-Implementierung (symbol_browser.py v4.6.0)
 
 ### Datei: `modules/plc/symbol_browser.py`
 
@@ -853,23 +853,23 @@ subitem_ioffset = parent_ioffset + (int(subitem_bitoffs) // 8)
 
 ## 8. Version History
 
-### v5.0.6 (Original)
+### v4.6.0 (Original)
 - ❌ Nur 751 Top-Level-Symbole
 - ❌ Type: "UNKNOWN"
 - ❌ TreeView 1 Ebene
 
-### v5.1.0 (DataType-Mapping)
+### v4.6.0 (DataType-Mapping)
 - ✅ DataType-basierter Parser
 - ✅ Rekursive SubItem-Expansion
 - ❌ Type noch "UNKNOWN" (Duplikat-Problem)
 
-### v5.1.1 (Priority-System)
+### v4.6.0 (Priority-System)
 - ✅ Intelligente Duplikat-Entfernung
 - ✅ Korrekte Type-Information
 - ✅ IGroup/IOffset/Size Extraktion
 - ❌ TreeView noch 1 Ebene
 
-### v5.1.2 (TreeView-Fix + Sortierung) - AKTUELL
+### v4.6.0 (TreeView-Fix + Sortierung) - AKTUELL
 - ✅ Hierarchischer TreeView (mehrere Ebenen)
 - ✅ Sortierung: Ordner zuerst, dann Variablen (A-Z)
 - ✅ Nodes können sowohl Symbol als auch Ordner sein
@@ -883,9 +883,9 @@ subitem_ioffset = parent_ioffset + (int(subitem_bitoffs) // 8)
 |--------|-------------------|------------|
 | **Symbole** | 14.264 | 1.769 |
 | **Warum Unterschied?** | PLC expandiert Arrays/Strings | TPY hat nur Basis-Symbole |
-| **Type-Info** | ✅ Korrekt | ✅ Korrekt (v5.1.1+) |
+| **Type-Info** | ✅ Korrekt | ✅ Korrekt (v4.6.0+) |
 | **Index_group/offset** | ✅ Korrekt | ✅ Top-Level korrekt, SubItems=0 |
-| **Hierarchie** | ✅ Vollständig | ✅ Vollständig (v5.1.2+) |
+| **Hierarchie** | ✅ Vollständig | ✅ Vollständig (v4.6.0+) |
 | **Performance** | Langsam (PLC-Verbindung) | Schnell (lokale Datei) |
 | **Offline-Fähig** | ❌ Nein | ✅ Ja |
 | **PLC-Zugriff** | ✅ Direkt | ⚠️ Nur über Top-Symbole |

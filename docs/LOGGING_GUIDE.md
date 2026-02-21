@@ -61,10 +61,10 @@ Der `web_manager.py` loggt automatisch:
 
 **Initialisierung:**
 ```
-[OK] Web Manager v5.1.0 Initialisierung START
+[OK] Web Manager v4.6.0 Initialisierung START
 Pfade initialisiert: root=..., config=..., data=...
 PLCConfigManager bereit: config_file=...
-[OK] Web Manager v5.1.0 Initialisierung ABGESCHLOSSEN
+[OK] Web Manager v4.6.0 Initialisierung ABGESCHLOSSEN
 ```
 
 **API-Requests:**

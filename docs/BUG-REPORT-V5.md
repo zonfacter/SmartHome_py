@@ -1,12 +1,12 @@
-# SmartHome Edge OS v5.0 - Bug Report
+# SmartHome Edge OS v4.6.0 - Bug Report
 
 **Datum:** 2026-01-05
-**Version:** v5.0.0
+**Version:** v4.6.0
 **Prüfungsumfang:** Vollständige Codebase-Analyse
 
 ## Executive Summary
 
-Comprehensive bug check durchgeführt auf alle v5.0 Module (Backend + Frontend).
+Comprehensive bug check durchgeführt auf alle v4.6.0 Module (Backend + Frontend).
 **Total gefundene Bugs:** 8
 **Kritische Bugs:** 2 (XSS-Vulnerabilities)
 **Alle Bugs behoben:** ✅

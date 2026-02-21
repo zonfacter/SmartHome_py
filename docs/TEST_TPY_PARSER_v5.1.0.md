@@ -1,7 +1,7 @@
-# Test-Plan: TPY-Parser v5.1.0 mit DataType-Mapping
+# Test-Plan: TPY-Parser v4.6.0 mit DataType-Mapping
 
 **Datum:** 10. Januar 2026
-**Version:** symbol_browser.py v5.1.0
+**Version:** symbol_browser.py v4.6.0
 **Ziel:** Verifizieren dass TPY-Parser ~14.000 Symbole findet (statt nur 751)
 
 ---
@@ -48,7 +48,7 @@ python main.py
 ✅ ERFOLG: ~14000 Symbole aus TPY geladen und im Cache gespeichert!
 ```
 
-### ❌ Fehler-Fall (alte v5.0.6):
+### ❌ Fehler-Fall (alte v4.6.0):
 ```
 🔍 Gefunden: 952 <Symbol> Elemente (Top-Level)
 🔍 Rekursiv gefunden: 952 Symbole (inkl. SubItems)  ← NUR Top-Level!
@@ -92,7 +92,7 @@ python main.py
 - Verschachtelte Member sichtbar (z.B. "RisingEdgeOn.Q")
 - Mindestens **2-3 Hierarchie-Ebenen** bei FB-Strukturen
 
-### ❌ Fehler-Fall (alte v5.0.6):
+### ❌ Fehler-Fall (alte v4.6.0):
 ```
 🔵 Light_EG_WZ (FB_Light)  ← Flach, keine Kinder
 🔵 Light_EG_Bad (FB_Light)
@@ -149,8 +149,8 @@ TreeView zeigt nur Symbole mit "RisingEdge" im Namen:
 | Methode | Symbole | Server-Log |
 |---------|---------|------------|
 | **Live-Load** (pyads) | 14.264 | `✓ 14264 Symbole von plc_001 geladen` |
-| **TPY-Parser** (v5.1.0) | ~14.000 | `✅ ERFOLG: ~14000 Symbole aus TPY geladen` |
-| ~~TPY-Parser~~ (v5.0.6 alt) | 751 | `✅ ERFOLG: 751 Symbole aus TPY geladen` ❌ |
+| **TPY-Parser** (v4.6.0) | ~14.000 | `✅ ERFOLG: ~14000 Symbole aus TPY geladen` |
+| ~~TPY-Parser~~ (v4.6.0 alt) | 751 | `✅ ERFOLG: 751 Symbole aus TPY geladen` ❌ |
 
 ### ✅ Erfolg-Kriterium:
 - Beide Methoden liefern **ähnliche Symbol-Anzahl** (±10%)
@@ -307,7 +307,7 @@ RecursionError: maximum recursion depth exceeded
 
 ## Erfolgs-Checkliste
 
-### ✅ TPY-Parser v5.1.0 funktioniert wenn:
+### ✅ TPY-Parser v4.6.0 funktioniert wenn:
 
 - [ ] Server-Log zeigt: "📚 DataType-Map erstellt: 237 Typen"
 - [ ] Server-Log zeigt: "~14000 Symbole (inkl. DataType-SubItems)"
@@ -332,5 +332,5 @@ RecursionError: maximum recursion depth exceeded
 ---
 
 **Erstellt:** 2026-01-10
-**Version:** v5.1.0
+**Version:** v4.6.0
 **Status:** Bereit zum Testen

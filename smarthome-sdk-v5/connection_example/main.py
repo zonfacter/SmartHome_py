@@ -177,7 +177,7 @@ class CustomTCPConnection(BaseConnection):
     def _send_init_handshake(self):
         """Sendet Initialisierungs-Handshake"""
         try:
-            init_msg = b"HELLO SmartHome Edge OS v5.0\n"
+            init_msg = b"HELLO SmartHome Edge OS v4.6.0\n"
             self.socket.send(init_msg)
             self.update_stats(packets_sent=1, bytes_sent=len(init_msg))
         except Exception as e:

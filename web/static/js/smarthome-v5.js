@@ -1,11 +1,11 @@
 /**
- * SmartHome Edge OS v5.0
- * Zentrale Integration aller v5.0 Features
+ * SmartHome Edge OS v4.6.0
+ * Zentrale Integration aller v4.6.0 Features
  *
  * Neue Features:
- * - Symbol Browser v5.0 (PLC-Symbole mit korrekter Type-Detection)
- * - Widget Manager v5.0 (Erweiterte CRUD-Operationen)
- * - Plugin Manager v5.0 (ioBroker-Style Plugin-Verwaltung)
+ * - Symbol Browser v4.6.0 (PLC-Symbole mit korrekter Type-Detection)
+ * - Widget Manager v4.6.0 (Erweiterte CRUD-Operationen)
+ * - Plugin Manager v4.6.0 (ioBroker-Style Plugin-Verwaltung)
  */
 
 class SmartHomeV5 {
@@ -20,7 +20,7 @@ class SmartHomeV5 {
     }
 
     init() {
-        console.log('🚀 SmartHome Edge OS v5.0 - Initialisierung...');
+        console.log('🚀 SmartHome Edge OS v4.6.0 - Initialisierung...');
 
         // Socket.IO Connection
         this.initSocketIO();
@@ -61,7 +61,7 @@ class SmartHomeV5 {
     }
 
     initComponents() {
-        console.log('🔧 Initialisiere v5.0 Komponenten...');
+        console.log('🔧 Initialisiere v4.6.0 Komponenten...');
 
         // Symbol Browser (if container exists)
         const symbolContainer = document.getElementById('symbol-tree');
@@ -71,7 +71,7 @@ class SmartHomeV5 {
                 connectionId: 'plc_001',
                 onSelect: (symbol) => this.onSymbolSelected(symbol)
             });
-            console.log('✅ Symbol Browser v5.0 geladen');
+            console.log('✅ Symbol Browser v4.6.0 geladen');
         }
 
         // Widget Manager (if container exists)
@@ -83,7 +83,7 @@ class SmartHomeV5 {
                 onWidgetUpdated: (id, widget) => this.onWidgetUpdated(id, widget),
                 onWidgetDeleted: (id) => this.onWidgetDeleted(id)
             });
-            console.log('✅ Widget Manager v5.0 geladen');
+            console.log('✅ Widget Manager v4.6.0 geladen');
         }
 
         // Plugin Manager (if container exists)
@@ -92,7 +92,7 @@ class SmartHomeV5 {
             this.pluginManager = new PluginManagerV5({
                 container: pluginContainer
             });
-            console.log('✅ Plugin Manager v5.0 geladen');
+            console.log('✅ Plugin Manager v4.6.0 geladen');
         }
 
         // Instance Manager (if container exists)
@@ -101,10 +101,10 @@ class SmartHomeV5 {
             this.instanceManager = new InstanceManagerV5({
                 container: instanceContainer
             });
-            console.log('✅ Instance Manager v5.0 geladen');
+            console.log('✅ Instance Manager v4.6.0 geladen');
         }
 
-        console.log('🎉 SmartHome v5.0 bereit!');
+        console.log('🎉 SmartHome v4.6.0 bereit!');
     }
 
     // ========================================================================

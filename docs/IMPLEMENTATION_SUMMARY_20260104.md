@@ -445,7 +445,7 @@ plc.connect()
    - Historical data analysis
    - Performance optimization
 
-4. **Authentication System** (v5.0.0)
+4. **Authentication System** (v4.6.0)
    - OAuth2/JWT tokens
    - Role-based access control
    - API key management

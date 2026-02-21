@@ -1,10 +1,10 @@
 """
-Bluetooth Manager v5.0.0
+Bluetooth Manager v4.6.0
 Multi-Instance Bluetooth-Verbindung für Connection Manager
 
 📁 SPEICHERORT: modules/bluetooth/bluetooth_manager.py
 
-Features v5.0:
+Features v4.6.0:
 - ⭐ Multi-Instance Support (mehrere BLE-Geräte parallel)
 - ⭐ Integration mit Connection Manager
 - ⭐ BaseConnection Interface
@@ -43,7 +43,7 @@ except ImportError:
 
 class BluetoothConnection(BaseConnection):
     """
-    Bluetooth Connection v5.0.0
+    Bluetooth Connection v4.6.0
 
     Implementiert BaseConnection für BLE-Verbindungen.
     Unterstützt mehrere parallele BLE-Geräte über Connection Manager.
