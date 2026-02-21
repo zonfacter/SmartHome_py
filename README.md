@@ -41,6 +41,8 @@ Für den aktuellen produktiven Ablauf sind diese Dokumente die verbindliche Quel
 - `docs/11_caching_strategy.md`
 - `docs/12_config_migrations.md`
 - `docs/13_feature_flags_rollout.md`
+- `docs/14_ux_notifications.md`
+- `docs/15_error_recovery_actions.md`
 - `docs/WEB_SETUP_ROUTING_ADS_GUIDE.md`
 - `docs/STAGING_GATE.md` (Release-Gates, Canary, Go/No-Go)
 - `docs/SECURITY_INCIDENT_SENTRY_DSN.md` (Incident-Runbook & Secret-Policy)
