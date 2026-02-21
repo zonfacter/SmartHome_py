@@ -31,6 +31,20 @@ class ServiceManager:
     """
 
     @staticmethod
+    def is_container_runtime() -> bool:
+        """Erkennt Docker/Kubernetes Laufzeitumgebungen robust."""
+        if os.path.exists('/.dockerenv'):
+            return True
+        if os.environ.get('KUBERNETES_SERVICE_HOST'):
+            return True
+        try:
+            with open('/proc/1/cgroup', 'r', encoding='utf-8') as f:
+                cgroup = f.read().lower()
+            return ('docker' in cgroup) or ('kubepods' in cgroup) or ('containerd' in cgroup)
+        except Exception:
+            return False
+
+    @staticmethod
     def restart_service() -> bool:
         """
         Startet den Service neu
@@ -56,6 +70,10 @@ class ServiceManager:
 
             system_platform = platform.system()
             cwd = os.getcwd()
+
+            if ServiceManager.is_container_runtime():
+                logger.warning("Container-Runtime erkannt: beende PID1 fuer orchestrator restart")
+                os._exit(0)
 
             # Robuster Restart über separaten Prozess:
             # vermeidet Socket-FD-Vererbung/Port-Konflikte bei execv.
@@ -95,7 +113,8 @@ class ServiceManager:
             'python': sys.executable,
             'args': sys.argv,
             'is_restarted': '--restarted' in sys.argv,
-            'pid': os.getpid()
+            'pid': os.getpid(),
+            'is_container_runtime': ServiceManager.is_container_runtime(),
         }
 
     @staticmethod
@@ -135,6 +154,9 @@ class ServiceManager:
         Returns:
             (success, message)
         """
+        if ServiceManager.is_container_runtime():
+            return False, "Dienst-Neustart via daemon-Script ist im Container deaktiviert (nutze Container-Restart-Policy)"
+
         script_path = ServiceManager._ctl_script_path()
         if not os.path.exists(script_path):
             return False, f"Control-Script nicht gefunden: {script_path}"

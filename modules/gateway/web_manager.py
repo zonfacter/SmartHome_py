@@ -2029,15 +2029,6 @@ class WebManager(BaseModule):
                 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
                 db_path = os.path.join(project_root, 'config', 'system_logs.db')
                 actor = request.headers.get('X-Admin-User') or request.remote_addr or 'unknown'
-                DatabaseLogger.audit_event(
-                    db_path=db_path,
-                    action='daemon_restart_scheduled',
-                    actor=str(actor),
-                    details={
-                        'delay_seconds': delay,
-                        'request_id': self._get_request_id()
-                    }
-                )
                 logger.warning(
                     "Admin restart requested: req_id=%s type=daemon delay=%ss remote=%s ua=%s",
                     self._get_request_id(),
@@ -2047,6 +2038,16 @@ class WebManager(BaseModule):
                 )
                 ok, message = ServiceManager.schedule_ctl_restart(delay_seconds=delay)
                 if not ok:
+                    DatabaseLogger.audit_event(
+                        db_path=db_path,
+                        action='daemon_restart_rejected',
+                        actor=str(actor),
+                        details={
+                            'delay_seconds': delay,
+                            'request_id': self._get_request_id(),
+                            'reason': message
+                        }
+                    )
                     logger.warning(
                         "Admin restart rejected: req_id=%s type=daemon remote=%s reason=%s",
                         self._get_request_id(),
@@ -2058,6 +2059,15 @@ class WebManager(BaseModule):
                         {'success': False, 'error': message},
                         400
                     )
+                DatabaseLogger.audit_event(
+                    db_path=db_path,
+                    action='daemon_restart_scheduled',
+                    actor=str(actor),
+                    details={
+                        'delay_seconds': delay,
+                        'request_id': self._get_request_id()
+                    }
+                )
                 logger.warning(
                     "Admin restart scheduled: req_id=%s type=daemon delay=%ss remote=%s",
                     self._get_request_id(),
