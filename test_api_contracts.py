@@ -206,3 +206,22 @@ def test_contract_socket_payloads(web_fixture):
     assert custom_event == "camera_alert"
     assert custom_payload["cam_id"] == "cam01"
     assert custom_payload["source"] == "contract-test"
+
+
+def test_contract_read_cache_hit_and_invalidation(web_fixture):
+    _, client = web_fixture
+
+    first = client.get("/api/system/status")
+    assert first.status_code == 200
+    assert first.headers.get("X-Read-Cache") == "MISS"
+
+    second = client.get("/api/system/status")
+    assert second.status_code == 200
+    assert second.headers.get("X-Read-Cache") == "HIT"
+
+    # Any state-changing API call should invalidate read cache.
+    _ = client.post("/api/variables/write", json={"plc_id": "plc_001", "value": True})
+
+    third = client.get("/api/system/status")
+    assert third.status_code == 200
+    assert third.headers.get("X-Read-Cache") == "MISS"

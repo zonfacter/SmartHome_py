@@ -20,6 +20,7 @@ from collections import deque
 from urllib.parse import urlparse
 import uuid
 import hashlib
+from copy import deepcopy
 from datetime import datetime, timezone
 
 # Flask & SocketIO (lazy import)
@@ -106,6 +107,16 @@ class WebManager(BaseModule):
         self._api_sli_samples = deque()
         self._api_totals = {'requests': 0, 'errors_5xx': 0}
         self._deprecated_api_endpoints = self._load_deprecated_api_endpoints()
+        self._read_cache = {}
+        self._read_cache_lock = threading.Lock()
+        self._read_cache_max_entries = max(16, int(os.getenv('SMARTHOME_READ_CACHE_MAX_ENTRIES', '256')))
+        self._read_cache_ttl_default = max(0.1, float(os.getenv('SMARTHOME_READ_CACHE_TTL_SECONDS', '1.0')))
+        self._read_cache_ttl = {
+            'system_status': max(0.1, float(os.getenv('SMARTHOME_READ_CACHE_TTL_SYSTEM_STATUS', str(self._read_cache_ttl_default)))),
+            'telemetry': max(0.1, float(os.getenv('SMARTHOME_READ_CACHE_TTL_TELEMETRY', '0.5'))),
+            'monitor_slo': max(0.1, float(os.getenv('SMARTHOME_READ_CACHE_TTL_MONITOR_SLO', str(self._read_cache_ttl_default)))),
+            'monitor_streams': max(0.1, float(os.getenv('SMARTHOME_READ_CACHE_TTL_MONITOR_STREAMS', str(self._read_cache_ttl_default))))
+        }
         self._slo_targets = {
             'api_availability_ratio': float(os.getenv('SLO_API_AVAILABILITY', '0.995')),
             'api_p95_latency_ms': float(os.getenv('SLO_API_P95_LATENCY_MS', '500')),
@@ -316,6 +327,8 @@ class WebManager(BaseModule):
             incoming_req_id = str(request.headers.get('X-Request-ID') or '').strip()
             g.request_id = incoming_req_id or uuid.uuid4().hex
             g._api_started_at = time.time()
+            if request.path.startswith('/api/') and request.method.upper() in ('POST', 'PUT', 'PATCH', 'DELETE'):
+                self._invalidate_read_cache()
             if self.data_gateway and hasattr(self.data_gateway, 'set_correlation_id'):
                 try:
                     self.data_gateway.set_correlation_id(g.request_id)
@@ -567,6 +580,44 @@ class WebManager(BaseModule):
             response.headers['X-API-Replacement'] = meta['replacement']
         if meta.get('reason'):
             response.headers['X-API-Deprecation-Reason'] = meta['reason']
+
+    def _invalidate_read_cache(self):
+        with self._read_cache_lock:
+            self._read_cache.clear()
+
+    def _cached_json_response(self, cache_key: str, ttl_seconds: float, producer):
+        now = time.time()
+        ttl = max(0.1, float(ttl_seconds))
+        cache_key = str(cache_key)
+
+        with self._read_cache_lock:
+            existing = self._read_cache.get(cache_key)
+            if existing and float(existing.get('expires_at', 0)) > now:
+                response = jsonify(deepcopy(existing.get('body')))
+                response.status_code = int(existing.get('status_code', 200))
+                response.headers['X-Read-Cache'] = 'HIT'
+                return response
+
+        body, status_code = producer()
+        response = jsonify(body)
+        response.status_code = int(status_code)
+        response.headers['X-Read-Cache'] = 'MISS'
+
+        if int(status_code) != 200:
+            return response
+        if not isinstance(body, (dict, list)):
+            return response
+
+        with self._read_cache_lock:
+            if len(self._read_cache) >= self._read_cache_max_entries:
+                oldest_key = min(self._read_cache.items(), key=lambda kv: float(kv[1].get('expires_at', 0)))[0]
+                self._read_cache.pop(oldest_key, None)
+            self._read_cache[cache_key] = {
+                'body': deepcopy(body),
+                'status_code': int(status_code),
+                'expires_at': now + ttl
+            }
+        return response
 
     def _check_control_rate_limit(self):
         """
@@ -1376,8 +1427,11 @@ class WebManager(BaseModule):
                 if not self.data_gateway:
                     return jsonify({'error': 'Gateway nicht verfügbar'}), 503
 
-                status = self.data_gateway.get_system_status()
-                return jsonify(status)
+                return self._cached_json_response(
+                    'get:/api/system/status',
+                    self._read_cache_ttl.get('system_status', 1.0),
+                    lambda: (self.data_gateway.get_system_status(), 200)
+                )
             except Exception as e:
                 logger.error(f"Fehler beim System-Status: {e}", exc_info=True)
                 return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -1388,8 +1442,11 @@ class WebManager(BaseModule):
             if not self.data_gateway:
                 return jsonify({'error': 'Gateway nicht verfügbar'}), 503
 
-            data = self.data_gateway.get_all_telemetry()
-            return jsonify(data)
+            return self._cached_json_response(
+                'get:/api/telemetry',
+                self._read_cache_ttl.get('telemetry', 0.5),
+                lambda: (self.data_gateway.get_all_telemetry(), 200)
+            )
 
         @self.app.route('/api/system/dependencies')
         def check_dependencies():
@@ -2293,7 +2350,11 @@ class WebManager(BaseModule):
         def get_slo_report():
             """SLI/SLO Report für API- und Stream-Verfügbarkeit."""
             try:
-                return jsonify(self._compute_slo_report())
+                return self._cached_json_response(
+                    'get:/api/monitor/slo',
+                    self._read_cache_ttl.get('monitor_slo', 1.0),
+                    lambda: (self._compute_slo_report(), 200)
+                )
             except Exception as e:
                 logger.error(f"Fehler bei GET /api/monitor/slo: {e}", exc_info=True)
                 return jsonify({'error': str(e)}), 500
@@ -2314,7 +2375,11 @@ class WebManager(BaseModule):
 
                 payload['viewer_ttl_seconds'] = 30
                 payload['success'] = True
-                return jsonify(payload)
+                return self._cached_json_response(
+                    'get:/api/monitor/streams',
+                    self._read_cache_ttl.get('monitor_streams', 1.0),
+                    lambda: (payload, 200)
+                )
             except Exception as e:
                 logger.error(f"Fehler bei GET /api/monitor/streams: {e}", exc_info=True)
                 return jsonify({'success': False, 'error': str(e)}), 500

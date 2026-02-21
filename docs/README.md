@@ -15,6 +15,7 @@ Diese Dateien sind der verbindliche Stand fuer Betrieb, Integration und API:
 - `docs/ADR/README.md`
 - `docs/09_module_boundaries_ownership.md`
 - `docs/10_blue_green_atomic_deployment.md`
+- `docs/11_caching_strategy.md`
 - `docs/DOCKER_DEPLOYMENT.md`
 - `docs/STAGING_GATE.md`
 - `docs/SECURITY_INCIDENT_SENTRY_DSN.md`
