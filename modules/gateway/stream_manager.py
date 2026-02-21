@@ -799,6 +799,11 @@ class StreamManager(BaseModule):
             cmd.extend([
                 '-vf', f'scale={width}:{height}',
                 '-c:v', 'libx264',
+                # Erzwinge kurze GOP für stabile 1s-HLS-Segmente und schnellen Start.
+                '-g', '25',
+                '-keyint_min', '25',
+                '-sc_threshold', '0',
+                '-force_key_frames', 'expr:gte(t,n_forced*1)',
                 '-preset', 'veryfast',
                 '-tune', 'zerolatency',
                 '-b:v', '800k'

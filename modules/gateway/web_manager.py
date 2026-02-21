@@ -1,5 +1,5 @@
 """
-Web Manager Module v4.6.0
+Web Manager Module v4.6.1
 FINAL FIX: Beseitigt NoneType-Pfadfehler durch synchrone Initialisierung.
 
 📁 SPEICHERORT: modules/gateway/web_manager.py
@@ -55,12 +55,12 @@ logger = logging.getLogger(__name__)
 
 class WebManager(BaseModule):
     """
-    Web Manager v4.6.0
+    Web Manager v4.6.1
     Verwaltet das Web-Interface und die Kommunikation zum Frontend.
     """
 
     NAME = "web_manager"
-    VERSION = "4.6.0"
+    VERSION = "4.6.1"
     DESCRIPTION = "Flask + SocketIO Web-HMI Server"
     AUTHOR = "TwinCAT Team"
     API_MAJOR_VERSION = "1"
@@ -98,6 +98,12 @@ class WebManager(BaseModule):
         self._camera_trigger_state = {}
         self._camera_trigger_last_fired = {}
         self._trigger_store = None
+        self._camera_config_recovery_lock = threading.Lock()
+        self._camera_config_recovery_last_attempt = 0.0
+        self._camera_config_recovery_cooldown_seconds = max(
+            30.0,
+            float(os.getenv('SMARTHOME_CAMERA_CONFIG_RECOVERY_COOLDOWN_SECONDS', '60'))
+        )
         self._control_rate_limit = {}
         self._control_rate_limit_lock = threading.Lock()
         self._stream_viewers = {}
@@ -140,7 +146,7 @@ class WebManager(BaseModule):
         super().initialize(app_context)
         self.app_context = app_context
 
-        logger.info("=== Web Manager v4.6.0 Initialisierung START ===")
+        logger.info("=== Web Manager v4.6.1 Initialisierung START ===")
 
         # Initialize Sentry if available
         if SENTRY_AVAILABLE:
@@ -241,7 +247,7 @@ class WebManager(BaseModule):
                 print("  [ERROR] Flask nicht verfuegbar!")
 
             print(f"  [OK] {self.NAME} v{self.VERSION} initialisiert")
-            logger.info("=== Web Manager v4.6.0 Initialisierung ABGESCHLOSSEN ===")
+            logger.info("=== Web Manager v4.6.1 Initialisierung ABGESCHLOSSEN ===")
 
             if self.sentry:
                 self.sentry.add_breadcrumb(
@@ -2839,14 +2845,90 @@ class WebManager(BaseModule):
 
         def _load_cameras_config():
             path = _cameras_config_path()
+            config = {"cameras": {}}
+            load_reason = "missing"
+
             if os.path.exists(path):
-                with open(path, 'r') as f:
-                    return json.load(f)
-            return {"cameras": {}}
+                try:
+                    with open(path, 'r', encoding='utf-8') as f:
+                        loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        config = loaded
+                    else:
+                        load_reason = "invalid_format"
+                        logger.warning("Kamera-Konfiguration ungültig (kein Objekt): %s", path)
+                except Exception as exc:
+                    load_reason = "invalid_json"
+                    logger.warning("Kamera-Konfiguration konnte nicht gelesen werden (%s): %s", path, exc)
+            else:
+                logger.warning("Kamera-Konfiguration fehlt: %s", path)
+
+            cameras = config.get('cameras')
+            if not isinstance(cameras, dict):
+                config['cameras'] = {}
+                cameras = config['cameras']
+
+            if cameras:
+                return config
+
+            now = time.time()
+            with self._camera_config_recovery_lock:
+                if (now - float(self._camera_config_recovery_last_attempt)) < float(self._camera_config_recovery_cooldown_seconds):
+                    return config
+                self._camera_config_recovery_last_attempt = now
+
+            logger.warning(
+                "Kamera-Konfiguration ist leer (%s). Starte Auto-Recovery via Ring-Import.",
+                load_reason
+            )
+
+            try:
+                from modules.integrations.ring_module import list_ring_cameras
+                ring_result = list_ring_cameras()
+                if not ring_result.get('success'):
+                    logger.warning(
+                        "Auto-Recovery der Kamera-Konfiguration fehlgeschlagen: %s",
+                        ring_result.get('error', 'unbekannter Fehler')
+                    )
+                    return config
+
+                ring_cameras = ring_result.get('cameras') or []
+                recovered = {}
+                for cam in ring_cameras:
+                    ring_device_id = str(cam.get('device_id') or '').strip()
+                    if not ring_device_id:
+                        continue
+                    cam_id = f"ring_{ring_device_id}"
+                    cam_name = str(cam.get('name') or f"Ring {ring_device_id}")
+                    recovered[cam_id] = {
+                        'name': cam_name,
+                        'url': f"/api/cameras/{cam_id}/snapshot",
+                        'type': 'ring',
+                        'autostart': False,
+                        'ring': {
+                            'device_id': ring_device_id
+                        }
+                    }
+
+                if not recovered:
+                    logger.warning("Auto-Recovery: Keine Ring-Kameras für Wiederherstellung gefunden.")
+                    return config
+
+                config['cameras'].update(recovered)
+                _save_cameras_config(config)
+                logger.warning(
+                    "Auto-Recovery erfolgreich: %d Ring-Kamera(s) wurden nach cameras.json wiederhergestellt.",
+                    len(recovered)
+                )
+                return config
+            except Exception as exc:
+                logger.warning("Auto-Recovery der Kamera-Konfiguration fehlgeschlagen: %s", exc)
+                return config
 
         def _save_cameras_config(config):
             path = _cameras_config_path()
-            with open(path, 'w') as f:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=2)
 
         def _feature_flags_path():
