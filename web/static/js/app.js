@@ -77,6 +77,7 @@ class SmartHomeApp {
         // Theme anwenden
         this.applyTheme(this.theme);
         this.loadFeatureFlags();
+        this._ensureToastContainer();
 
         // Event-Listener registrieren (nach kurzem Delay für DOM)
         setTimeout(() => {
@@ -126,6 +127,68 @@ class SmartHomeApp {
                 btn.classList.remove('hidden');
             }
         });
+    }
+
+    _ensureToastContainer() {
+        if (document.getElementById('app-toast-container')) return;
+        const container = document.createElement('div');
+        container.id = 'app-toast-container';
+        container.className = 'fixed top-4 right-4 z-[100] flex flex-col gap-3 w-[92vw] max-w-md';
+        document.body.appendChild(container);
+    }
+
+    showToast(message, { level = 'info', duration = 5000, actions = [] } = {}) {
+        this._ensureToastContainer();
+        const container = document.getElementById('app-toast-container');
+        if (!container) return;
+
+        const toneClass = level === 'error'
+            ? 'border-red-300 bg-red-50 text-red-900'
+            : level === 'success'
+                ? 'border-green-300 bg-green-50 text-green-900'
+                : 'border-blue-300 bg-blue-50 text-blue-900';
+
+        const toast = document.createElement('div');
+        toast.className = `rounded-lg border shadow-lg p-3 ${toneClass}`;
+        const msg = document.createElement('div');
+        msg.className = 'text-sm';
+        msg.textContent = String(message || '');
+        toast.appendChild(msg);
+
+        if (Array.isArray(actions) && actions.length > 0) {
+            const row = document.createElement('div');
+            row.className = 'mt-2 flex flex-wrap gap-2';
+            actions.slice(0, 2).forEach(action => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'px-2 py-1 text-xs rounded bg-white/90 border border-current';
+                btn.textContent = action.label || 'Action';
+                btn.addEventListener('click', () => {
+                    try { action.onClick && action.onClick(); } catch (e) {}
+                    toast.remove();
+                });
+                row.appendChild(btn);
+            });
+            toast.appendChild(row);
+        }
+
+        container.appendChild(toast);
+        if (duration > 0) {
+            setTimeout(() => {
+                if (toast && toast.parentNode) toast.remove();
+            }, duration);
+        }
+    }
+
+    showRecoverableError(message, retryAction, fallbackPage = null) {
+        const actions = [];
+        if (typeof retryAction === 'function') {
+            actions.push({ label: 'Erneut versuchen', onClick: retryAction });
+        }
+        if (fallbackPage) {
+            actions.push({ label: 'Zu Setup', onClick: () => this.showPage(fallbackPage) });
+        }
+        this.showToast(message, { level: 'error', duration: 10000, actions });
     }
 
     setupApiAuthHeaderInjection() {
@@ -293,7 +356,7 @@ class SmartHomeApp {
     showPage(pageName) {
         console.log(`🔄 Zeige Seite: ${pageName}`);
         if (!this.isFeatureEnabled(`ui.page.${pageName}`, true)) {
-            alert(`Feature für Seite '${pageName}' ist aktuell deaktiviert.`);
+            this.showToast(`Feature für Seite '${pageName}' ist aktuell deaktiviert.`, { level: 'info' });
             pageName = 'dashboard';
         }
 
@@ -492,6 +555,11 @@ class SmartHomeApp {
 
         } catch (error) {
             console.error('Fehler beim Laden des System-Status:', error);
+            this.showRecoverableError(
+                `System-Status konnte nicht geladen werden: ${error.message}`,
+                () => this.loadSystemStatus(),
+                'setup'
+            );
         }
     }
 
@@ -607,7 +675,7 @@ class SmartHomeApp {
         const runtimeType = (document.getElementById('plc-runtime-type')?.value || 'TC3').toUpperCase();
 
         if (!amsId) {
-            alert('Bitte AMS Net ID eingeben!');
+            this.showToast('Bitte AMS Net ID eingeben.', { level: 'error' });
             return;
         }
 
@@ -637,12 +705,21 @@ class SmartHomeApp {
                 this.plcConnected = true;
                 this.updatePLCStatus(true);
                 console.log('✅ PLC verbunden');
+                this.showToast('PLC erfolgreich verbunden.', { level: 'success', duration: 3000 });
             } else {
-                alert('PLC-Verbindung fehlgeschlagen: ' + (data.error || 'Unbekannter Fehler'));
+                this.showRecoverableError(
+                    'PLC-Verbindung fehlgeschlagen: ' + (data.error || 'Unbekannter Fehler'),
+                    () => this.connectPLC(),
+                    'setup'
+                );
             }
         } catch (error) {
             console.error('Fehler bei PLC-Verbindung:', error);
-            alert('Fehler bei PLC-Verbindung: ' + error.message);
+            this.showRecoverableError(
+                'Fehler bei PLC-Verbindung: ' + error.message,
+                () => this.connectPLC(),
+                'setup'
+            );
         }
     }
 
@@ -660,9 +737,15 @@ class SmartHomeApp {
                 this.plcConnected = false;
                 this.updatePLCStatus(false);
                 console.log('✅ PLC getrennt');
+                this.showToast('PLC getrennt.', { level: 'info', duration: 2500 });
             }
         } catch (error) {
             console.error('Fehler beim Trennen der PLC:', error);
+            this.showRecoverableError(
+                'Fehler beim Trennen der PLC: ' + error.message,
+                () => this.disconnectPLC(),
+                'setup'
+            );
         }
     }
 
