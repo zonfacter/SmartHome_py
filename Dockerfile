@@ -10,7 +10,7 @@ RUN groupadd --system --gid 10001 smarthome \
     && useradd --system --uid 10001 --gid 10001 --create-home smarthome
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg nodejs npm \
+    && apt-get install -y --no-install-recommends build-essential ffmpeg nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt
