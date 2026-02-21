@@ -10,6 +10,8 @@ Diese Dateien sind der verbindliche Stand fuer Betrieb, Integration und API:
 - `docs/05_api_reference.md`
 - `docs/06_api_lifecycle_policy.md`
 - `docs/07_operations_playbook.md`
+- `docs/openapi.json`
+- `docs/08_socket_events.md`
 - `docs/DOCKER_DEPLOYMENT.md`
 - `docs/STAGING_GATE.md`
 - `docs/SECURITY_INCIDENT_SENTRY_DSN.md`

@@ -8,9 +8,19 @@ Nur hier gelistete Endpunkte gelten als dokumentierter API-Stand.
 - Breaking Changes nur über neuen Major-Namespace (z. B. `/api/v2/*`)
 - Deprecation-Fenster vor Entfernen: mindestens `90` Tage
 - Laufende Policy und Sunset-Regeln: `docs/06_api_lifecycle_policy.md`
+- OpenAPI-Vertrag: `docs/openapi.json`
+- Socket/Event-Verträge: `docs/08_socket_events.md`
 - Runtime-Signale:
 - `X-API-Version`, `X-API-Major-Version`, `X-API-Compatibility-Model` auf allen `/api/*`-Responses
 - Für deprecated Endpunkte zusätzlich: `Deprecation`, `Sunset`, optional `X-API-Replacement`
+
+## Fehlercode-Baseline
+- `400`: Payload ungültig oder Pflichtfelder fehlen
+- `401`: Authentifizierung für geschützte Control-API fehlt/ungültig
+- `403`: Origin-/Autorisierungsregeln verletzt
+- `404`: Ressource/Route nicht gefunden
+- `429`: Rate-Limit auf kritischen Endpunkten überschritten
+- `500`: Interner Fehler
 
 ## System
 - `GET /api/system/status`
