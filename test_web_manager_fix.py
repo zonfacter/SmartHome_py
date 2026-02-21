@@ -1,5 +1,5 @@
 """
-Test-Script für Web Manager v5.1.0 Fix
+Test-Script für Web Manager v4.6.0 Fix
 Prüft ob die Race-Condition behoben ist
 """
 
@@ -199,7 +199,7 @@ def test_api_route_handlers():
 def main():
     """Führt alle Tests aus"""
     print("\n" + "=" * 60)
-    print("WEB MANAGER v5.1.0 FIX - TEST SUITE")
+    print("WEB MANAGER v4.6.0 FIX - TEST SUITE")
     print("=" * 60 + "\n")
 
     results = []

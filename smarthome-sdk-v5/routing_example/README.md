@@ -1,10 +1,10 @@
 # Routing Example Plugin
 
-Demonstriert die Nutzung des **Universal Data Routers** (v5.0)
+Demonstriert die Nutzung des **Universal Data Routers** (v4.6.0)
 
 ## Was macht dieses Plugin?
 
-Dieses Plugin ist ein vollständiges Beispiel, das alle wichtigen Features des v5.0 Routing-Systems zeigt:
+Dieses Plugin ist ein vollständiges Beispiel, das alle wichtigen Features des v4.6.0 Routing-Systems zeigt:
 
 ### 1. **Daten Publizieren** (`route_data`)
 ```python
@@ -359,4 +359,4 @@ if pattern == datapoint_path:
 **Version**: 1.0.0
 **Autor**: TwinCAT Team
 **Lizenz**: MIT
-**Min. OS Version**: 5.0.0
+**Min. OS Version**: 4.6.0

@@ -1,4 +1,4 @@
-# SmartHome Edge OS v5.0 Dependencies
+# SmartHome Edge OS v4.6.0 Dependencies
 
 # Core
 Flask==3.0.0

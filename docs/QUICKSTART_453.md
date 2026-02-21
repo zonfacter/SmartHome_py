@@ -1,4 +1,4 @@
-# Quick-Start Guide - v4.5.3
+# Quick-Start Guide - v4.6.0
 
 **Version**: 4.5.3
 **Datum**: 04.01.2026
@@ -20,7 +20,7 @@ python start_web_hmi.py --port 5001
 **Erwartete Ausgabe**:
 ```
 ============================================================
-SmartHome OS v4.5.3 - Web-HMI
+SmartHome OS v4.6.0 - Web-HMI
 ============================================================
 
 INFO     [database_logger] Database Logger initialisiert: D:\...\config\system_logs.db
@@ -36,10 +36,10 @@ INFO     [database_logger] Database Logger initialisiert: D:\...\config\system_l
   ⚡ web_manager v1.0.0 initialisiert
 ```
 
-**NEU in v4.5.3**:
+**NEU in v4.6.0**:
 - ✅ Database Logger initialisiert
 - ✅ Widget-Sync läuft automatisch
-- ✅ v4.5.3 wird angezeigt
+- ✅ v4.6.0 wird angezeigt
 
 ---
 
@@ -165,10 +165,10 @@ curl -X POST http://localhost:5001/api/admin/service/restart -d '{}'
   ✅ Widget-Sync abgeschlossen: 1 Variablen registriert
 ```
 
-**Vor v4.5.3**:
+**Vor v4.6.0**:
 - Widget zeigt `UNKNOWN` für `MAIN.bLight1`
 
-**Nach v4.5.3**:
+**Nach v4.6.0**:
 - ✅ Variable wird beim Start vorab gelesen
 - ✅ Widget zeigt sofort korrekten Wert
 
@@ -360,9 +360,9 @@ python -X utf8 start_web_hmi.py --port 5001 --restarted
 
 ## 📊 Verifikation
 
-### Checkliste v4.5.3
+### Checkliste v4.6.0
 
-- [ ] Server startet mit "v4.5.3" Meldung
+- [ ] Server startet mit "v4.6.0" Meldung
 - [ ] `config/system_logs.db` wird erstellt
 - [ ] `/api/admin/logs` liefert Daten
 - [ ] `/api/admin/service/info` zeigt korrekten Status

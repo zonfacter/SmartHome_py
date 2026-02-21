@@ -1,5 +1,5 @@
 /**
- * Symbol Browser v5.0
+ * Symbol Browser v4.6.0
  * Moderner TreeView für PLC-Symbole mit korrekter Type-Detection
  */
 

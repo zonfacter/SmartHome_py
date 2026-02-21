@@ -2,7 +2,7 @@
 
 **Datum:** 11. Januar 2026 03:30 Uhr
 **Status:** ✅ Phase 1-3 ABGESCHLOSSEN (75% Complete)
-**Version:** v5.1.0
+**Version:** v4.6.0
 
 ---
 
@@ -214,7 +214,7 @@ socket.emit('unsubscribe_variable', {
 def shutdown(self):
     self.running = False
 
-    # ⭐ v5.1.0: Stop Variable Polling
+    # ⭐ v4.6.0: Stop Variable Polling
     if self.data_gateway:
         self.data_gateway.stop_variable_polling()
         logger.info("Variable Polling gestoppt")
@@ -310,7 +310,7 @@ app.variableManager.unsubscribe('widget_123');
 initializeSocket() {
     this.socket = new SocketHandler();
 
-    // ⭐ v5.1.0: Initialize Variable Manager
+    // ⭐ v4.6.0: Initialize Variable Manager
     this.variableManager = new VariableManager(this.socket.socket);
     console.log('✅ Variable Manager initialisiert');
 
@@ -322,7 +322,7 @@ initializeSocket() {
 ```html
 <!-- JAVASCRIPT -->
 <script src="/static/js/socket_handler.js"></script>
-<script src="/static/js/variable-manager.js"></script> <!-- ⭐ v5.1.0 -->
+<script src="/static/js/variable-manager.js"></script> <!-- ⭐ v4.6.0 -->
 <script src="/static/js/app.js"></script>
 ```
 

@@ -2,7 +2,7 @@
 
 **Datum:** 11. Januar 2026 10:00 Uhr
 **Status:** ✅ 5 KRITISCHE FEHLER BEHOBEN
-**Version:** v5.1.1
+**Version:** v4.6.0
 
 ---
 
@@ -466,4 +466,4 @@ app.renderWidget(w, dashboard);
 **Nächste Aktion:** Server neu starten und testen! 🚀
 
 **Erstellt:** 11. Januar 2026 04:30 Uhr
-**Version:** v5.1.1
+**Version:** v4.6.0

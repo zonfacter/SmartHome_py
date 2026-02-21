@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 
 class BasePlugin(ABC):
     """
-    v5.1 BasePlugin Interface
+    v4.6.0 BasePlugin Interface
     Features: CPU-Throttling, Spam-Protection, Sentry-Logging
     """
     def __init__(self, app_context, config):

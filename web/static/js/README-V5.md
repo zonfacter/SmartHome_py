@@ -1,10 +1,10 @@
-# SmartHome Edge OS v5.0 - Frontend Components
+# SmartHome Edge OS v4.6.0 - Frontend Components
 
-Moderne JavaScript-Komponenten für das v5.0 Frontend.
+Moderne JavaScript-Komponenten für das v4.6.0 Frontend.
 
 ## 📦 Komponenten
 
-### 1. **Symbol Browser v5.0** (`symbol-browser-v5.js`)
+### 1. **Symbol Browser v4.6.0** (`symbol-browser-v5.js`)
 
 Moderner TreeView für PLC-Symbole mit korrekter Type-Detection.
 
@@ -46,7 +46,7 @@ symbolBrowser.applyFilters();
 
 ---
 
-### 2. **Widget Manager v5.0** (`widget-manager-v5.js`)
+### 2. **Widget Manager v4.6.0** (`widget-manager-v5.js`)
 
 Erweiterte CRUD-Operationen für Widgets.
 
@@ -95,7 +95,7 @@ widgetManager.deleteWidget(widgetId);
 
 ---
 
-### 3. **Plugin Manager v5.0** (`plugin-manager-v5.js`)
+### 3. **Plugin Manager v4.6.0** (`plugin-manager-v5.js`)
 
 ioBroker-Style Plugin-Verwaltung.
 
@@ -132,9 +132,9 @@ pluginManager.filterPlugins('running');
 
 ---
 
-### 4. **SmartHome v5.0** (`smarthome-v5.js`)
+### 4. **SmartHome v4.6.0** (`smarthome-v5.js`)
 
-Zentrale Integration aller v5.0 Features.
+Zentrale Integration aller v4.6.0 Features.
 
 **Features:**
 - ✅ Auto-Initialisierung aller Komponenten
@@ -172,7 +172,7 @@ const debugInfo = await smarthome.getWidgetDebugInfo();
 <!DOCTYPE html>
 <html lang="de">
 <head>
-    <title>SmartHome v5.0</title>
+    <title>SmartHome v4.6.0</title>
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -194,7 +194,7 @@ const debugInfo = await smarthome.getWidgetDebugInfo();
     <!-- Plugin Manager -->
     <div id="plugin-manager"></div>
 
-    <!-- Load v5.0 Scripts -->
+    <!-- Load v4.6.0 Scripts -->
     <script src="/static/js/symbol-browser-v5.js"></script>
     <script src="/static/js/widget-manager-v5.js"></script>
     <script src="/static/js/plugin-manager-v5.js"></script>
@@ -407,13 +407,13 @@ if (typeof lucide !== 'undefined') {
 
 ## 📝 Changelog
 
-### v5.0.0 (2026-01-05)
+### v4.6.0 (2026-01-05)
 
 **Neue Features:**
-- ✅ Symbol Browser v5.0
-- ✅ Widget Manager v5.0
-- ✅ Plugin Manager v5.0
-- ✅ Zentrale SmartHome v5.0 Integration
+- ✅ Symbol Browser v4.6.0
+- ✅ Widget Manager v4.6.0
+- ✅ Plugin Manager v4.6.0
+- ✅ Zentrale SmartHome v4.6.0 Integration
 - ✅ Dark Mode Support
 - ✅ Tailwind CSS Styling
 - ✅ Socket.IO Integration
@@ -425,6 +425,6 @@ if (typeof lucide !== 'undefined') {
 
 ---
 
-**Version**: 5.0.0
+**Version**: 4.6.0
 **Autor**: TwinCAT Team
 **Lizenz**: MIT

@@ -1,4 +1,4 @@
-# Quick Fix Summary - v5.1.1
+# Quick Fix Summary - v4.6.0
 
 **Datum:** 11. Januar 2026 05:00 Uhr
 **Status:** ✅ 4 CRITICAL BUGS FIXED
@@ -58,7 +58,7 @@ http://localhost:5000
 const w = {
     id: 'test_v511',
     type: 'boolean',
-    title: 'v5.1.1 Test',
+    title: 'v4.6.0 Test',
     variable: 'Light.Light_EG_WZ.bOn',
     position: {x: 50, y: 50}
 };
@@ -112,6 +112,6 @@ app.renderWidget(w, document.getElementById('dashboard-page'));
 
 ---
 
-**Version:** v5.1.1
+**Version:** v4.6.0
 **Erstellt:** 11. Januar 2026 05:00 Uhr
 **Dokumentation:** `CRITICAL_FIXES_2026_01_11.md`

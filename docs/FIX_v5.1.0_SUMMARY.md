@@ -1,4 +1,4 @@
-# 🎯 Web Manager v5.1.0 - Fix Summary
+# 🎯 Web Manager v4.6.0 - Fix Summary
 
 ## Problem
 
@@ -120,10 +120,10 @@ $ python -m py_compile modules/gateway/plc_config_manager.py
 
 | Datei | Änderung | Version |
 |-------|----------|---------|
-| `modules/gateway/web_manager.py` | Race-Condition-Fix + Logging | v5.1.0 |
-| `modules/gateway/plc_config_manager.py` | Unicode-Fix | v5.0.8 |
+| `modules/gateway/web_manager.py` | Race-Condition-Fix + Logging | v4.6.0 |
+| `modules/gateway/plc_config_manager.py` | Unicode-Fix | v4.6.0 |
 | `modules/core/sentry_config.py` | **NEU** - Sentry Integration | v1.0.0 |
-| `start_web_hmi.py` | Sentry-Initialisierung | v4.5.3 |
+| `start_web_hmi.py` | Sentry-Initialisierung | v4.6.0 |
 | `test_logging_system.py` | **NEU** - Logging-Tests | v1.0.0 |
 | `LOGGING_GUIDE.md` | **NEU** - Logging-Dokumentation | - |
 
@@ -150,10 +150,10 @@ python start_web_hmi.py
 [INFO] SENTRY_DSN gefunden - Error Tracking aktiviert
 [OK] Sentry initialisiert (Environment: development, Release: dev-unknown)
 ============================================================
-SmartHome OS v4.5.3 - Web-HMI
+SmartHome OS v4.6.0 - Web-HMI
 ============================================================
 
-=== Web Manager v5.1.0 Initialisierung START ===
+=== Web Manager v4.6.0 Initialisierung START ===
 Pfade initialisiert: root=D:\..., config=D:\...\config, data=D:\...\plc_data
 Data Gateway verknuepft
 Initialisiere PLCConfigManager...
@@ -163,7 +163,7 @@ PLCConfigManager bereit: config_file=D:\...\config\plc_connections.json
 Initialisiere Flask App...
 Flask App bereit
 [OK] web_manager v1.0.0 initialisiert
-=== Web Manager v5.1.0 Initialisierung ABGESCHLOSSEN ===
+=== Web Manager v4.6.0 Initialisierung ABGESCHLOSSEN ===
 
 ▶️  Web-Server startet auf http://0.0.0.0:5000
 ```
@@ -325,4 +325,4 @@ Bei Problemen:
 
 **Status:** ✅ **Production Ready**
 
-**Version:** v5.1.0 (2026-01-06)
+**Version:** v4.6.0 (2026-01-06)

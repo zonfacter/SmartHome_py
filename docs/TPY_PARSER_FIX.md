@@ -1,7 +1,7 @@
 # TPY-Parser Fix - DataType-basierte SubItem-Expansion
 
 **Datum:** 10. Januar 2026
-**Version:** symbol_browser.py v5.1.0
+**Version:** symbol_browser.py v4.6.0
 **Status:** ✅ IMPLEMENTIERT - Bereit zum Testen
 
 ---
@@ -195,7 +195,7 @@ Light_EG_WZ.RisingEdgeOn.M (BOOL)
 
 ## Erwartetes Ergebnis
 
-### Vorher (v5.0.6):
+### Vorher (v4.6.0):
 ```
 📂 Root-Element: PlcProjectInfo
 🔍 Gefunden: 952 <Symbol> Elemente (Top-Level)
@@ -204,7 +204,7 @@ Light_EG_WZ.RisingEdgeOn.M (BOOL)
 💾 751 Symbole konvertiert zu PLCSymbol-Objekten
 ```
 
-### Nachher (v5.1.0):
+### Nachher (v4.6.0):
 ```
 📂 Root-Element: PlcProjectInfo
 🔍 Gefunden: 952 <Symbol> Elemente (Top-Level)
@@ -302,8 +302,8 @@ python main.py
 | Methode | Symbole | Hierarchie | Status |
 |---------|---------|------------|--------|
 | **Live-Load** (pyads) | 14.264 | ✅ Vollständig | ✅ Funktioniert |
-| **TPY-Parser** (alt v5.0.6) | 751 | ❌ Nur Top-Level | ❌ Unvollständig |
-| **TPY-Parser** (neu v5.1.0) | ~14.000 | ✅ Vollständig | ✅ Sollte funktionieren |
+| **TPY-Parser** (alt v4.6.0) | 751 | ❌ Nur Top-Level | ❌ Unvollständig |
+| **TPY-Parser** (neu v4.6.0) | ~14.000 | ✅ Vollständig | ✅ Sollte funktionieren |
 
 ---
 
@@ -311,7 +311,7 @@ python main.py
 
 ### `modules/plc/symbol_browser.py`
 
-**Lines 1-20:** Version-Header aktualisiert (v5.1.0)
+**Lines 1-20:** Version-Header aktualisiert (v4.6.0)
 **Lines 257-359:** Komplette Neuimplementierung des TPY-Parsers:
 - DataType-Map Erstellung
 - `get_text()` Hilfsfunktion

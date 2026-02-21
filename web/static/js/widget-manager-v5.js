@@ -1,5 +1,5 @@
 /**
- * Widget Manager v5.0
+ * Widget Manager v4.6.0
  * Erweiterte CRUD-Operationen für Widgets
  */
 

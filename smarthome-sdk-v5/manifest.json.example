@@ -3,7 +3,7 @@
   "name": "Beispiel Sensor Plugin",
   "version": "1.0.0",
   "author": "Dein Name / Firma",
-  "description": "Ein Demo-Plugin zur Demonstration des v5.1 SDKs.",
+  "description": "Ein Demo-Plugin zur Demonstration des v4.6.0 SDKs.",
   "category": "Sensoren",
   "icon": "activity",
   "min_os_version": "5.1.0",

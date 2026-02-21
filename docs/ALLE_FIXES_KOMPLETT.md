@@ -254,7 +254,7 @@ python -X utf8 start_web_hmi.py --port 5001
 ### Erwartete Console-Ausgabe:
 ```
 ==========================================================
-SmartHome OS v4.5.3 - Web-HMI
+SmartHome OS v4.6.0 - Web-HMI
 ==========================================================
 
 INFO     [database_logger] Database Logger initialisiert: ...

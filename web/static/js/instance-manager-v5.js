@@ -1,5 +1,5 @@
 /**
- * Instance Manager v5.0
+ * Instance Manager v4.6.0
  * Connection-Instanzen Verwaltung mit Live-Monitoring
  */
 

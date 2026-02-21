@@ -194,7 +194,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🔧 Improvements
 
-- **Startup-Meldung**: Zeigt v4.5.3 statt v4.5
+- **Startup-Meldung**: Zeigt v4.6.0 statt v4.5
 - **Restart-Indikator**: Zeigt `✅ Service neu gestartet (Hot-Reload)` bei Restart
 - **Logging-Format**: Strukturiert und konsistent
 
@@ -460,7 +460,7 @@ Earlier versions were monolithic and not modular. Version 4.0.0 represents a com
 - Sandboxed plugin execution
 - Plugin dependency management
 
-### Planned for v5.0.0
+### Planned for v4.6.0
 
 #### Container Orchestration
 - Docker Compose templates

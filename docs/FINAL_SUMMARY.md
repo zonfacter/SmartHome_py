@@ -2,7 +2,7 @@
 
 **Datum:** 10. Januar 2026
 **Status:** 🎉 **10/10 Bugs behoben + TPY-Parser mit DataType-Mapping korrigiert**
-**Version:** symbol_browser.py v5.1.0
+**Version:** symbol_browser.py v4.6.0
 
 ---
 
@@ -44,7 +44,7 @@
 
 **Lösung:** DataType-basierter Parser (adaptiert aus `convert_tpy_csv.py`)
 
-#### Vorher (v5.0.6 - FALSCH):
+#### Vorher (v4.6.0 - FALSCH):
 ```python
 # Suchte nach SubItems unter Symbol - gibt LEER zurück!
 for subitem in sym.findall('./SubItem'):  # ← Findet nichts in TwinCAT 2!
@@ -54,7 +54,7 @@ for subitem in sym.findall('./SubItem'):  # ← Findet nichts in TwinCAT 2!
 # Ergebnis: Nur 751 Top-Symbole
 ```
 
-#### Nachher (v5.1.0 - KORREKT):
+#### Nachher (v4.6.0 - KORREKT):
 ```python
 # SCHRITT 1: Baue DataType-Map
 datatype_by_name = {}

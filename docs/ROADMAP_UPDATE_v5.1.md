@@ -1,4 +1,4 @@
-# Feature Roadmap Update - v5.1 Central Data Router
+# Feature Roadmap Update - v4.6.0 Central Data Router
 
 **Datum:** 2026-01-04
 **Status:** Design & Architecture abgeschlossen
@@ -16,9 +16,9 @@
 - Widget Delete Button dokumentiert
 - ConfigManager Widget-Persistence Methods dokumentiert
 
-### 2. Neue Sektion: v5.1 Central Data Router
+### 2. Neue Sektion: v4.6.0 Central Data Router
 
-Die FEATURE_ROADMAP.md wurde um eine vollständige v5.1 Architektur-Spezifikation erweitert:
+Die FEATURE_ROADMAP.md wurde um eine vollständige v4.6.0 Architektur-Spezifikation erweitert:
 
 #### **Konzept: Middleware Broker Pattern**
 - Problem: Keine Cross-Interface-Kommunikation (BT → PLC unmöglich)
@@ -73,7 +73,7 @@ Die FEATURE_ROADMAP.md wurde um eine vollständige v5.1 Architektur-Spezifikatio
 3. Multi-Sensor Aggregation Plugin
 
 #### **Migration Guide:**
-- Schritt-für-Schritt von v4.7.0 zu v5.1
+- Schritt-für-Schritt von v4.7.0 zu v4.6.0
 - Code-Beispiele (Vorher/Nachher)
 - Rückwärtskompatibilität dokumentiert
 
@@ -190,9 +190,9 @@ Python-Expressions für Werte-Mapping!
 
 ### FEATURE_ROADMAP.md:
 
-**Zeile 3-16:** v4.5.3 → v4.7.0 aktualisiert + neue Features hinzugefügt
+**Zeile 3-16:** v4.6.0 → v4.7.0 aktualisiert + neue Features hinzugefügt
 
-**Zeile 298-1018:** Komplett neue Sektion "v5.1 Central Data Router" mit:
+**Zeile 298-1018:** Komplett neue Sektion "v4.6.0 Central Data Router" mit:
 - 726 Zeilen neue Dokumentation
 - 6 Komponenten vollständig spezifiziert
 - 3 Use Cases mit kompletten Flows
@@ -205,7 +205,7 @@ Python-Expressions für Werte-Mapping!
 
 ## Qualitätssicherung
 
-Alle v5.1 Komponenten sind:
+Alle v4.6.0 Komponenten sind:
 - ✅ Vollständig spezifiziert (Architektur + Code)
 - ✅ Mit Use Cases dokumentiert
 - ✅ Rückwärtskompatibel zu v4.7.0
@@ -214,7 +214,7 @@ Alle v5.1 Komponenten sind:
 
 ---
 
-**Status:** FEATURE_ROADMAP.md ist bereit für v5.1 Implementierung!
+**Status:** FEATURE_ROADMAP.md ist bereit für v4.6.0 Implementierung!
 
 **Reviewer:** Bitte prüfen Sie insbesondere:
 1. Routing Rules Schema - vollständig?

@@ -3,10 +3,10 @@
   "name": "Routing Example Plugin",
   "version": "1.0.0",
   "author": "TwinCAT Team",
-  "description": "Demonstriert die Nutzung des Universal Data Routers (v5.0). Zeigt wie Plugins Daten publizieren und subscriben können.",
+  "description": "Demonstriert die Nutzung des Universal Data Routers (v4.6.0). Zeigt wie Plugins Daten publizieren und subscriben können.",
   "category": "Examples",
   "icon": "git-branch",
-  "min_os_version": "5.0.0",
+  "min_os_version": "4.6.0",
   "dependencies": [],
   "config_schema": {
     "publish_interval": "number",

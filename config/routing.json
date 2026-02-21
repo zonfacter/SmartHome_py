@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "description": "Routing-Konfiguration für SmartHome Edge OS v5.0",
+  "description": "Routing-Konfiguration für SmartHome Edge OS v4.6.0",
   "routes": [
     {
       "id": "example_passthrough",

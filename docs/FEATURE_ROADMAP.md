@@ -295,7 +295,7 @@ ConnectionManager
 
 ---
 
-## 🚀 v5.1 - Central Data Router ("Single Source of Truth")
+## 🚀 v4.6.0 - Central Data Router ("Single Source of Truth")
 **Status:** Design & Architecture Phase
 **Ziel:** Zentrales Routing-System für heterogene Datenquellen mit Pub/Sub-Architektur
 
@@ -881,7 +881,7 @@ class DataGateway(BaseModule):
 
 ---
 
-## 📅 Implementation Timeline v5.1
+## 📅 Implementation Timeline v4.6.0
 
 ### Phase 1 (1-2 Tage): Core Architecture
 - [x] route_data() Methode in DataGateway
@@ -914,7 +914,7 @@ class DataGateway(BaseModule):
 
 ---
 
-## 🎯 v5.1 Use Cases
+## 🎯 v4.6.0 Use Cases
 
 ### Use Case 1: BT-Sensor → PLC
 **Szenario:** Bluetooth Temperatursensor soll Außentemperatur an PLC senden
@@ -982,7 +982,7 @@ class AvgTempPlugin(BasePlugin):
 
 ---
 
-## 🔧 Migration Guide (v4.7.0 → v5.1)
+## 🔧 Migration Guide (v4.7.0 → v4.6.0)
 
 ### Schritt 1: Bestehende Integrationen anpassen
 **Vorher:**
@@ -997,7 +997,7 @@ def update_value(self, source, variable, value):
 
 **Nachher:**
 ```python
-# modules/gateway/data_gateway.py (v5.1)
+# modules/gateway/data_gateway.py (v4.6.0)
 def update_value(self, source, variable, value):
     # Leite alles durch route_data()
     self.route_data(source, variable, value)
@@ -1012,6 +1012,6 @@ Erstelle `config/routing.json` mit initialen Regeln.
 ---
 
 Welche Priorität sollen wir zuerst angehen? Ich empfehle:
-1. **v5.1 Phase 1** - route_data() + Pub/Sub Core
-2. **v5.1 Phase 2** - Routing Configuration System
-3. **v5.1 Phase 3** - History Manager
+1. **v4.6.0 Phase 1** - route_data() + Pub/Sub Core
+2. **v4.6.0 Phase 2** - Routing Configuration System
+3. **v4.6.0 Phase 3** - History Manager

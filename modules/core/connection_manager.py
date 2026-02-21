@@ -1,10 +1,10 @@
 """
-Connection Manager Module v5.0.0
+Connection Manager Module v4.6.0
 Verwaltet beliebig viele parallele Verbindungen
 
 📁 SPEICHERORT: modules/core/connection_manager.py
 
-Features v5.0:
+Features v4.6.0:
 - ⭐ Multi-Instance Support (mehrere PLCs, MQTT-Broker, etc.)
 - ⭐ Einheitliches Lifecycle-Management
 - ⭐ Health-Monitoring pro Verbindung
@@ -136,7 +136,7 @@ class BaseConnection(ABC):
 
 class ConnectionManager(BaseModule):
     """
-    Connection Manager v5.0.0
+    Connection Manager v4.6.0
 
     Verwaltet beliebig viele parallele Verbindungen:
     - PLCs (mehrere AMS-Verbindungen)
@@ -154,7 +154,7 @@ class ConnectionManager(BaseModule):
     """
 
     NAME = "connection_manager"
-    VERSION = "5.0.0"
+    VERSION = "4.6.0"
     DESCRIPTION = "Multi-Connection Manager"
     AUTHOR = "TwinCAT Team"
     DEPENDENCIES = ['data_gateway']
@@ -276,7 +276,7 @@ class ConnectionManager(BaseModule):
         """Erstellt Standard connections.json Template"""
         default_config = {
             "version": "1.0",
-            "description": "Verbindungs-Konfiguration für SmartHome Edge OS v5.0",
+            "description": "Verbindungs-Konfiguration für SmartHome Edge OS v4.6.0",
             "connections": {
                 "plc_001": {
                     "type": "plc",

@@ -1,8 +1,8 @@
-# 🔧 Hotfix v5.1.3 - Config Manager Race-Condition-Fix
+# 🔧 Hotfix v4.6.0 - Config Manager Race-Condition-Fix
 
 ## Problem (Root Cause gefunden!)
 
-Nach v5.1.2 traten weiterhin NoneType-Fehler auf, **OBWOHL** `PLCConfigManager` gefixt war:
+Nach v4.6.0 traten weiterhin NoneType-Fehler auf, **OBWOHL** `PLCConfigManager` gefixt war:
 
 ```
 [ERROR] Fehler beim Speichern: _path_exists: path should be string, bytes, os.PathLike or integer, not NoneType
@@ -15,7 +15,7 @@ Das System verwendet **NICHT NUR** `PLCConfigManager`, sondern auch:
 
 1. **`PLCConfigManager`** (modules/gateway/plc_config_manager.py)
    - Für PLC-spezifische Configs
-   - ✅ **Wurde in v5.1.0 gefixt**
+   - ✅ **Wurde in v4.6.0 gefixt**
 
 2. **`ConfigManager`** (modules/core/config_manager.py)
    - Für allgemeine App-Config (Widgets, Themes, Custom Lights)
@@ -30,7 +30,7 @@ config_mgr.save_config()  # NoneType-Fehler hier!
 
 ---
 
-## Lösung v5.1.3
+## Lösung v4.6.0
 
 ### Fix 1: Race-Condition in ConfigManager.__init__()
 
@@ -54,7 +54,7 @@ def initialize(self, app_context):
 
 **Problem:** Flask-Routes konnten `config_manager.save_config()` aufrufen, BEVOR `initialize()` fertig war.
 
-**Jetzt (v5.1.3):**
+**Jetzt (v4.6.0):**
 ```python
 def __init__(self):
     super().__init__()
@@ -124,7 +124,7 @@ Alle Emoji-Zeichen durch ASCII ersetzt:
 
 ## Vergleich: Vorher vs. Jetzt
 
-### Vorher (v5.1.2):
+### Vorher (v4.6.0):
 ```python
 # Widget erstellen (web_manager.py):
 config_mgr = self.app_context.module_manager.get_module('config_manager')
@@ -137,7 +137,7 @@ config_mgr.save_config()  # ❌ NoneType-Fehler wenn config_file = None
 ✗ Fehler beim Speichern: _path_exists: path should be string... not NoneType
 ```
 
-### Jetzt (v5.1.3):
+### Jetzt (v4.6.0):
 ```python
 # Dasselbe Code funktioniert nun:
 config_mgr = self.app_context.module_manager.get_module('config_manager')
@@ -276,7 +276,7 @@ T4    |                               | initialize() fertig
 
 ## Vergleich der Manager-Versionen
 
-| Manager | Datei | v5.1.2 | v5.1.3 |
+| Manager | Datei | v4.6.0 | v4.6.0 |
 |---------|-------|--------|--------|
 | PLCConfigManager | gateway/plc_config_manager.py | ✅ Gefixt | ✅ Gefixt |
 | ConfigManager | core/config_manager.py | ❌ Bug | ✅ **Gefixt** |
@@ -293,7 +293,7 @@ T4    |                               | initialize() fertig
 | Datei | Änderungen | Zeilen |
 |-------|-----------|--------|
 | `modules/core/config_manager.py` | Race-Condition-Fix + Unicode-Fix | ~24 Zeilen geändert |
-| `HOTFIX_v5.1.3_CONFIG_MANAGER.md` | **NEU** - Diese Dokumentation | - |
+| `HOTFIX_v4.6.0_CONFIG_MANAGER.md` | **NEU** - Diese Dokumentation | - |
 
 ---
 
@@ -327,14 +327,14 @@ T4    |                               | initialize() fertig
 
 ## Known Issues (behoben)
 
-### ✅ v5.1.0-v5.1.2: PLCConfigManager Race-Condition
-**Status:** Behoben in v5.1.0
+### ✅ v4.6.0-v4.6.0: PLCConfigManager Race-Condition
+**Status:** Behoben in v4.6.0
 
-### ✅ v5.1.0-v5.1.2: ConfigManager Race-Condition
-**Status:** Behoben in v5.1.3 (**DIESER FIX**)
+### ✅ v4.6.0-v4.6.0: ConfigManager Race-Condition
+**Status:** Behoben in v4.6.0 (**DIESER FIX**)
 
 ### ✅ Unicode-Encoding auf Windows
-**Status:** Behoben in v5.1.3 (ASCII statt Emoji)
+**Status:** Behoben in v4.6.0 (ASCII statt Emoji)
 
 ---
 
@@ -359,7 +359,7 @@ T4    |                               | initialize() fertig
 
 ## Change Log
 
-### v5.1.3 (2026-01-06 20:00) - **CRITICAL FIX**
+### v4.6.0 (2026-01-06 20:00) - **CRITICAL FIX**
 - ✅ **CRITICAL:** ConfigManager Race-Condition behoben
 - ✅ Pfade in `__init__()` statt `initialize()` gesetzt
 - ✅ Unicode-Encoding-Probleme behoben (Emoji → ASCII)
@@ -367,26 +367,26 @@ T4    |                               | initialize() fertig
 - ✅ Theme-Management funktioniert nun
 - ✅ Custom-Lights-Management funktioniert nun
 
-### v5.1.2 (2026-01-06 19:15)
+### v4.6.0 (2026-01-06 19:15)
 - ✅ TPY-Upload-Route hinzugefügt
 - ✅ Widget POST-Support hinzugefügt
 - ✅ Latenz-Messung hinzugefügt
-- ❌ ConfigManager-Bug noch vorhanden (behoben in v5.1.3)
+- ❌ ConfigManager-Bug noch vorhanden (behoben in v4.6.0)
 
-### v5.1.1 (2026-01-06 18:50)
+### v4.6.0 (2026-01-06 18:50)
 - ✅ 9 fehlende API-Routen wiederhergestellt
-- ❌ ConfigManager-Bug noch vorhanden (behoben in v5.1.3)
+- ❌ ConfigManager-Bug noch vorhanden (behoben in v4.6.0)
 
-### v5.1.0 (2026-01-06 18:00)
+### v4.6.0 (2026-01-06 18:00)
 - ✅ PLCConfigManager Race-Condition behoben
 - ✅ Sentry-Integration hinzugefügt
-- ❌ ConfigManager-Bug noch vorhanden (behoben in v5.1.3)
+- ❌ ConfigManager-Bug noch vorhanden (behoben in v4.6.0)
 
 ---
 
 ## Status: CRITICAL FIX DEPLOYED ✅
 
-**Version:** v5.1.3 (2026-01-06 20:00)
+**Version:** v4.6.0 (2026-01-06 20:00)
 **Kritikalität:** CRITICAL
 **Deployment:** PRODUCTION READY
 
@@ -417,4 +417,4 @@ Bei Problemen:
 - GitHub Issues
 - Sentry: https://sentry.io
 
-**Version:** v5.1.3 FINAL (2026-01-06)
+**Version:** v4.6.0 FINAL (2026-01-06)

@@ -2,7 +2,7 @@
 
 **Datum:** 11. Januar 2026 04:00 Uhr
 **Status:** ✅ 100% COMPLETE - READY FOR TESTING
-**Version:** v5.1.0
+**Version:** v4.6.0
 
 ---
 
@@ -504,5 +504,5 @@ console.log('Value:', d.value);
 **Nächster Schritt:** Server neu starten und Test-Widget erstellen! 🚀
 
 **Erstellt:** 11. Januar 2026 04:00 Uhr
-**Version:** v5.1.0
+**Version:** v4.6.0
 **Autor:** Claude Sonnet 4.5

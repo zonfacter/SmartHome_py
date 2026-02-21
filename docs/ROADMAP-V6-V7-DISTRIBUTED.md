@@ -3,13 +3,13 @@
 
 **Datum:** 2026-01-05
 **Status:** Planung
-**Basis:** v5.0.0 (Production Ready)
+**Basis:** v4.6.0 (Production Ready)
 
 ---
 
 ## Executive Summary
 
-Nach Abschluss von v5.0 (lokales Gateway mit Multi-Instance Support) folgt nun der Schritt zum **verteilten Edge-Betriebssystem**:
+Nach Abschluss von v4.6.0 (lokales Gateway mit Multi-Instance Support) folgt nun der Schritt zum **verteilten Edge-Betriebssystem**:
 
 - **v6.0:** Distributed Architecture (Satellite-Core Mode)
 - **v7.0:** Advanced Performance & Logic Engines
@@ -22,7 +22,7 @@ Nach Abschluss von v5.0 (lokales Gateway mit Multi-Instance Support) folgt nun d
 
 ## Architektur-Konzept
 
-### Aktuell (v5.0):
+### Aktuell (v4.6.0):
 ```
 ┌─────────────────────────────────┐
 │  SmartHome Edge OS (Monolith)   │
@@ -1688,12 +1688,12 @@ def test_discovery_service():
 
 ---
 
-## Migration von v5.0 → v6.0
+## Migration von v4.6.0 → v6.0
 
 ### Rückwärtskompatibilität:
 ✅ **100% kompatibel**
 
-v6.0 ist ein **reines Add-On** zu v5.0. Bestehende Installationen laufen ohne Änderungen weiter.
+v6.0 ist ein **reines Add-On** zu v4.6.0. Bestehende Installationen laufen ohne Änderungen weiter.
 
 ### Opt-In Features:
 - Headless-Mode: `--headless` Flag

@@ -1,7 +1,7 @@
 """
 Routing Example Plugin
 
-Demonstriert die Nutzung des Universal Data Routers (v5.0)
+Demonstriert die Nutzung des Universal Data Routers (v4.6.0)
 """
 
 from .main import RoutingExamplePlugin

@@ -1,5 +1,5 @@
 /**
- * Plugin Manager v5.0
+ * Plugin Manager v4.6.0
  * ioBroker-Style Plugin-Verwaltung
  */
 

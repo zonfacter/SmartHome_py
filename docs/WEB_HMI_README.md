@@ -1,4 +1,4 @@
-# SmartHome OS v4.5 - Web-HMI
+# SmartHome OS v4.6.0 - Web-HMI
 
 Modern web-basiertes HMI-Interface für TwinCAT SmartHome Visualisierung.
 

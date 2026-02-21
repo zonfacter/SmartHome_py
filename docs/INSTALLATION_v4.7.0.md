@@ -299,7 +299,7 @@ variableExplorer.switchTab('mqtt');
 - 📈 **Hardware Monitor (HAL)** - CPU/GPU/RAM Live-Monitoring
 - 🎨 **Theme-Editor** - Custom Themes erstellen
 
-### **v5.0 Vision:**
+### **v4.6.0 Vision:**
 - 🤖 **Auto-Widget-Generator** - KI generiert Widgets aus Variablen
 - 📱 **Mobile App** - Native iOS/Android App
 - 🔐 **User-Management** - Multi-User mit Permissions

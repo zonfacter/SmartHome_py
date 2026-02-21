@@ -2,7 +2,7 @@
 
 **Datum:** 11. Januar 2026 04:00 Uhr
 **Status:** ✅ READY FOR TESTING
-**Version:** v5.1.0
+**Version:** v4.6.0
 
 ---
 

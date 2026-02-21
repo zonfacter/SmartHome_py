@@ -4,7 +4,7 @@ import time
 
 class ExampleSensorPlugin(BasePlugin):
     """
-    Referenz-Plugin zur Demonstration des v5.1 SDKs.
+    Referenz-Plugin zur Demonstration des v4.6.0 SDKs.
     Simuliert einen Sensor, um das Routing zu testen.
     """
     def initialize(self):

@@ -1,9 +1,9 @@
 # CHANGELOG.md
 
-## v5.0.0 – Edge-Betriebssystem für industrielle Hausautomatisierung (🔄 In Entwicklung)
+## v4.6.0 – Edge-Betriebssystem für industrielle Hausautomatisierung (🔄 In Entwicklung)
 
 ### Übersicht
-Version **5.0.0** bringt eine vollständige Transformation des Systems von einer HMI-Visualisierung zu einem **Edge-Betriebssystem für industrielle Hausautomatisierung** nach dem Vorbild von ioBroker.
+Version **4.6.0** bringt eine vollständige Transformation des Systems von einer HMI-Visualisierung zu einem **Edge-Betriebssystem für industrielle Hausautomatisierung** nach dem Vorbild von ioBroker.
 
 Das System wird nicht mehr nur eine Anwendung, sondern eine vollständig modulare Middleware-Plattform mit:
 - Universal Data Router für alle Datenquellen
@@ -474,7 +474,7 @@ Datenquelle → DataGateway.route_data()
 
 ---
 
-## Migration von v4.x zu v5.0
+## Migration von v4.x zu v4.6.0
 
 ### Schritt 1: Backup erstellen
 ```bash
@@ -551,7 +551,7 @@ pip install -r requirements.txt
 
 ## Zusammenfassung
 
-Version **v5.0.0** transformiert das Projekt zu einem vollwertigen **Edge-Betriebssystem für industrielle Hausautomatisierung**. Die neue Architektur ermöglicht:
+Version **v4.6.0** transformiert das Projekt zu einem vollwertigen **Edge-Betriebssystem für industrielle Hausautomatisierung**. Die neue Architektur ermöglicht:
 
 ✅ **Flexible Datenflüsse** durch Universal Data Router
 ✅ **Beliebig viele Verbindungen** durch Connection Manager
@@ -564,7 +564,7 @@ Version **v5.0.0** transformiert das Projekt zu einem vollwertigen **Edge-Betrie
 
 **Entwicklungsstand:** 2026-01-04
 **Status:** In Planung (0% Implementation)
-**Zielversion:** 5.0.0
+**Zielversion:** 4.6.0
 **Erwartete Fertigstellung:** Q2 2026
 
 ---
@@ -583,7 +583,7 @@ Version **v5.0.0** transformiert das Projekt zu einem vollwertigen **Edge-Betrie
 - ✅ Hardware-Monitoring
 - ✅ Responsive Web-UI
 
-### Bekannte Limitierungen (werden in v5.0 behoben)
+### Bekannte Limitierungen (werden in v4.6.0 behoben)
 - Nur eine PLC-Verbindung gleichzeitig
 - Kein Bluetooth-Support
 - Keine flexible Routing-Engine

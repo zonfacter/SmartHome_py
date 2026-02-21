@@ -1,14 +1,14 @@
-# 🚀 SmartHome Edge OS v5.0 - Release Notes
+# 🚀 SmartHome Edge OS v4.6.0 - Release Notes
 
 **Release Date**: 2026-01-05
-**Version**: 5.0.0
+**Version**: 4.6.0
 **Codename**: "Edge Revolution"
 
 ---
 
 ## 🎯 Überblick
 
-SmartHome Edge OS v5.0 transformiert das System von einer einfachen HMI-Anwendung zu einem **vollwertigen Edge Operating System** für industrielle Heimautomatisierung.
+SmartHome Edge OS v4.6.0 transformiert das System von einer einfachen HMI-Anwendung zu einem **vollwertigen Edge Operating System** für industrielle Heimautomatisierung.
 
 ### Kernziele dieser Version:
 - ⭐ **Universal Data Router** - Zentrale Datenverwaltung
@@ -24,7 +24,7 @@ SmartHome Edge OS v5.0 transformiert das System von einer einfachen HMI-Anwendun
 ### 🔄 Phase 1: Universal Data Router
 
 **Backend:**
-- `modules/gateway/data_gateway.py` (v1.0 → v5.0)
+- `modules/gateway/data_gateway.py` (v1.0 → v4.6.0)
   - `route_data()` Methode (~360 Zeilen)
   - Spam Protection (500 pps Circuit Breaker)
   - Pattern Matching für Routing
@@ -148,7 +148,7 @@ print(f"Cells: {bms_data.cell_voltages}")
 
 ---
 
-### 🔍 Phase 4: Symbol Browser v5.0
+### 🔍 Phase 4: Symbol Browser v4.6.0
 
 **Backend:**
 - `modules/plc/symbol_browser.py` (~400 Zeilen)
@@ -181,7 +181,7 @@ GET /api/v5/plc/symbols/filter/BOOL
 
 ---
 
-### 📊 Phase 5: Widget Manager v5.0
+### 📊 Phase 5: Widget Manager v4.6.0
 
 **Backend:**
 - Widget API erweitert
@@ -203,7 +203,7 @@ GET /api/v5/plc/symbols/filter/BOOL
 
 ---
 
-### 🧩 Phase 6: Plugin Manager v5.0
+### 🧩 Phase 6: Plugin Manager v4.6.0
 
 **Frontend:**
 - `web/static/js/plugin-manager-v5.js` (~600 Zeilen)
@@ -249,18 +249,18 @@ await smarthome.syncWidgets();
 TwinCAT_Smarthome_Visu/
 ├── modules/
 │   ├── gateway/
-│   │   ├── data_gateway.py          (v5.0 - Universal Router)
-│   │   └── web_manager.py           (v5.0 API-Routen)
+│   │   ├── data_gateway.py          (v4.6.0 - Universal Router)
+│   │   └── web_manager.py           (v4.6.0 API-Routen)
 │   ├── core/
-│   │   ├── connection_manager.py    (v5.0 - Multi-Connection)
-│   │   └── plc_connection.py        (v5.0 - Multi-Instance)
+│   │   ├── connection_manager.py    (v4.6.0 - Multi-Connection)
+│   │   └── plc_connection.py        (v4.6.0 - Multi-Instance)
 │   ├── bluetooth/
-│   │   ├── bluetooth_manager.py     (v5.0 - BLE)
-│   │   ├── bms_parser.py            (v5.0 - BMS Base)
+│   │   ├── bluetooth_manager.py     (v4.6.0 - BLE)
+│   │   ├── bms_parser.py            (v4.6.0 - BMS Base)
 │   │   └── parsers/
-│   │       └── jbd_parser.py        (v5.0 - JBD/Xiaoxiang)
+│   │       └── jbd_parser.py        (v4.6.0 - JBD/Xiaoxiang)
 │   └── plc/
-│       └── symbol_browser.py        (v5.0 - Symbol Browser)
+│       └── symbol_browser.py        (v4.6.0 - Symbol Browser)
 ├── smarthome-sdk-v5/
 │   ├── routing_example/             (SDK Beispiel)
 │   ├── connection_example/          (SDK Beispiel)
@@ -282,7 +282,7 @@ TwinCAT_Smarthome_Visu/
 
 ---
 
-## 🔧 Migration von v4.x zu v5.0
+## 🔧 Migration von v4.x zu v4.6.0
 
 ### 1. PLC-Verbindungen
 
@@ -293,7 +293,7 @@ plc.connect()
 value = plc.read_by_name("MAIN.bAlarm")
 ```
 
-**Neu (v5.0):**
+**Neu (v4.6.0):**
 ```python
 # Über Connection Manager
 conn_mgr = module_manager.get_module('connection_manager')
@@ -311,7 +311,7 @@ if plc.is_connected():
 data_gateway.update_telemetry("MAIN.temperature", 23.5)
 ```
 
-**Neu (v5.0):**
+**Neu (v4.6.0):**
 ```python
 # Universal Router
 data_gateway.route_data(
@@ -329,7 +329,7 @@ data_gateway.route_data(
 widgets = config_mgr.get_config_value('widgets', {})
 ```
 
-**Neu (v5.0):**
+**Neu (v4.6.0):**
 ```python
 widgets = config_mgr.get_widgets()
 ```
@@ -351,7 +351,7 @@ widgets = config_mgr.get_widgets()
 3. ✅ **UNKNOWN Symbol-Type Bug**
    - Symbole zeigten "UNKNOWN" als Type
    - Ursache: Alte Symbol-Parser aus .tpy Datei
-   - Fix: Neuer Symbol Browser v5.0 liest direkt von PLC
+   - Fix: Neuer Symbol Browser v4.6.0 liest direkt von PLC
 
 ### Weitere Verbesserungen:
 - ✅ Widget-Sync Performance optimiert
@@ -363,7 +363,7 @@ widgets = config_mgr.get_widgets()
 
 ## 📊 Performance-Verbesserungen
 
-| Metrik | v4.x | v5.0 | Verbesserung |
+| Metrik | v4.x | v4.6.0 | Verbesserung |
 |--------|------|------|--------------|
 | Symbol-Lade-Zeit | ~3s | ~0.5s | **6x schneller** |
 | Widget-Sync | ~2s | ~0.3s | **7x schneller** |
@@ -475,7 +475,7 @@ python main.py
 
 ## 🎯 Roadmap
 
-### Geplant für v5.1:
+### Geplant für v4.6.0:
 - [ ] Node-RED Integration (MQTT Bridge)
 - [ ] Performance-Profiling System
 - [ ] Plugin Marketplace
@@ -515,8 +515,8 @@ MIT License
 
 ---
 
-**Version**: 5.0.0
+**Version**: 4.6.0
 **Build**: 2026-01-05
 **Autor**: TwinCAT Team
 
-🎉 **SmartHome Edge OS v5.0 ist produktionsbereit!**
+🎉 **SmartHome Edge OS v4.6.0 ist produktionsbereit!**

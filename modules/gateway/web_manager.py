@@ -1,5 +1,5 @@
 """
-Web Manager Module v5.1.0
+Web Manager Module v4.6.0
 FINAL FIX: Beseitigt NoneType-Pfadfehler durch synchrone Initialisierung.
 
 📁 SPEICHERORT: modules/gateway/web_manager.py
@@ -55,12 +55,12 @@ logger = logging.getLogger(__name__)
 
 class WebManager(BaseModule):
     """
-    Web Manager v5.1.0
+    Web Manager v4.6.0
     Verwaltet das Web-Interface und die Kommunikation zum Frontend.
     """
 
     NAME = "web_manager"
-    VERSION = "1.1.0"
+    VERSION = "4.6.0"
     DESCRIPTION = "Flask + SocketIO Web-HMI Server"
     AUTHOR = "TwinCAT Team"
     API_MAJOR_VERSION = "1"
@@ -83,7 +83,7 @@ class WebManager(BaseModule):
         self.lock = threading.Lock()
         self.sentry = None
 
-        # ⭐ Variable Manager (v5.1.0)
+        # ⭐ Variable Manager (v4.6.0)
         self.variable_manager = None
 
         # ONVIF PTZ Controllers (lazy, gecacht)
@@ -140,7 +140,7 @@ class WebManager(BaseModule):
         super().initialize(app_context)
         self.app_context = app_context
 
-        logger.info("=== Web Manager v5.1.0 Initialisierung START ===")
+        logger.info("=== Web Manager v4.6.0 Initialisierung START ===")
 
         # Initialize Sentry if available
         if SENTRY_AVAILABLE:
@@ -191,7 +191,7 @@ class WebManager(BaseModule):
                 conn_mgr = app_context.module_manager.get_module('connection_manager')
                 self.symbol_browser = get_symbol_browser(conn_mgr)
 
-                # ⭐ v5.1.0: Initialize Variable Manager
+                # ⭐ v4.6.0: Initialize Variable Manager
                 logger.info("Initialisiere Variable Manager...")
                 self.variable_manager = create_variable_manager()
                 self._trigger_store = CameraTriggerStore(os.path.join(conf_dir, 'automation_rules.db'))
@@ -241,7 +241,7 @@ class WebManager(BaseModule):
                 print("  [ERROR] Flask nicht verfuegbar!")
 
             print(f"  [OK] {self.NAME} v{self.VERSION} initialisiert")
-            logger.info("=== Web Manager v5.1.0 Initialisierung ABGESCHLOSSEN ===")
+            logger.info("=== Web Manager v4.6.0 Initialisierung ABGESCHLOSSEN ===")
 
             if self.sentry:
                 self.sentry.add_breadcrumb(
@@ -3694,7 +3694,7 @@ class WebManager(BaseModule):
                 return jsonify({'error': str(e)}), 500
 
         # ==========================================
-        # ⭐ VARIABLE MANAGER API ENDPOINTS (v5.1.0)
+        # ⭐ VARIABLE MANAGER API ENDPOINTS (v4.6.0)
         # ==========================================
 
         @self.app.route('/api/variables/write', methods=['POST'])
@@ -3820,7 +3820,7 @@ class WebManager(BaseModule):
                 if not plc:
                     return jsonify({'status': 'error', 'message': 'PLC nicht verfügbar'}), 503
 
-                # ⭐ v5.1.2: Hole plc_type aus Symbol-Info
+                # ⭐ v4.6.0: Hole plc_type aus Symbol-Info
                 symbol_info = self.variable_manager.get_symbol_info(variable, plc_id)
                 if not symbol_info:
                     return jsonify({'status': 'error', 'message': 'Symbol nicht gefunden'}), 404
@@ -3898,7 +3898,7 @@ class WebManager(BaseModule):
             print(f"  🔌 Client getrennt: {client_id} (Total: {len(self.connected_clients)})")
 
         # ==========================================
-        # ⭐ VARIABLE MANAGER WEBSOCKET EVENTS (v5.1.0)
+        # ⭐ VARIABLE MANAGER WEBSOCKET EVENTS (v4.6.0)
         # ==========================================
 
         @self.socketio.on('subscribe_variable')
@@ -4796,7 +4796,7 @@ class WebManager(BaseModule):
         self.running = False
         self._stop_ring_event_monitor()
 
-        # ⭐ v5.1.0: Stop Variable Polling
+        # ⭐ v4.6.0: Stop Variable Polling
         if self.data_gateway:
             self.data_gateway.stop_variable_polling()
             logger.info("Variable Polling gestoppt")
