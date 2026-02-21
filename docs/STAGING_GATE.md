@@ -7,6 +7,7 @@ Dieses Dokument beschreibt den reproduzierbaren Staging-Gate vor einem Produktiv
 - Risiko vor Prod-Deploy reduzieren
 - Kernflüsse unter stagingnahen Bedingungen prüfen
 - Eindeutige Go/No-Go-Entscheidung erzeugen
+- Übergabe in Blue-Green-Cutover vorbereiten (`docs/10_blue_green_atomic_deployment.md`)
 
 ## Workflow
 
