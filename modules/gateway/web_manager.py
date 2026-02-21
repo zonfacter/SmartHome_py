@@ -1688,16 +1688,67 @@ class WebManager(BaseModule):
                 limit = max(1, min(limit, 500))
                 filter_mode = str(request.args.get('filter', 'all') or 'all').strip().lower()
 
-                if filter_mode == 'restart':
+                def _audit_action(log_row: Dict[str, Any]) -> str:
+                    if str(log_row.get('module') or '').lower() != 'audit':
+                        return ''
+                    try:
+                        payload = json.loads(str(log_row.get('message') or '{}'))
+                        return str(payload.get('action') or '').strip().lower()
+                    except Exception:
+                        return ''
+
+                def _is_restart_log(log_row: Dict[str, Any]) -> bool:
+                    msg = str(log_row.get('message') or '').lower()
+                    action = _audit_action(log_row)
+                    return (
+                        action in ('service_restart_scheduled', 'daemon_restart_scheduled', 'daemon_restart_rejected')
+                        or 'restart' in msg
+                        or 'neustart' in msg
+                    )
+
+                def _is_restart_app(log_row: Dict[str, Any]) -> bool:
+                    msg = str(log_row.get('message') or '').lower()
+                    action = _audit_action(log_row)
+                    return action == 'service_restart_scheduled' or 'type=app' in msg
+
+                def _is_restart_daemon(log_row: Dict[str, Any]) -> bool:
+                    msg = str(log_row.get('message') or '').lower()
+                    action = _audit_action(log_row)
+                    return action in ('daemon_restart_scheduled', 'daemon_restart_rejected') or 'type=daemon' in msg
+
+                def _is_restart_error(log_row: Dict[str, Any]) -> bool:
+                    msg = str(log_row.get('message') or '').lower()
+                    action = _audit_action(log_row)
+                    has_restart_context = (
+                        'restart' in msg
+                        or 'neustart' in msg
+                        or 'type=app' in msg
+                        or 'type=daemon' in msg
+                    )
+                    has_error_marker = (
+                        'rejected' in msg
+                        or 'abgelehnt' in msg
+                        or 'failed' in msg
+                        or 'fehler' in msg
+                    )
+                    return (
+                        action == 'daemon_restart_rejected'
+                        or (has_restart_context and has_error_marker)
+                    )
+
+                if filter_mode in ('restart', 'restart_app', 'restart_daemon', 'restart_error'):
                     # Restart-Events sind häufig nur Teilmenge: größeren Suchraum laden
                     # und anschließend serverseitig filtern.
                     search_limit = min(limit * 10, 5000)
-                    logs = DatabaseLogger.get_recent_logs(db_path, limit=search_limit)
-                    keywords = ('restart', 'neustart')
-                    logs = [
-                        log for log in logs
-                        if any(k in str(log.get('message', '')).lower() for k in keywords)
-                    ][:limit]
+                    raw_logs = DatabaseLogger.get_recent_logs(db_path, limit=search_limit)
+                    if filter_mode == 'restart_app':
+                        logs = [log for log in raw_logs if _is_restart_app(log)][:limit]
+                    elif filter_mode == 'restart_daemon':
+                        logs = [log for log in raw_logs if _is_restart_daemon(log)][:limit]
+                    elif filter_mode == 'restart_error':
+                        logs = [log for log in raw_logs if _is_restart_error(log)][:limit]
+                    else:
+                        logs = [log for log in raw_logs if _is_restart_log(log)][:limit]
                 else:
                     logs = DatabaseLogger.get_recent_logs(db_path, limit=limit)
 
