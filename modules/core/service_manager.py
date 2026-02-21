@@ -16,6 +16,7 @@ import subprocess
 import platform
 import logging
 import time
+import signal
 from typing import Tuple
 
 
@@ -72,8 +73,9 @@ class ServiceManager:
             cwd = os.getcwd()
 
             if ServiceManager.is_container_runtime():
-                logger.warning("Container-Runtime erkannt: beende PID1 fuer orchestrator restart")
-                os._exit(0)
+                logger.warning("Container-Runtime erkannt: sende SIGTERM fuer orchestrator-konformen Neustart")
+                os.kill(os.getpid(), signal.SIGTERM)
+                return True
 
             # Robuster Restart über separaten Prozess:
             # vermeidet Socket-FD-Vererbung/Port-Konflikte bei execv.

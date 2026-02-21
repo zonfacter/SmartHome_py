@@ -2026,6 +2026,7 @@ class WebManager(BaseModule):
                     delay = int(data.get('delay', 1))
                 except Exception:
                     delay = 1
+                delay = max(1, min(delay, 30))
                 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
                 db_path = os.path.join(project_root, 'config', 'system_logs.db')
                 actor = request.headers.get('X-Admin-User') or request.remote_addr or 'unknown'

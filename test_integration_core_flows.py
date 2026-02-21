@@ -267,12 +267,12 @@ def test_integration_admin_restart_actions_are_audited(integration_fixture, monk
 
     daemon_restart = client.post(
         "/api/admin/service/restart-daemon",
-        json={"delay": 2},
+        json={"delay": 999},
         headers={"X-Admin-User": "pytest-admin"},
     )
     assert daemon_restart.status_code == 200
     assert daemon_restart.get_json()["success"] is True
-    assert captured["daemon_delays"] == [2]
+    assert captured["daemon_delays"] == [30]
 
     assert len(captured["audit"]) == 2
     assert captured["audit"][0]["action"] == "service_restart_scheduled"
@@ -280,7 +280,7 @@ def test_integration_admin_restart_actions_are_audited(integration_fixture, monk
     assert captured["audit"][0]["actor"] == "pytest-admin"
     assert captured["audit"][1]["actor"] == "pytest-admin"
     assert captured["audit"][0]["details"]["delay_seconds"] == 3
-    assert captured["audit"][1]["details"]["delay_seconds"] == 2
+    assert captured["audit"][1]["details"]["delay_seconds"] == 30
     assert "request_id" in captured["audit"][0]["details"]
 
 
@@ -302,23 +302,20 @@ def test_integration_admin_daemon_restart_rejection_is_audited(integration_fixtu
         )
         return 1
 
-    def _fake_schedule_ctl_restart(delay_seconds=1):
-        return False, "daemon restart disabled in container runtime"
-
     monkeypatch.setattr(DatabaseLogger, "audit_event", staticmethod(_fake_audit))
-    monkeypatch.setattr(ServiceManager, "schedule_ctl_restart", staticmethod(_fake_schedule_ctl_restart))
+    monkeypatch.setattr(ServiceManager, "is_container_runtime", staticmethod(lambda: True))
 
     daemon_restart = client.post(
         "/api/admin/service/restart-daemon",
-        json={"delay": 2},
+        json={"delay": 999},
         headers={"X-Admin-User": "pytest-admin"},
     )
     assert daemon_restart.status_code == 400
     body = daemon_restart.get_json()
     assert body["success"] is False
-    assert "disabled" in body["error"]
+    assert "deaktiviert" in body["error"]
     assert len(captured["audit"]) == 1
     assert captured["audit"][0]["action"] == "daemon_restart_rejected"
     assert captured["audit"][0]["actor"] == "pytest-admin"
-    assert captured["audit"][0]["details"]["delay_seconds"] == 2
+    assert captured["audit"][0]["details"]["delay_seconds"] == 30
     assert "request_id" in captured["audit"][0]["details"]
