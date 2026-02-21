@@ -24,8 +24,13 @@
 
 ## 📌 **Aktuelle Betriebsdoku (Web-HMI)**
 
-Für den aktuellen produktiven Ablauf (Web-Setup) bitte diese Anleitung verwenden:
+Für den aktuellen produktiven Ablauf sind diese Dokumente die verbindliche Quelle:
 
+- `docs/01_quickstart.md`
+- `docs/02_twincat_setup.md`
+- `docs/03_camera_setup.md`
+- `docs/04_gateway_integration.md`
+- `docs/05_api_reference.md`
 - `docs/WEB_SETUP_ROUTING_ADS_GUIDE.md`
 - `docs/STAGING_GATE.md` (Release-Gates, Canary, Go/No-Go)
 - `docs/SECURITY_INCIDENT_SENTRY_DSN.md` (Incident-Runbook & Secret-Policy)
@@ -37,6 +42,7 @@ Inhalt:
 - Routing-Regeln über Setup-UI bearbeiten (`config/routing.json`)
 - Docker-Hardening/Least-Privilege: `docs/DOCKER_LEAST_PRIVILEGE.md`
 - Release-Verifikation (Checksums + Attestation): `docs/RELEASE_VERIFICATION.md`
+- Dokumentations-Index + Historisch-Markierung: `docs/README.md`
 
 ---
 
