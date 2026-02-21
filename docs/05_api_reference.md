@@ -26,6 +26,7 @@ Nur hier gelistete Endpunkte gelten als dokumentierter API-Stand.
 - `GET /api/system/status`
 - `GET /api/system/dependencies`
 - `GET /api/system/versioning`
+- `GET /api/system/feature-flags`
 - `GET /api/telemetry`
 
 ## PLC / TwinCAT
@@ -80,6 +81,7 @@ Nur hier gelistete Endpunkte gelten als dokumentierter API-Stand.
 - `GET /api/admin/service/info`
 - `POST /api/admin/service/restart`
 - `POST /api/admin/service/restart-daemon`
+- `POST /api/admin/feature-flags`
 
 ## Monitoring
 - `GET /api/monitor/dataflow`

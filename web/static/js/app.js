@@ -59,6 +59,12 @@ class SmartHomeApp {
         this._routeEditorSelectedId = null;
         this._listenerRegistry = new Map();
         this._listenerScopes = new Map();
+        this._featureFlags = {
+            'ui.page.camera-wall': true,
+            'ui.page.monitor': true,
+            'ui.page.admin': true,
+            'ui.ring.webrtc': true
+        };
 
         // Initialisierung
         this.init();
@@ -70,6 +76,7 @@ class SmartHomeApp {
 
         // Theme anwenden
         this.applyTheme(this.theme);
+        this.loadFeatureFlags();
 
         // Event-Listener registrieren (nach kurzem Delay für DOM)
         setTimeout(() => {
@@ -87,6 +94,38 @@ class SmartHomeApp {
         this.loadSystemStatus();
 
         console.log('✅ SmartHome App bereit');
+    }
+
+    async loadFeatureFlags() {
+        try {
+            const response = await fetch('/api/system/feature-flags');
+            if (!response.ok) return;
+            const payload = await response.json();
+            const flags = payload.flags || {};
+            if (flags && typeof flags === 'object') {
+                this._featureFlags = { ...this._featureFlags, ...flags };
+                this.applyFeatureFlagsToNavigation();
+            }
+        } catch (error) {
+            console.warn('⚠️ Feature-Flags konnten nicht geladen werden:', error.message);
+        }
+    }
+
+    isFeatureEnabled(flagKey, defaultValue = true) {
+        if (!(flagKey in this._featureFlags)) return defaultValue;
+        return !!this._featureFlags[flagKey];
+    }
+
+    applyFeatureFlagsToNavigation() {
+        document.querySelectorAll('[data-page]').forEach(btn => {
+            const page = btn.getAttribute('data-page');
+            const enabled = this.isFeatureEnabled(`ui.page.${page}`, true);
+            if (!enabled) {
+                btn.classList.add('hidden');
+            } else {
+                btn.classList.remove('hidden');
+            }
+        });
     }
 
     setupApiAuthHeaderInjection() {
@@ -253,6 +292,10 @@ class SmartHomeApp {
 
     showPage(pageName) {
         console.log(`🔄 Zeige Seite: ${pageName}`);
+        if (!this.isFeatureEnabled(`ui.page.${pageName}`, true)) {
+            alert(`Feature für Seite '${pageName}' ist aktuell deaktiviert.`);
+            pageName = 'dashboard';
+        }
 
         // Cleanup beim Verlassen der Kamera-Seiten
         if (this.currentPage === 'cameras' && pageName !== 'cameras') {
@@ -2605,7 +2648,9 @@ class SmartHomeApp {
                 console.warn('Ring bridge start fehlgeschlagen, nutze Snapshot-Fallback:', e);
             }
 
-            const preferWebrtc = !!ringStatus.webrtc_available && (localStorage.getItem('ringWebrtcPreferred') || '1') === '1';
+            const preferWebrtc = this.isFeatureEnabled('ui.ring.webrtc', true)
+                && !!ringStatus.webrtc_available
+                && (localStorage.getItem('ringWebrtcPreferred') || '1') === '1';
             if (preferWebrtc && window.RTCPeerConnection) {
                 videoEl.style.display = '';
                 try {

@@ -107,6 +107,14 @@ class WebManager(BaseModule):
         self._api_sli_samples = deque()
         self._api_totals = {'requests': 0, 'errors_5xx': 0}
         self._deprecated_api_endpoints = self._load_deprecated_api_endpoints()
+        self._feature_flags_file = os.path.join(os.path.abspath(os.getcwd()), 'config', 'feature_flags.json')
+        self._feature_flags_defaults = {
+            'ui.page.camera-wall': True,
+            'ui.page.monitor': True,
+            'ui.page.admin': True,
+            'ui.ring.webrtc': True
+        }
+        self._feature_flags = {}
         self._read_cache = {}
         self._read_cache_lock = threading.Lock()
         self._read_cache_max_entries = max(16, int(os.getenv('SMARTHOME_READ_CACHE_MAX_ENTRIES', '256')))
@@ -122,6 +130,7 @@ class WebManager(BaseModule):
             'api_p95_latency_ms': float(os.getenv('SLO_API_P95_LATENCY_MS', '500')),
             'stream_health_ratio': float(os.getenv('SLO_STREAM_HEALTH_RATIO', '0.99'))
         }
+        self._feature_flags = self._load_feature_flags()
 
     def initialize(self, app_context: Any):
         """Initialisiert das Modul und erzwingt absolute Pfade für alle Manager."""
@@ -584,6 +593,40 @@ class WebManager(BaseModule):
     def _invalidate_read_cache(self):
         with self._read_cache_lock:
             self._read_cache.clear()
+
+    def _normalize_feature_flags(self, payload: Dict[str, Any]) -> Dict[str, bool]:
+        normalized = dict(self._feature_flags_defaults)
+        for key, value in dict(payload or {}).items():
+            flag = str(key or '').strip()
+            if not flag:
+                continue
+            normalized[flag] = bool(value)
+        return normalized
+
+    def _load_feature_flags(self) -> Dict[str, bool]:
+        os.makedirs(os.path.dirname(self._feature_flags_file), exist_ok=True)
+        if not os.path.exists(self._feature_flags_file):
+            return dict(self._feature_flags_defaults)
+        try:
+            with open(self._feature_flags_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict) and isinstance(data.get('flags'), dict):
+                data = data.get('flags')
+            if not isinstance(data, dict):
+                return dict(self._feature_flags_defaults)
+            return self._normalize_feature_flags(data)
+        except Exception:
+            return dict(self._feature_flags_defaults)
+
+    def _persist_feature_flags(self, flags: Dict[str, bool]):
+        os.makedirs(os.path.dirname(self._feature_flags_file), exist_ok=True)
+        payload = {
+            'schema_version': 1,
+            'updated_at': self._utc_iso(),
+            'flags': dict(flags or {})
+        }
+        with open(self._feature_flags_file, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
 
     def _cached_json_response(self, cache_key: str, ttl_seconds: float, producer):
         now = time.time()
@@ -1481,6 +1524,16 @@ class WebManager(BaseModule):
 
             return jsonify(deps)
 
+        @self.app.route('/api/system/feature-flags', methods=['GET'])
+        def get_feature_flags():
+            """Liefert aktive Frontend-Feature-Flags."""
+            self._feature_flags = self._load_feature_flags()
+            return jsonify({
+                'success': True,
+                'flags': dict(self._feature_flags),
+                'source': self._feature_flags_file
+            })
+
         @self.app.route('/api/system/versioning')
         def api_versioning_policy():
             """Liefert das verbindliche API-Kompatibilitätsmodell."""
@@ -2282,6 +2335,22 @@ class WebManager(BaseModule):
                 )
             except Exception as e:
                 logger.error(f"Fehler bei POST /api/admin/service/restart-daemon: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/admin/feature-flags', methods=['POST'])
+        def admin_update_feature_flags():
+            """Aktualisiert Feature-Flags zur Laufzeit."""
+            try:
+                payload = request.get_json(silent=True) or {}
+                flags_payload = payload.get('flags', payload)
+                if not isinstance(flags_payload, dict):
+                    return jsonify({'success': False, 'error': 'flags payload must be an object'}), 400
+                next_flags = self._normalize_feature_flags(flags_payload)
+                self._persist_feature_flags(next_flags)
+                self._feature_flags = dict(next_flags)
+                return jsonify({'success': True, 'flags': self._feature_flags})
+            except Exception as e:
+                logger.error(f"Fehler bei POST /api/admin/feature-flags: {e}", exc_info=True)
                 return jsonify({'success': False, 'error': str(e)}), 500
 
         @self.app.route('/api/monitor/dataflow')
