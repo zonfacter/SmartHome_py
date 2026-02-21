@@ -106,6 +106,9 @@ def test_contract_system_status_schema(web_fixture):
     _, client = web_fixture
     res = client.get("/api/system/status")
     assert res.status_code == 200
+    assert res.headers.get("X-API-Version") == "v1"
+    assert res.headers.get("X-API-Major-Version") == "1"
+    assert res.headers.get("X-API-Compatibility-Model") == "major-path"
     payload = res.get_json()
     assert isinstance(payload, dict)
     for key in ("status", "plc", "capabilities", "blob_stats", "telemetry_count", "uptime"):
@@ -127,6 +130,19 @@ def test_contract_monitor_slo_schema(web_fixture):
     assert isinstance(payload["sli"], dict)
     assert "api" in payload["sli"]
     assert "streams" in payload["sli"]
+
+
+def test_contract_api_versioning_policy_endpoint(web_fixture):
+    _, client = web_fixture
+    res = client.get("/api/system/versioning")
+    assert res.status_code == 200
+    payload = res.get_json()
+    assert payload["current_major"] == 1
+    assert payload["current_namespace"] == "/api"
+    assert payload["compatibility_model"] == "major-path"
+    assert payload["deprecation_min_days"] == 90
+    assert payload["policy_document"] == "docs/06_api_lifecycle_policy.md"
+    assert isinstance(payload["deprecated_endpoints"], list)
 
 
 def test_contract_error_code_for_missing_variable(web_fixture):

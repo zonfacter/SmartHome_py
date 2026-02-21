@@ -2,9 +2,20 @@
 
 Nur hier gelistete Endpunkte gelten als dokumentierter API-Stand.
 
+## Versionierung und Deprecation
+- Aktueller stabiler API-Major: `v1`
+- Aktueller Namespace: `/api/*` (entspricht `v1`)
+- Breaking Changes nur über neuen Major-Namespace (z. B. `/api/v2/*`)
+- Deprecation-Fenster vor Entfernen: mindestens `90` Tage
+- Laufende Policy und Sunset-Regeln: `docs/06_api_lifecycle_policy.md`
+- Runtime-Signale:
+- `X-API-Version`, `X-API-Major-Version`, `X-API-Compatibility-Model` auf allen `/api/*`-Responses
+- Für deprecated Endpunkte zusätzlich: `Deprecation`, `Sunset`, optional `X-API-Replacement`
+
 ## System
 - `GET /api/system/status`
 - `GET /api/system/dependencies`
+- `GET /api/system/versioning`
 - `GET /api/telemetry`
 
 ## PLC / TwinCAT
