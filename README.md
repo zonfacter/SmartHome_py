@@ -28,6 +28,7 @@ Für den aktuellen produktiven Ablauf (Web-Setup) bitte diese Anleitung verwende
 
 - `docs/WEB_SETUP_ROUTING_ADS_GUIDE.md`
 - `docs/STAGING_GATE.md` (Release-Gates, Canary, Go/No-Go)
+- `docs/SECURITY_INCIDENT_SENTRY_DSN.md` (Incident-Runbook & Secret-Policy)
 
 Inhalt:
 - PLC Runtime (TC2/TC3) korrekt konfigurieren
