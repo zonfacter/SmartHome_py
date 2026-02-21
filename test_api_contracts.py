@@ -145,6 +145,29 @@ def test_contract_api_versioning_policy_endpoint(web_fixture):
     assert isinstance(payload["deprecated_endpoints"], list)
 
 
+def test_contract_feature_flags_read_and_update(web_fixture):
+    _, client = web_fixture
+    get_first = client.get("/api/system/feature-flags")
+    assert get_first.status_code == 200
+    first_payload = get_first.get_json()
+    assert first_payload["success"] is True
+    assert isinstance(first_payload["flags"], dict)
+
+    update = client.post(
+        "/api/admin/feature-flags",
+        json={"flags": {"ui.page.monitor": False}}
+    )
+    assert update.status_code == 200
+    update_payload = update.get_json()
+    assert update_payload["success"] is True
+    assert update_payload["flags"]["ui.page.monitor"] is False
+
+    get_second = client.get("/api/system/feature-flags")
+    assert get_second.status_code == 200
+    second_payload = get_second.get_json()
+    assert second_payload["flags"]["ui.page.monitor"] is False
+
+
 def test_contract_error_code_for_missing_variable(web_fixture):
     _, client = web_fixture
     res = client.post("/api/variables/write", json={"plc_id": "plc_001", "value": True})
