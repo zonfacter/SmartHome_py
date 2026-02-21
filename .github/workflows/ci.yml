@@ -73,7 +73,7 @@ jobs:
       - name: Wait for container health endpoint
         run: |
           for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:5000/api/system/status >/dev/null; then
+            if curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:5000/api/system/status >/dev/null; then
               echo "health endpoint ready"
               exit 0
             fi
