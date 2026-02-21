@@ -29,6 +29,10 @@ Pfad: `Setup -> Kameras`
 - Ring-Kameras importieren: `POST /api/ring/cameras/import`
 
 ## PTZ (ONVIF)
+### Voraussetzungen
+- Python-Paket `onvif-zeep` muss installiert sein (in `requirements.txt` enthalten).
+- Kamera braucht ONVIF-Port + valide ONVIF-Credentials.
+
 - Status: `GET /api/cameras/<cam_id>/ptz/status`
 - Move: `POST /api/cameras/<cam_id>/ptz/move`
 - Stop: `POST /api/cameras/<cam_id>/ptz/stop`
