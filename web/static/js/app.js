@@ -40,6 +40,8 @@ class SmartHomeApp {
         this._ringSnapshotTimers = {};
         this._ringSnapshotInFlight = {};
         this._ringSnapshotObjectUrls = {};
+        this._showRingSnapshotTimestamp = localStorage.getItem('ringSnapshotTimestampEnabled') !== '0';
+        this._snapshotAgeTicker = null;
         this._fullscreenSnapshotTimer = null;
         this._ringPeerConnection = null;
         this._ringWebrtcSessionId = null;
@@ -84,6 +86,7 @@ class SmartHomeApp {
         this.applyTheme(this.theme);
         this.loadFeatureFlags();
         this._ensureToastContainer();
+        this._startSnapshotAgeTicker();
 
         // Event-Listener registrieren (nach kurzem Delay für DOM)
         setTimeout(() => {
@@ -1913,6 +1916,9 @@ class SmartHomeApp {
                         <div class="aspect-video bg-gray-900 rounded overflow-hidden relative">
                             <video id="ring-video-${camId}" class="w-full h-full object-cover" muted autoplay playsinline style="display:none;"></video>
                             <img id="cam-image-${camId}" src="" alt="${cam.name}" class="w-full h-full object-cover">
+                            <div id="ring-snapshot-ts-${camId}" class="absolute bottom-2 right-2 text-[11px] text-white bg-black/70 px-2 py-1 rounded pointer-events-none z-10 hidden">
+                                Snapshot: -
+                            </div>
                             <div id="ring-loading-${camId}" class="absolute inset-0 flex items-center justify-center text-white bg-gray-900 bg-opacity-60">
                                 <div class="text-center">
                                     <i data-lucide="loader" class="w-8 h-8 mx-auto mb-2 animate-spin"></i>
@@ -2476,6 +2482,7 @@ class SmartHomeApp {
 
         const mode = this._getRingWidgetMode(camId);
         if (mode === 'live' && this._ringLiveEnabled) {
+            this._hideRingSnapshotTimestamp(camId, imgElementId);
             if (loadingEl) {
                 loadingEl.innerHTML = '<div class="text-center"><i data-lucide="loader" class="w-8 h-8 mx-auto mb-2 animate-spin"></i><p class="text-sm">Ring Live wird geladen...</p></div>';
                 loadingEl.style.display = '';
@@ -2529,6 +2536,7 @@ class SmartHomeApp {
                 URL.revokeObjectURL(this._ringSnapshotObjectUrls[key]);
             }
             this._ringSnapshotObjectUrls[key] = newUrl;
+            this._setRingSnapshotTimestamp(camId, imgElementId, Date.now());
         } catch (e) {
             // Snapshot-Ausfall ist tolerierbar; WebRTC oder nächster Zyklus übernimmt.
         } finally {
@@ -2546,6 +2554,103 @@ class SmartHomeApp {
         this._ringSnapshotTimers[key] = setInterval(async () => {
             await this._loadRingSnapshot(camId, imgElementId, 9000, 1, 1, 8);
         }, intervalMs);
+    }
+
+    _startSnapshotAgeTicker() {
+        if (this._snapshotAgeTicker) clearInterval(this._snapshotAgeTicker);
+        this._snapshotAgeTicker = setInterval(() => {
+            this._refreshAllSnapshotAgeBadges();
+        }, 1000);
+    }
+
+    _applySnapshotAgeVisual(el, ageSec) {
+        if (!el) return;
+        const age = Math.max(0, Number(ageSec) || 0);
+        if (age < 15) {
+            el.style.backgroundColor = 'rgba(22, 163, 74, 0.78)';
+        } else if (age < 60) {
+            el.style.backgroundColor = 'rgba(217, 119, 6, 0.82)';
+        } else {
+            el.style.backgroundColor = 'rgba(220, 38, 38, 0.82)';
+        }
+        el.style.color = '#fff';
+    }
+
+    _formatSnapshotTimestamp(epochMs = Date.now()) {
+        try {
+            return new Date(epochMs).toLocaleString('de-DE', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        } catch (e) {
+            return String(epochMs);
+        }
+    }
+
+    _refreshSnapshotAgeBadge(el) {
+        if (!el) return;
+        const epoch = Number(el.dataset.snapshotEpochMs || 0);
+        const label = el.dataset.snapshotLabel || '';
+        if (!epoch || !label) return;
+        const ageSec = Math.max(0, Math.floor((Date.now() - epoch) / 1000));
+        el.textContent = `Snapshot: ${label} (vor ${ageSec}s)`;
+        this._applySnapshotAgeVisual(el, ageSec);
+    }
+
+    _refreshAllSnapshotAgeBadges() {
+        const selectors = ['[id^="ring-snapshot-ts-"]', '#fullscreen-ring-snapshot-ts'];
+        document.querySelectorAll(selectors.join(', ')).forEach(el => {
+            if (!this._showRingSnapshotTimestamp || !el.dataset.snapshotEpochMs) {
+                el.classList.add('hidden');
+                return;
+            }
+            el.classList.remove('hidden');
+            this._refreshSnapshotAgeBadge(el);
+        });
+    }
+
+    _setRingSnapshotTimestamp(camId, imgElementId, epochMs = Date.now()) {
+        const epoch = Number(epochMs) || Date.now();
+        const label = this._formatSnapshotTimestamp(epoch);
+        if (imgElementId === 'fullscreen-image') {
+            const fullTs = document.getElementById('fullscreen-ring-snapshot-ts');
+            if (fullTs) {
+                fullTs.dataset.snapshotEpochMs = String(epoch);
+                fullTs.dataset.snapshotLabel = label;
+                if (this._showRingSnapshotTimestamp) {
+                    fullTs.classList.remove('hidden');
+                } else {
+                    fullTs.classList.add('hidden');
+                }
+                this._refreshSnapshotAgeBadge(fullTs);
+            }
+            return;
+        }
+        const el = document.getElementById(`ring-snapshot-ts-${camId}`);
+        if (el) {
+            el.dataset.snapshotEpochMs = String(epoch);
+            el.dataset.snapshotLabel = label;
+            if (this._showRingSnapshotTimestamp) {
+                el.classList.remove('hidden');
+            } else {
+                el.classList.add('hidden');
+            }
+            this._refreshSnapshotAgeBadge(el);
+        }
+    }
+
+    _hideRingSnapshotTimestamp(camId, imgElementId) {
+        if (imgElementId === 'fullscreen-image') {
+            const fullTs = document.getElementById('fullscreen-ring-snapshot-ts');
+            if (fullTs) fullTs.classList.add('hidden');
+            return;
+        }
+        const el = document.getElementById(`ring-snapshot-ts-${camId}`);
+        if (el) el.classList.add('hidden');
     }
 
     _stopRingSnapshotRefresh(camId, imgElementId) {
@@ -2875,6 +2980,15 @@ class SmartHomeApp {
         const imageEl = document.getElementById('fullscreen-image');
         const nameEl = document.getElementById('fullscreen-cam-name');
         const closeBtn = document.getElementById('fullscreen-close');
+        let snapshotTsEl = document.getElementById('fullscreen-ring-snapshot-ts');
+        if (!snapshotTsEl && overlay) {
+            snapshotTsEl = document.createElement('div');
+            snapshotTsEl.id = 'fullscreen-ring-snapshot-ts';
+            snapshotTsEl.className = 'absolute top-4 left-4 text-white text-sm bg-black/70 px-3 py-1 rounded z-10 hidden pointer-events-none';
+            snapshotTsEl.textContent = 'Snapshot: -';
+            overlay.appendChild(snapshotTsEl);
+        }
+        if (snapshotTsEl) snapshotTsEl.classList.add('hidden');
 
         if (!overlay || !videoEl || !imageEl) return;
 
@@ -2889,6 +3003,7 @@ class SmartHomeApp {
         }
 
         if (camType === 'rtsp') {
+            this._hideRingSnapshotTimestamp(camId, 'fullscreen-image');
             videoEl.style.display = '';
             // Widget-HLS-Instanz zerstoeren (verhindert Konflikte)
             if (this._hlsInstances[camId]) {
@@ -2935,6 +3050,7 @@ class SmartHomeApp {
                     });
                     const bridgeData = await bridgeResp.json();
                     if (bridgeResp.ok && bridgeData.success && bridgeData.hls_url) {
+                        this._hideRingSnapshotTimestamp(camId, 'fullscreen-image');
                         imageEl.style.display = 'none';
                         videoEl.style.display = '';
                         this._loadFullscreenHls(videoEl, camId, 0, bridgeData.hls_url, true);
@@ -2949,6 +3065,7 @@ class SmartHomeApp {
                 && !!ringStatus.webrtc_available
                 && (localStorage.getItem('ringWebrtcPreferred') || '1') === '1';
             if (liveAllowedForCamera && preferWebrtc && window.RTCPeerConnection) {
+                this._hideRingSnapshotTimestamp(camId, 'fullscreen-image');
                 videoEl.style.display = '';
                 try {
                     await this._startRingWebrtc(camId, videoEl);
@@ -2969,6 +3086,7 @@ class SmartHomeApp {
                 }, 2500);
             }
         } else {
+            this._hideRingSnapshotTimestamp(camId, 'fullscreen-image');
             imageEl.style.display = '';
             const widgetImage = document.getElementById(`cam-image-${camId}`);
             imageEl.src = widgetImage ? widgetImage.src : '';
@@ -2998,6 +3116,7 @@ class SmartHomeApp {
         const overlay = document.getElementById('camera-fullscreen-overlay');
         const videoEl = document.getElementById('fullscreen-video');
         const imageEl = document.getElementById('fullscreen-image');
+        const snapshotTsEl = document.getElementById('fullscreen-ring-snapshot-ts');
 
         // PTZ Controls ausblenden und Listener entfernen
         this._cleanupPTZControls();
@@ -3016,6 +3135,7 @@ class SmartHomeApp {
         if (imageEl) imageEl.src = '';
         if (imageEl) imageEl.style.display = 'none';
         if (videoEl) videoEl.style.display = '';
+        if (snapshotTsEl) snapshotTsEl.classList.add('hidden');
         if (this._fullscreenSnapshotTimer) {
             clearInterval(this._fullscreenSnapshotTimer);
             this._fullscreenSnapshotTimer = null;
@@ -3511,6 +3631,16 @@ class SmartHomeApp {
         const mqttConnectBtn = document.getElementById('mqtt-connect-btn');
         if (mqttConnectBtn) {
             this.registerMQTTHandlers();
+        }
+
+        const ringSnapshotToggle = document.getElementById('ring-snapshot-ts-toggle');
+        if (ringSnapshotToggle) {
+            ringSnapshotToggle.checked = !!this._showRingSnapshotTimestamp;
+            this._bindScopedListener(ringSnapshotToggle, 'change', () => {
+                this._showRingSnapshotTimestamp = !!ringSnapshotToggle.checked;
+                localStorage.setItem('ringSnapshotTimestampEnabled', this._showRingSnapshotTimestamp ? '1' : '0');
+                this._refreshAllSnapshotAgeBadges();
+            }, { scope, key: 'setup:ring-snapshot-ts-toggle' });
         }
 
         // Setup Symbol-Suche Event-Listener
