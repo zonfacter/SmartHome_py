@@ -8,6 +8,7 @@ Diese Dateien sind der verbindliche Stand fuer Betrieb, Integration und API:
 - `docs/03_camera_setup.md`
 - `docs/04_gateway_integration.md`
 - `docs/05_api_reference.md`
+- `docs/06_api_lifecycle_policy.md`
 - `docs/DOCKER_DEPLOYMENT.md`
 - `docs/STAGING_GATE.md`
 - `docs/SECURITY_INCIDENT_SENTRY_DSN.md`

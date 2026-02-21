@@ -62,6 +62,9 @@ class WebManager(BaseModule):
     VERSION = "1.0.0"
     DESCRIPTION = "Flask + SocketIO Web-HMI Server"
     AUTHOR = "TwinCAT Team"
+    API_MAJOR_VERSION = "1"
+    API_NAMESPACE = "/api"
+    API_DEPRECATION_MIN_DAYS = 90
 
     def __init__(self):
         super().__init__()
@@ -102,6 +105,7 @@ class WebManager(BaseModule):
         self._api_sli_window_seconds = max(60, int(os.getenv('SLO_WINDOW_SECONDS', '3600')))
         self._api_sli_samples = deque()
         self._api_totals = {'requests': 0, 'errors_5xx': 0}
+        self._deprecated_api_endpoints = self._load_deprecated_api_endpoints()
         self._slo_targets = {
             'api_availability_ratio': float(os.getenv('SLO_API_AVAILABILITY', '0.995')),
             'api_p95_latency_ms': float(os.getenv('SLO_API_P95_LATENCY_MS', '500')),
@@ -278,6 +282,7 @@ class WebManager(BaseModule):
             req_id = self._get_request_id()
             response.headers['X-Request-ID'] = req_id
             if request.path.startswith('/api/'):
+                self._apply_api_lifecycle_headers(response, request.path)
                 started = getattr(g, '_api_started_at', None)
                 if started:
                     duration_ms = max(0.0, (time.time() - started) * 1000.0)
@@ -498,6 +503,70 @@ class WebManager(BaseModule):
     def _utc_iso(self, epoch: float = None) -> str:
         ts = time.time() if epoch is None else float(epoch)
         return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace('+00:00', 'Z')
+
+    @staticmethod
+    def _http_date_from_iso(iso_date: str) -> str:
+        dt = datetime.fromisoformat(str(iso_date).replace('Z', '+00:00')).astimezone(timezone.utc)
+        return dt.strftime('%a, %d %b %Y %H:%M:%S GMT')
+
+    def _load_deprecated_api_endpoints(self) -> Dict[str, Dict[str, str]]:
+        """
+        Lädt optionales Deprecation-Mapping aus der Umgebung.
+        Format:
+        {
+          "/api/legacy/path": {"sunset": "2026-12-31T00:00:00Z", "replacement": "/api/new/path", "reason": "..."}
+        }
+        """
+        raw = str(os.getenv('SMARTHOME_API_DEPRECATED_ENDPOINTS', '') or '').strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+            if not isinstance(parsed, dict):
+                raise ValueError("Deprecation mapping must be a JSON object")
+        except Exception as exc:
+            logger.warning("Ungültige SMARTHOME_API_DEPRECATED_ENDPOINTS Konfiguration: %s", exc)
+            return {}
+
+        normalized: Dict[str, Dict[str, str]] = {}
+        for path, meta in parsed.items():
+            key = str(path or '').strip()
+            if not key.startswith('/api/'):
+                continue
+            if not isinstance(meta, dict):
+                continue
+            sunset = str(meta.get('sunset') or '').strip()
+            if not sunset:
+                continue
+            try:
+                _ = self._http_date_from_iso(sunset)
+            except Exception:
+                logger.warning("Ungültiges Sunset-Datum für %s: %s", key, sunset)
+                continue
+            normalized[key] = {
+                'sunset': sunset,
+                'replacement': str(meta.get('replacement') or '').strip(),
+                'reason': str(meta.get('reason') or '').strip()
+            }
+        return normalized
+
+    def _apply_api_lifecycle_headers(self, response, path: str):
+        response.headers['X-API-Version'] = f"v{self.API_MAJOR_VERSION}"
+        response.headers['X-API-Major-Version'] = self.API_MAJOR_VERSION
+        response.headers['X-API-Compatibility-Model'] = 'major-path'
+        response.headers['X-API-Lifecycle-Policy'] = '/docs/06_api_lifecycle_policy.md'
+
+        meta = self._deprecated_api_endpoints.get(str(path or '').strip())
+        if not meta:
+            return
+
+        response.headers['Deprecation'] = 'true'
+        response.headers['Sunset'] = self._http_date_from_iso(meta['sunset'])
+        response.headers['Link'] = '</docs/06_api_lifecycle_policy.md>; rel="deprecation"'
+        if meta.get('replacement'):
+            response.headers['X-API-Replacement'] = meta['replacement']
+        if meta.get('reason'):
+            response.headers['X-API-Deprecation-Reason'] = meta['reason']
 
     def _check_control_rate_limit(self):
         """
@@ -1354,6 +1423,29 @@ class WebManager(BaseModule):
             }
 
             return jsonify(deps)
+
+        @self.app.route('/api/system/versioning')
+        def api_versioning_policy():
+            """Liefert das verbindliche API-Kompatibilitätsmodell."""
+            deprecated = []
+            for path, meta in sorted(self._deprecated_api_endpoints.items()):
+                entry = {
+                    'path': path,
+                    'sunset': meta.get('sunset')
+                }
+                if meta.get('replacement'):
+                    entry['replacement'] = meta.get('replacement')
+                if meta.get('reason'):
+                    entry['reason'] = meta.get('reason')
+                deprecated.append(entry)
+            return jsonify({
+                'current_major': int(self.API_MAJOR_VERSION),
+                'current_namespace': self.API_NAMESPACE,
+                'compatibility_model': 'major-path',
+                'deprecation_min_days': self.API_DEPRECATION_MIN_DAYS,
+                'policy_document': 'docs/06_api_lifecycle_policy.md',
+                'deprecated_endpoints': deprecated
+            })
 
         @self.app.route('/api/plc/connect', methods=['POST'])
         def connect_plc():
