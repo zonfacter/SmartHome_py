@@ -43,6 +43,15 @@ class VariableManager {
         this.socket.on('variable_updates', (data) => {
             this._handleVariableUpdates(data);
         });
+        // Kompatibilität: einzelnes Update-Format
+        this.socket.on('variable_update', (data) => {
+            this._handleSingleVariableUpdate(data);
+        });
+
+        // Reconnect-Safety: subscriptions erneut beim Connect senden.
+        this.socket.on('connect', () => {
+            this._resubscribeAll();
+        });
 
         // Subscribe Success
         this.socket.on('subscribe_success', (data) => {
@@ -77,6 +86,8 @@ class VariableManager {
             return;
         }
 
+        const hadSubscription = this.subscriptions.has(widgetId);
+
         // Speichere Subscription lokal
         this.subscriptions.set(widgetId, {
             variable: variable,
@@ -91,7 +102,9 @@ class VariableManager {
             plc_id: plcId
         });
 
-        this.stats.subscriptions++;
+        if (!hadSubscription) {
+            this.stats.subscriptions++;
+        }
         console.log(`📌 Widget ${widgetId} subscribes to ${plcId}/${variable}`);
     }
 
@@ -303,6 +316,45 @@ class VariableManager {
                 this.stats.updates_received++;
             }
         }
+    }
+
+    /**
+     * Verarbeitet Einzel-Update-Format
+     *
+     * @private
+     */
+    _handleSingleVariableUpdate(data) {
+        if (!data || !data.variable) return;
+        const plcId = data.plc_id || 'plc_001';
+        const variable = data.variable;
+        const update = {
+            value: data.value,
+            timestamp: data.timestamp || Date.now() / 1000,
+            type: data.type || 'UNKNOWN'
+        };
+        this._handleVariableUpdates({
+            [plcId]: {
+                [variable]: update
+            }
+        });
+    }
+
+    /**
+     * Sendet alle aktiven Subscriptions erneut (z.B. nach Reconnect)
+     *
+     * @private
+     */
+    _resubscribeAll() {
+        if (!this.socket || this.subscriptions.size === 0) return;
+
+        for (const [widgetId, subscription] of this.subscriptions.entries()) {
+            this.socket.emit('subscribe_variable', {
+                widget_id: widgetId,
+                variable: subscription.variable,
+                plc_id: subscription.plc_id
+            });
+        }
+        console.log(`📌 Re-Subscribe ausgeführt: ${this.subscriptions.size} Widgets`);
     }
 
     /**

@@ -2,18 +2,30 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PYTHON_BIN="$ROOT_DIR/venv/bin/python"
+if [[ -x "$ROOT_DIR/venv/bin/python" ]]; then
+  PYTHON_BIN="$ROOT_DIR/venv/bin/python"
+elif [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+  PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
+else
+  echo "Kein Python-Interpreter in venv/.venv gefunden" >&2
+  exit 1
+fi
 APP_CMD=("start_web_hmi.py" "--host" "0.0.0.0" "--port" "5000")
 PID_FILE="/tmp/smarthome-web.pid"
 LOG_FILE="/tmp/smarthome-web.log"
 HEALTH_URL="http://127.0.0.1:5000/api/system/status"
+SERVER_PATTERN="(^|[[:space:]])${PYTHON_BIN}([[:space:]].*)?[[:space:]](/opt/Smarthome-Web/)?start_web_hmi\\.py --host 0\\.0\\.0\\.0 --port 5000([[:space:]]|$)"
+
+find_server_pid() {
+  pgrep -u "$(id -u)" -f "$SERVER_PATTERN" | head -n1 || true
+}
 
 get_pid() {
   if [[ -f "$PID_FILE" ]]; then
     cat "$PID_FILE" 2>/dev/null || true
     return
   fi
-  pgrep -f "start_web_hmi.py --host 0.0.0.0 --port 5000" | head -n1 || true
+  find_server_pid
 }
 
 is_running() {
