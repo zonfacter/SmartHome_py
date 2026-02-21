@@ -85,16 +85,39 @@ class SmartHomeApp {
             console.log('📋 Event-Listener registriert');
         }, 100);
 
-        // Socket.IO initialisieren
-        this.initializeSocket();
+        // Initiale Seite so früh wie möglich anzeigen.
+        requestAnimationFrame(() => this.showPage('dashboard'));
 
-        // Initiale Seite anzeigen
-        this.showPage('dashboard');
-
-        // System-Status laden
-        this.loadSystemStatus();
+        // Nicht-kritische Initialisierung in Idle-Phase verlagern.
+        const bootDeferred = () => {
+            this.initializeSocket();
+            this.loadSystemStatus();
+            this._loadDevTestScenarios();
+        };
+        if (typeof window.requestIdleCallback === 'function') {
+            window.requestIdleCallback(() => bootDeferred(), { timeout: 1500 });
+        } else {
+            setTimeout(() => bootDeferred(), 0);
+        }
 
         console.log('✅ SmartHome App bereit');
+    }
+
+    _loadDevTestScenarios() {
+        try {
+            const params = new URLSearchParams(window.location.search || '');
+            const enabled = params.get('dev_scenarios') === '1'
+                || localStorage.getItem('smarthome_dev_scenarios') === '1';
+            if (!enabled) return;
+            if (document.getElementById('dev-test-scenarios-script')) return;
+            const script = document.createElement('script');
+            script.id = 'dev-test-scenarios-script';
+            script.src = '/static/js/test_scenarios.js';
+            script.defer = true;
+            document.body.appendChild(script);
+        } catch (error) {
+            console.warn('Dev-Test-Szenarien konnten nicht geladen werden:', error.message);
+        }
     }
 
     async loadFeatureFlags() {

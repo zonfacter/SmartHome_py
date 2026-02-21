@@ -1382,17 +1382,14 @@
     <!-- ================================================================
          JAVASCRIPT
          ================================================================ -->
-    <script src="/static/js/socket_handler.js"></script>
-    <script src="/static/js/variable-manager.js"></script> <!-- ⭐ v5.1.0 -->
-    <script src="/static/js/app.js"></script>
-
-    <!-- Test-Suite (nur im Development-Modus) -->
-    <script src="/static/js/test_scenarios.js"></script>
+    <script defer src="/static/js/socket_handler.js"></script>
+    <script defer src="/static/js/variable-manager.js"></script> <!-- ⭐ v5.1.0 -->
+    <script defer src="/static/js/app.js"></script>
 
     <!-- Lucide Icons initialisieren -->
     <script>
-        // Warte auf vollständiges Laden inkl. Lucide-Library
-        window.addEventListener('load', () => {
+        // Icons nach DOM-Initialisierung aufbauen.
+        window.addEventListener('DOMContentLoaded', () => {
             if (typeof lucide !== 'undefined') {
                 lucide.createIcons();
                 console.log('✅ Lucide Icons initialisiert');
