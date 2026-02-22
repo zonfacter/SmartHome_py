@@ -1,29 +1,44 @@
-# Dokumentations-Index
+# Dokumentation (aktiv)
 
-## Kanonische Betriebsdoku (normativ)
-Diese Dateien sind der verbindliche Stand fuer Betrieb, Integration und API:
+Diese Dokumentation ist die **verbindliche aktive Doku ab v4.6.2**.
 
-- `docs/01_quickstart.md`
-- `docs/02_twincat_setup.md`
-- `docs/03_camera_setup.md`
-- `docs/04_gateway_integration.md`
-- `docs/05_api_reference.md`
-- `docs/06_api_lifecycle_policy.md`
-- `docs/07_operations_playbook.md`
-- `docs/openapi.json`
-- `docs/08_socket_events.md`
-- `docs/ADR/README.md`
-- `docs/09_module_boundaries_ownership.md`
-- `docs/10_blue_green_atomic_deployment.md`
-- `docs/11_caching_strategy.md`
-- `docs/12_config_migrations.md`
-- `docs/13_feature_flags_rollout.md`
-- `docs/14_ux_notifications.md`
-- `docs/15_error_recovery_actions.md`
-- `docs/16_frontend_performance.md`
-- `docs/DOCKER_DEPLOYMENT.md`
-- `docs/STAGING_GATE.md`
-- `docs/SECURITY_INCIDENT_SENTRY_DSN.md`
+## Einstieg
 
-## Historische Dokumente
-Alle anderen Dateien unter `docs/`, die nicht oben genannt sind, gelten als **historisch/nicht normativ** (Release-Notizen, alte Roadmaps, Hotfix-Protokolle).
+1. `01_quickstart.md`
+2. `02_twincat_setup.md`
+3. `03_camera_setup.md`
+4. `04_gateway_integration.md`
+
+## API und Verträge
+
+- `05_api_reference.md`
+- `openapi.json`
+- `06_api_lifecycle_policy.md`
+- `08_socket_events.md`
+
+## Betrieb und Deployment
+
+- `07_operations_playbook.md`
+- `STAGING_GATE.md`
+- `DOCKER_DEPLOYMENT.md`
+- `DOCKER_LEAST_PRIVILEGE.md`
+- `RELEASE_VERIFICATION.md`
+- `SECURITY_INCIDENT_SENTRY_DSN.md`
+
+## Architektur und Engineering-Entscheidungen
+
+- `09_module_boundaries_ownership.md`
+- `10_blue_green_atomic_deployment.md`
+- `11_caching_strategy.md`
+- `12_config_migrations.md`
+- `13_feature_flags_rollout.md`
+- `14_ux_notifications.md`
+- `15_error_recovery_actions.md`
+- `16_frontend_performance.md`
+- `ADR/README.md`
+
+## Legacy
+
+Historische Dokumente wurden bewusst ausgelagert:
+- `LEGACY.md`
+- Ordner: `legacy/`
