@@ -76,6 +76,7 @@ class StreamManager(BaseModule):
         # Capabilities
         self.has_ffmpeg = self._check_ffmpeg()
         self.has_node = self._check_node()
+        self.has_ring_client_api = self._check_ring_client_api()
         self.hw_accel_mode = None
         self.recovery_enabled = str(os.getenv('STREAM_AUTO_RECOVERY_ENABLED', 'true')).lower() in (
             '1', 'true', 'yes', 'on'
@@ -111,6 +112,7 @@ class StreamManager(BaseModule):
         print(f"  ⚡ {self.NAME} v{self.VERSION} initialisiert")
         print(f"     🎬 FFmpeg: {'Verfügbar' if self.has_ffmpeg else 'NICHT INSTALLIERT'}")
         print(f"     🟩 Node.js: {'Verfügbar' if self.has_node else 'NICHT INSTALLIERT'}")
+        print(f"     🟪 Ring-Bridge: {'Bereit' if self.has_ring_client_api else 'ring-client-api fehlt'}")
         print(f"     🎮 HW-Accel: {self.hw_accel_mode or 'CPU (Software)'}")
         print(f"     📁 HLS-Dir: {self.hls_dir}")
         print(f"     🔁 Auto-Recovery: {'Aktiv' if self.recovery_enabled else 'Deaktiviert'}")
@@ -124,6 +126,24 @@ class StreamManager(BaseModule):
     def _check_node(self) -> bool:
         """Prüft ob Node.js installiert ist"""
         return shutil.which('node') is not None
+
+    def _check_ring_client_api(self) -> bool:
+        """Prüft ob die Node-Abhängigkeit für Ring-Streams installiert ist."""
+        if not self.has_node:
+            return False
+        try:
+            proc = subprocess.run(
+                ['node', '-e', "require.resolve('ring-client-api')"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                cwd=os.path.abspath(os.getcwd()),
+                timeout=5,
+                check=False,
+            )
+            return proc.returncode == 0
+        except Exception:
+            return False
 
     def _ensure_metrics(self, camera_id: str) -> Dict[str, Any]:
         metrics = self._stream_metrics.get(camera_id)
@@ -217,7 +237,7 @@ class StreamManager(BaseModule):
             breaker = self._get_stream_breaker(camera_id, 'rtsp')
             if not breaker.allow_request():
                 metrics['last_error'] = 'circuit_open'
-                self.logger.warning("Stream start blocked by circuit breaker: camera=%s", camera_id)
+                self.logger.info("Stream start blocked by circuit breaker: camera=%s", camera_id)
                 return False
             desired_spec = {
                 'type': 'rtsp',
@@ -428,6 +448,15 @@ class StreamManager(BaseModule):
         """Startet Ring -> HLS Bridge via Node (ring-client-api)."""
         if not self.has_ffmpeg or not self.has_node:
             return False
+        if not self.has_ring_client_api:
+            with self.lock:
+                metrics = self._ensure_metrics(camera_id)
+                metrics['last_error'] = 'ring_client_api_missing'
+            self.logger.error(
+                "Ring stream dependency missing: camera=%s package=ring-client-api",
+                camera_id
+            )
+            return False
         if not refresh_token:
             return False
 
@@ -442,7 +471,7 @@ class StreamManager(BaseModule):
             breaker = self._get_stream_breaker(camera_id, 'ring')
             if not breaker.allow_request():
                 metrics['last_error'] = 'circuit_open'
-                self.logger.warning("Ring stream start blocked by circuit breaker: camera=%s", camera_id)
+                self.logger.info("Ring stream start blocked by circuit breaker: camera=%s", camera_id)
                 return False
             desired_spec = {
                 'type': 'ring',
@@ -707,7 +736,7 @@ class StreamManager(BaseModule):
                 self._cleanup_hls_files(camera_id)
 
         for camera_id, desired_spec, delay, exit_code, attempt in restart_queue:
-            self.logger.warning(
+            self.logger.info(
                 "Stream recovery scheduled: camera=%s type=%s attempt=%s delay=%.1fs exit_code=%s",
                 camera_id,
                 desired_spec.get('type'),
@@ -726,7 +755,17 @@ class StreamManager(BaseModule):
             if ok:
                 self.logger.info("Stream recovery successful: camera=%s attempt=%s", camera_id, attempt)
             else:
-                self.logger.error("Stream recovery failed: camera=%s attempt=%s", camera_id, attempt)
+                breaker = self._get_stream_breaker(camera_id, str(desired_spec.get('type', '')))
+                breaker_state = breaker.snapshot().get('state')
+                if breaker_state == CircuitBreaker.STATE_OPEN:
+                    self.logger.info(
+                        "Stream recovery deferred by circuit breaker: camera=%s type=%s attempt=%s",
+                        camera_id,
+                        desired_spec.get('type'),
+                        attempt
+                    )
+                else:
+                    self.logger.warning("Stream recovery failed: camera=%s attempt=%s", camera_id, attempt)
 
     def _restart_from_desired_spec(self, desired_spec: Dict[str, Any]) -> bool:
         spec_type = str(desired_spec.get('type', '')).strip().lower()
