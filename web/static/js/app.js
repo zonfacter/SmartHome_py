@@ -2338,10 +2338,8 @@ class SmartHomeApp {
         if (!camId) return 'snapshot';
         if (this._ringWidgetModes[camId]) return this._ringWidgetModes[camId];
 
-        const stored = localStorage.getItem(`ringWidgetMode:${camId}`);
-        const mode = stored === 'live' ? 'live' : 'snapshot';
-        this._ringWidgetModes[camId] = mode;
-        return mode;
+        this._ringWidgetModes[camId] = 'snapshot';
+        return 'snapshot';
     }
 
     _setRingWidgetMode(camId, mode) {
@@ -2393,88 +2391,141 @@ class SmartHomeApp {
         await this._applyRingWidgetMode(camId);
     }
 
-    async _stopRingWidgetLive(camId) {
+    async _stopRingWidgetLive(camId, stopBackend = true) {
         const hls = this._ringWidgetHls[camId];
         if (hls) {
             try { hls.destroy(); } catch (e) {}
             delete this._ringWidgetHls[camId];
         }
         await this._stopRingWidgetWebrtc(camId);
+        if (!stopBackend) return;
         try {
             await fetch(`/api/cameras/${camId}/stop`, { method: 'POST' });
         } catch (e) {}
     }
 
+    async _waitForRingWidgetManifest(hlsUrl, maxAttempts = 24, delayMs = 500) {
+        let lastStatus = null;
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            try {
+                const resp = await fetch(`${hlsUrl}${hlsUrl.includes('?') ? '&' : '?'}probe=${Date.now()}`, {
+                    cache: 'no-store'
+                });
+                lastStatus = resp.status;
+                if (resp.ok) {
+                    const body = await resp.text();
+                    if (body && body.includes('#EXTM3U') && body.includes('.ts')) {
+                        return true;
+                    }
+                }
+            } catch (e) {}
+            if (attempt < maxAttempts - 1) {
+                await new Promise(r => setTimeout(r, delayMs));
+            }
+        }
+        throw new Error(`Ring HLS Manifest nicht bereit${lastStatus ? ` (HTTP ${lastStatus})` : ''}`);
+    }
+
     async _startRingWidgetLiveHls(camId, videoEl, imageEl, loadingEl) {
-        await this._stopRingWidgetLive(camId);
+        await this._stopRingWidgetLive(camId, false);
 
         const startResp = await fetch(`/api/cameras/${camId}/start`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
         });
         const startData = await startResp.json();
         if (!startResp.ok || !startData.success || !startData.hls_url) {
             throw new Error(startData.error || 'Ring Live-Start fehlgeschlagen');
         }
 
-        const hlsUrl = `${startData.hls_url}${startData.hls_url.includes('?') ? '&' : '?'}ts=${Date.now()}`;
+        const baseHlsUrl = startData.hls_url;
+        await this._waitForRingWidgetManifest(baseHlsUrl, 24, 500);
+        let lastError = null;
 
-        await new Promise((resolve, reject) => {
-            if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-                const hls = new Hls({
-                    enableWorker: true,
-                    lowLatencyMode: true,
-                    liveSyncDurationCount: 1,
-                    liveMaxLatencyDurationCount: 3,
-                    maxBufferLength: 2,
-                    backBufferLength: 0
-                });
-                this._ringWidgetHls[camId] = hls;
-                let settled = false;
+        for (let attempt = 0; attempt < 4; attempt++) {
+            const hlsUrl = `${baseHlsUrl}${baseHlsUrl.includes('?') ? '&' : '?'}ts=${Date.now()}`;
+            try {
+                await new Promise((resolve, reject) => {
+                    if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                        const hls = new Hls({
+                            enableWorker: true,
+                            lowLatencyMode: true,
+                            liveSyncDurationCount: 1,
+                            liveMaxLatencyDurationCount: 3,
+                            maxBufferLength: 2,
+                            backBufferLength: 0
+                        });
+                        this._ringWidgetHls[camId] = hls;
+                        let settled = false;
+                        const timeoutId = setTimeout(() => {
+                            if (settled) return;
+                            settled = true;
+                            try { hls.destroy(); } catch (e) {}
+                            delete this._ringWidgetHls[camId];
+                            reject(new Error('HLS manifest timeout'));
+                        }, 4000 + (attempt * 1000));
 
-                const fail = (err) => {
-                    if (settled) return;
-                    settled = true;
-                    try { hls.destroy(); } catch (e) {}
-                    delete this._ringWidgetHls[camId];
-                    reject(err);
-                };
+                        const fail = (err) => {
+                            if (settled) return;
+                            settled = true;
+                            clearTimeout(timeoutId);
+                            try { hls.destroy(); } catch (e) {}
+                            delete this._ringWidgetHls[camId];
+                            reject(err);
+                        };
 
-                hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    if (settled) return;
-                    settled = true;
-                    videoEl.play().catch(() => {});
-                    videoEl.style.display = '';
-                    imageEl.style.display = 'none';
-                    if (loadingEl) loadingEl.style.display = 'none';
-                    resolve();
-                });
-                hls.on(Hls.Events.ERROR, (event, data) => {
-                    if (data && data.fatal) {
-                        fail(new Error(data.type || 'HLS fatal'));
+                        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                            if (settled) return;
+                            settled = true;
+                            clearTimeout(timeoutId);
+                            videoEl.play().catch(() => {});
+                            videoEl.style.display = '';
+                            imageEl.style.display = 'none';
+                            if (loadingEl) loadingEl.style.display = 'none';
+                            resolve();
+                        });
+                        hls.on(Hls.Events.ERROR, (event, data) => {
+                            if (data && data.fatal) {
+                                fail(new Error(data.type || 'HLS fatal'));
+                            }
+                        });
+
+                        hls.loadSource(hlsUrl);
+                        hls.attachMedia(videoEl);
+                        return;
                     }
+
+                    if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+                        const timeoutId = setTimeout(() => reject(new Error('Native HLS timeout')), 4000 + (attempt * 1000));
+                        videoEl.src = hlsUrl;
+                        videoEl.onloadedmetadata = () => {
+                            clearTimeout(timeoutId);
+                            videoEl.play().catch(() => {});
+                            videoEl.style.display = '';
+                            imageEl.style.display = 'none';
+                            if (loadingEl) loadingEl.style.display = 'none';
+                            resolve();
+                        };
+                        videoEl.onerror = () => {
+                            clearTimeout(timeoutId);
+                            reject(new Error('Native HLS Fehler'));
+                        };
+                        return;
+                    }
+
+                    reject(new Error('HLS im Browser nicht unterstützt'));
                 });
-
-                hls.loadSource(hlsUrl);
-                hls.attachMedia(videoEl);
                 return;
+            } catch (err) {
+                lastError = err;
+                if (attempt < 3) {
+                    await new Promise(r => setTimeout(r, 700 + (attempt * 500)));
+                }
             }
+        }
 
-            if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-                videoEl.src = hlsUrl;
-                videoEl.onloadedmetadata = () => {
-                    videoEl.play().catch(() => {});
-                    videoEl.style.display = '';
-                    imageEl.style.display = 'none';
-                    if (loadingEl) loadingEl.style.display = 'none';
-                    resolve();
-                };
-                videoEl.onerror = () => reject(new Error('Native HLS Fehler'));
-                return;
-            }
-
-            reject(new Error('HLS im Browser nicht unterstützt'));
-        });
+        throw lastError || new Error('Ring HLS konnte nicht geladen werden');
     }
 
     async _applyRingWidgetMode(camId, ringStatus = null) {
@@ -3070,7 +3121,8 @@ class SmartHomeApp {
                 try {
                     const bridgeResp = await fetch(`/api/cameras/${camId}/start`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' }
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({})
                     });
                     const bridgeData = await bridgeResp.json();
                     if (bridgeResp.ok && bridgeData.success && bridgeData.hls_url) {
