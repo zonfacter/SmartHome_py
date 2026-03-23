@@ -1,4 +1,6 @@
 (function () {
+    const RING_EVENTS_CARD_ID = '__ring_events__';
+
     const cameraPageUiMethods = {
         async loadCamerasPage() {
             console.log('📹 Lade Kameras...');
@@ -23,11 +25,6 @@
             const ringAuthBtn = document.getElementById('ring-auth-btn');
             if (ringAuthBtn) this._bindScopedListener(ringAuthBtn, 'click', () => this._ringAuthenticateFromForm(), { scope, key: 'cameras:ring-auth' });
 
-            const refreshRingEventsBtn = document.getElementById('refresh-ring-events-btn');
-            if (refreshRingEventsBtn) {
-                this._bindScopedListener(refreshRingEventsBtn, 'click', () => this.loadRingEvents(), { scope, key: 'cameras:ring-events-refresh' });
-            }
-
             const ringWebrtcPreferred = document.getElementById('ring-webrtc-preferred');
             if (ringWebrtcPreferred) {
                 const stored = localStorage.getItem('ringWebrtcPreferred');
@@ -38,8 +35,14 @@
             }
 
             this._refreshRingStatus();
+            await this.loadSavedCameras();
+
+            const refreshRingEventsBtn = document.getElementById('refresh-ring-events-btn');
+            if (refreshRingEventsBtn) {
+                this._bindScopedListener(refreshRingEventsBtn, 'click', () => this.loadRingEvents(), { scope, key: 'cameras:ring-events-refresh' });
+            }
+
             this.loadRingEvents();
-            this.loadSavedCameras();
         },
 
         _getScanOptions() {
@@ -59,6 +62,88 @@
             const user = document.getElementById('scan-user')?.value?.trim() || 'admin';
             const password = document.getElementById('scan-password')?.value?.trim() || 'admin';
             return { ports, user, password };
+        },
+
+        _getCameraGridOrder() {
+            try {
+                const raw = localStorage.getItem('cameraGridOrder');
+                const parsed = raw ? JSON.parse(raw) : [];
+                return Array.isArray(parsed) ? parsed.filter(id => typeof id === 'string' && id) : [];
+            } catch (e) {
+                return [];
+            }
+        },
+
+        _setCameraGridOrder(order) {
+            if (!Array.isArray(order)) return;
+            localStorage.setItem('cameraGridOrder', JSON.stringify(order.filter(id => typeof id === 'string' && id)));
+        },
+
+        _sortCameraGridIds(camIds) {
+            const preferred = this._getCameraGridOrder();
+            const available = [RING_EVENTS_CARD_ID, ...camIds];
+            const known = preferred.filter(id => available.includes(id));
+            const rest = available.filter(id => !known.includes(id));
+            return [...known, ...rest];
+        },
+
+        _setupCameraGridDragAndDrop() {
+            const grid = document.getElementById('cameras-grid');
+            if (!grid) return;
+
+            let draggingId = null;
+
+            const persistOrder = () => {
+                const order = Array.from(grid.querySelectorAll('.camera-card[data-card-id]'))
+                    .map(card => card.getAttribute('data-card-id'))
+                    .filter(Boolean);
+                this._setCameraGridOrder(order);
+            };
+
+            grid.querySelectorAll('.camera-card[data-card-id]').forEach(card => {
+                const cardId = card.getAttribute('data-card-id');
+                card.setAttribute('draggable', 'true');
+
+                card.addEventListener('dragstart', (e) => {
+                    draggingId = cardId;
+                    card.classList.add('opacity-60', 'scale-[0.98]');
+                    if (e.dataTransfer) {
+                        e.dataTransfer.effectAllowed = 'move';
+                        e.dataTransfer.setData('text/plain', cardId);
+                    }
+                });
+
+                card.addEventListener('dragend', () => {
+                    draggingId = null;
+                    card.classList.remove('opacity-60', 'scale-[0.98]');
+                    grid.querySelectorAll('.camera-card').forEach(item => {
+                        item.classList.remove('ring-2', 'ring-blue-400', 'ring-offset-2', 'dark:ring-offset-gray-900');
+                    });
+                });
+
+                card.addEventListener('dragover', (e) => {
+                    if (!draggingId || draggingId === cardId) return;
+                    e.preventDefault();
+                    card.classList.add('ring-2', 'ring-blue-400', 'ring-offset-2', 'dark:ring-offset-gray-900');
+                });
+
+                card.addEventListener('dragleave', () => {
+                    card.classList.remove('ring-2', 'ring-blue-400', 'ring-offset-2', 'dark:ring-offset-gray-900');
+                });
+
+                card.addEventListener('drop', (e) => {
+                    if (!draggingId || draggingId === cardId) return;
+                    e.preventDefault();
+                    const dragged = grid.querySelector(`.camera-card[data-card-id="${draggingId}"]`);
+                    if (!dragged || dragged === card) return;
+
+                    const rect = card.getBoundingClientRect();
+                    const before = e.clientY < rect.top + rect.height / 2;
+                    card.parentNode.insertBefore(dragged, before ? card : card.nextSibling);
+                    persistOrder();
+                    card.classList.remove('ring-2', 'ring-blue-400', 'ring-offset-2', 'dark:ring-offset-gray-900');
+                });
+            });
         },
 
         async _runNetworkScan() {
@@ -326,6 +411,7 @@
             }
 
             const camIds = Object.keys(cameras);
+            console.log(`Kameras geladen: ${camIds.length}`, camIds);
             this._clearRtspSnapshotTimers();
             this._clearRingSnapshotTimers();
             for (const timer of Object.values(this._hlsRetryTimers)) {
@@ -456,16 +542,51 @@
                 }
             }
 
+            const orderedIds = this._sortCameraGridIds(camIds);
             let gridHtml = '';
-            camIds.forEach(camId => {
+            orderedIds.forEach(cardId => {
+                if (cardId === RING_EVENTS_CARD_ID) {
+                    gridHtml += `
+                <div class="bg-white/95 dark:bg-gray-800/95 rounded-2xl border border-gray-200/80 dark:border-gray-700 shadow-sm hover:shadow-lg hover:-translate-y-0.5 p-4 camera-card transition-transform transition-shadow duration-200" data-cam-type="ring-events" data-card-id="${RING_EVENTS_CARD_ID}">
+                    <div class="flex items-start justify-between gap-3 mb-3">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <button class="camera-card-drag-handle p-1.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-grab" title="Kachel verschieben">
+                                    <i data-lucide="grip" class="w-4 h-4"></i>
+                                </button>
+                                <h3 class="font-semibold text-gray-900 dark:text-white">Ring Ereignisse</h3>
+                            </div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Klingeln, Bewegung und weitere API-Historie</p>
+                        </div>
+                        <button id="refresh-ring-events-btn" class="px-3 py-1.5 bg-slate-700 text-white text-xs rounded hover:bg-slate-800">
+                            Aktualisieren
+                        </button>
+                    </div>
+                    <div id="ring-events-status" class="text-xs text-gray-500 dark:text-gray-400 mb-3">Ereignisse werden geladen...</div>
+                    <div id="ring-events-panel" class="rounded-xl border border-gray-200 dark:border-gray-600 overflow-hidden bg-gray-50 dark:bg-gray-700">
+                        <div class="p-4 text-sm text-gray-500 dark:text-gray-400">
+                            Noch keine Ring-Ereignisse geladen.
+                        </div>
+                    </div>
+                </div>
+            `;
+                    return;
+                }
+
+                const camId = cardId;
                 const cam = cameras[camId];
                 const streamType = (cam.type || 'rtsp').toLowerCase();
 
                 if (streamType === 'mjpeg') {
                     gridHtml += `
-                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4 camera-card" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="mjpeg">
-                            <h3 class="font-semibold text-gray-900 dark:text-white mb-2">${cam.name}</h3>
-                            <div class="aspect-video bg-gray-900 rounded overflow-hidden relative">
+                        <div class="bg-white/95 dark:bg-gray-800/95 rounded-2xl border border-gray-200/80 dark:border-gray-700 shadow-sm hover:shadow-lg hover:-translate-y-0.5 p-4 camera-card transition-transform transition-shadow duration-200" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="mjpeg" data-card-id="${camId}">
+                            <div class="flex items-center gap-2 mb-2">
+                                <button class="camera-card-drag-handle p-1.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-grab" title="Kachel verschieben">
+                                    <i data-lucide="grip" class="w-4 h-4"></i>
+                                </button>
+                                <h3 class="font-semibold text-gray-900 dark:text-white">${cam.name}</h3>
+                            </div>
+                            <div class="aspect-video bg-gray-900 rounded-xl overflow-hidden relative ring-1 ring-black/5">
                                 <img id="cam-image-${camId}" src="${cam.url}" alt="${cam.name}" class="w-full h-full object-cover"
                                      onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                                 <div class="w-full h-full flex items-center justify-center text-white bg-gray-900" style="display:none;">
@@ -491,9 +612,14 @@
                     `;
                 } else if (streamType === 'ring') {
                     gridHtml += `
-                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4 camera-card" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="ring">
-                            <h3 class="font-semibold text-gray-900 dark:text-white mb-2">${cam.name}</h3>
-                            <div class="aspect-video bg-gray-900 rounded overflow-hidden relative">
+                        <div class="bg-white/95 dark:bg-gray-800/95 rounded-2xl border border-gray-200/80 dark:border-gray-700 shadow-sm hover:shadow-lg hover:-translate-y-0.5 p-4 camera-card transition-transform transition-shadow duration-200" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="ring" data-card-id="${camId}">
+                            <div class="flex items-center gap-2 mb-2">
+                                <button class="camera-card-drag-handle p-1.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-grab" title="Kachel verschieben">
+                                    <i data-lucide="grip" class="w-4 h-4"></i>
+                                </button>
+                                <h3 class="font-semibold text-gray-900 dark:text-white">${cam.name}</h3>
+                            </div>
+                            <div class="aspect-video bg-gray-900 rounded-xl overflow-hidden relative ring-1 ring-black/5">
                                 <video id="ring-video-${camId}" class="w-full h-full object-cover" muted autoplay playsinline style="display:none;"></video>
                                 <img id="cam-image-${camId}" src="" alt="${cam.name}" class="w-full h-full object-cover">
                                 <div id="ring-snapshot-ts-${camId}" class="absolute bottom-2 right-2 text-[11px] text-white bg-black/70 px-2 py-1 rounded pointer-events-none z-10 hidden">
@@ -522,9 +648,14 @@
                     `;
                 } else {
                     gridHtml += `
-                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4 camera-card" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="rtsp">
-                            <h3 class="font-semibold text-gray-900 dark:text-white mb-2">${cam.name}</h3>
-                            <div class="aspect-video bg-gray-900 rounded overflow-hidden relative">
+                        <div class="bg-white/95 dark:bg-gray-800/95 rounded-2xl border border-gray-200/80 dark:border-gray-700 shadow-sm hover:shadow-lg hover:-translate-y-0.5 p-4 camera-card transition-transform transition-shadow duration-200" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="rtsp" data-card-id="${camId}">
+                            <div class="flex items-center gap-2 mb-2">
+                                <button class="camera-card-drag-handle p-1.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-grab" title="Kachel verschieben">
+                                    <i data-lucide="grip" class="w-4 h-4"></i>
+                                </button>
+                                <h3 class="font-semibold text-gray-900 dark:text-white">${cam.name}</h3>
+                            </div>
+                            <div class="aspect-video bg-gray-900 rounded-xl overflow-hidden relative ring-1 ring-black/5">
                                 <img id="cam-image-${camId}" src="" alt="${cam.name}" class="w-full h-full object-cover">
                                 <video id="hls-video-${camId}" class="w-full h-full object-cover" muted autoplay playsinline style="display:none;"></video>
                                 <div id="hls-loading-${camId}" class="absolute inset-0 flex items-center justify-center text-white bg-gray-900">
@@ -555,6 +686,8 @@
             if (typeof lucide !== 'undefined') {
                 lucide.createIcons();
             }
+
+            this._setupCameraGridDragAndDrop();
 
             rtspCams.forEach(camId => {
                 this._loadRtspSnapshot(camId, `cam-image-${camId}`, 4500);
