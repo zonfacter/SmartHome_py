@@ -50,6 +50,7 @@ class SmartHomeApp {
         this._ringWidgetHls = {};
         this._ringWidgetModes = {};
         this._ringLiveEnabled = false;
+        this._ringEventsRefreshTimer = null;
         this._cameraAlertTimer = null;
         this._cameraAlertRestorePage = null;
         this._cameraTriggerRules = [];
@@ -520,6 +521,7 @@ class SmartHomeApp {
         // Cleanup beim Verlassen der Kamera-Seiten
         if (this.currentPage === 'cameras' && pageName !== 'cameras') {
             this._cleanupCameraStreams();
+            this._clearRingEventsRefreshTimer();
         }
         if (this.currentPage === 'camera-wall' && pageName !== 'camera-wall') {
             this._cleanupCameraWallStreams();
@@ -719,6 +721,11 @@ class SmartHomeApp {
 
         this.socket.registerCallback('camera_alert', (data) => {
             this._handleCameraAlert(data);
+            if (data && data.source === 'ring_doorbell') {
+                this.loadRingEvents().catch((error) => {
+                    console.error('Ring-Ereignisse konnten nach Alert nicht aktualisiert werden:', error);
+                });
+            }
         });
     }
 
@@ -1237,960 +1244,6 @@ class SmartHomeApp {
         // Hier könnten Charts/Graphen initialisiert werden
     }
 
-    async loadCamerasPage() {
-        console.log('📹 Lade Kameras...');
-        const scope = 'page:cameras';
-
-        // ⭐ v4.6.0: Lade Widgets für diese Page
-        await this.loadAndRenderWidgets('cameras');
-
-        // Grid-Layout aus localStorage laden
-        this._applyGridLayout();
-        this._setupGridLayoutToggle();
-
-        // Registriere Add-Camera-Button
-        const addCameraBtn = document.getElementById('add-camera-btn');
-        if (addCameraBtn) this._bindScopedListener(addCameraBtn, 'click', () => this.addCamera(), { scope, key: 'cameras:add-camera' });
-
-        // Diagnose-Button registrieren
-        const diagnoseBtn = document.getElementById('diagnose-btn');
-        if (diagnoseBtn) this._bindScopedListener(diagnoseBtn, 'click', () => this._runCameraDiagnose(), { scope, key: 'cameras:diagnose' });
-
-        // Netzwerk-Scan-Button registrieren
-        const scanBtn = document.getElementById('network-scan-btn');
-        if (scanBtn) this._bindScopedListener(scanBtn, 'click', () => this._runNetworkScan(), { scope, key: 'cameras:scan' });
-
-        // Ring-Import-Button registrieren
-        const ringImportBtn = document.getElementById('import-ring-btn');
-        if (ringImportBtn) this._bindScopedListener(ringImportBtn, 'click', () => this._openRingImport(), { scope, key: 'cameras:ring-import' });
-
-        const ringAuthBtn = document.getElementById('ring-auth-btn');
-        if (ringAuthBtn) this._bindScopedListener(ringAuthBtn, 'click', () => this._ringAuthenticateFromForm(), { scope, key: 'cameras:ring-auth' });
-
-        const ringWebrtcPreferred = document.getElementById('ring-webrtc-preferred');
-        if (ringWebrtcPreferred) {
-            const stored = localStorage.getItem('ringWebrtcPreferred');
-            ringWebrtcPreferred.checked = stored !== '0';
-            this._bindScopedListener(ringWebrtcPreferred, 'change', () => {
-                localStorage.setItem('ringWebrtcPreferred', ringWebrtcPreferred.checked ? '1' : '0');
-            }, { scope, key: 'cameras:ring-webrtc-preferred' });
-        }
-
-        this._refreshRingStatus();
-
-        // Lade gespeicherte Kameras und starte On-Demand Streams
-        this.loadSavedCameras();
-    }
-
-    _getScanOptions() {
-        // Ports aus Checkboxen
-        const ports = [];
-        document.querySelectorAll('.scan-port-cb:checked').forEach(cb => {
-            ports.push(parseInt(cb.value));
-        });
-        // Custom Ports
-        const customPorts = document.getElementById('scan-custom-ports')?.value?.trim();
-        if (customPorts) {
-            customPorts.split(/[,\s]+/).forEach(p => {
-                const num = parseInt(p);
-                if (num > 0 && num <= 65535 && !ports.includes(num)) ports.push(num);
-            });
-        }
-        // Credentials
-        const user = document.getElementById('scan-user')?.value?.trim() || 'admin';
-        const password = document.getElementById('scan-password')?.value?.trim() || 'admin';
-        return { ports, user, password };
-    }
-
-    async _runNetworkScan() {
-        const resultPanel = document.getElementById('scan-result');
-        const btn = document.getElementById('network-scan-btn');
-        const opts = this._getScanOptions();
-
-        btn.disabled = true;
-        btn.innerHTML = '<span class="animate-pulse">Scanne Netzwerk...</span>';
-        resultPanel.classList.remove('hidden');
-        resultPanel.innerHTML = `<p class="text-gray-500 animate-pulse">WS-Discovery + Port-Scan (${opts.ports.join(', ')}) laeuft, bitte warten...</p>`;
-
-        try {
-            const resp = await fetch('/api/cameras/scan', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ports: opts.ports, user: opts.user, password: opts.password })
-            });
-            const data = await resp.json();
-
-            if (!resp.ok) {
-                resultPanel.innerHTML = `<p class="text-red-500">Fehler: ${data.error || 'Unbekannt'}</p>`;
-                return;
-            }
-
-            let html = `<div class="mb-2 text-xs text-gray-500">Subnet: ${data.subnet}.0/24 | Methoden: ${(data.scan_method || []).join(', ')}</div>`;
-
-            if (!data.devices || data.devices.length === 0) {
-                html += '<p class="text-gray-500">Keine Kameras im Netzwerk gefunden</p>';
-            } else {
-                html += `<p class="font-semibold text-gray-900 dark:text-white mb-2">${data.devices.length} Geraet(e) gefunden:</p>`;
-                html += '<div class="space-y-2">';
-                data.devices.forEach(dev => {
-                    const typeColor = dev.type === 'camera'
-                        ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100'
-                        : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100';
-                    const typeLabel = dev.type === 'camera' ? 'Kamera' : 'Moeglich';
-                    const discoveryBadge = dev.discovery === 'onvif'
-                        ? '<span class="px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-100">ONVIF</span>'
-                        : '';
-                    const ports = (dev.ports || []).map(p => `<span class="px-1.5 py-0.5 rounded text-xs bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300">${p}</span>`).join(' ');
-
-                    html += `
-                        <div class="flex items-center justify-between p-2 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-600">
-                            <div class="flex items-center space-x-3">
-                                <span class="font-mono text-sm font-semibold text-gray-900 dark:text-white">${dev.host}</span>
-                                <span class="px-1.5 py-0.5 rounded text-xs ${typeColor}">${typeLabel}</span>
-                                ${discoveryBadge}
-                                <span class="text-xs text-gray-500">${dev.name || ''}</span>
-                            </div>
-                            <div class="flex items-center space-x-2">
-                                <span class="text-xs text-gray-400">Ports: ${ports}</span>
-                                <button class="scan-diagnose-btn px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700" data-host="${dev.host}">Diagnose</button>
-                            </div>
-                        </div>`;
-                });
-                html += '</div>';
-            }
-
-            resultPanel.innerHTML = html;
-
-            // Diagnose-Buttons: IP ins Diagnose-Feld eintragen und Diagnose starten
-            resultPanel.querySelectorAll('.scan-diagnose-btn').forEach(b => {
-                b.addEventListener('click', () => {
-                    const ip = b.getAttribute('data-host');
-                    const ipInput = document.getElementById('diagnose-ip');
-                    if (ipInput) ipInput.value = ip;
-                    this._runCameraDiagnose();
-                });
-            });
-
-            if (typeof lucide !== 'undefined') lucide.createIcons();
-
-        } catch (e) {
-            resultPanel.innerHTML = `<p class="text-red-500">Verbindungsfehler: ${e.message}</p>`;
-        } finally {
-            btn.disabled = false;
-            btn.innerHTML = '<i data-lucide="radar" class="w-4 h-4"></i><span>Netzwerk scannen</span>';
-            if (typeof lucide !== 'undefined') lucide.createIcons();
-        }
-    }
-
-    async _runCameraDiagnose() {
-        const ipInput = document.getElementById('diagnose-ip');
-        const resultPanel = document.getElementById('diagnose-result');
-        const btn = document.getElementById('diagnose-btn');
-        const ip = ipInput?.value?.trim();
-        const opts = this._getScanOptions();
-
-        if (!ip) {
-            alert('Bitte IP-Adresse eingeben');
-            return;
-        }
-
-        // UI: Ladezustand
-        btn.disabled = true;
-        btn.innerHTML = '<span class="animate-pulse">Scanne...</span>';
-        resultPanel.classList.remove('hidden');
-        resultPanel.innerHTML = '<p class="text-gray-500 animate-pulse">Diagnose laeuft, bitte warten...</p>';
-
-        try {
-            const resp = await fetch('/api/cameras/diagnose', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ host: ip, user: opts.user, password: opts.password })
-            });
-            const data = await resp.json();
-
-            if (!resp.ok) {
-                resultPanel.innerHTML = `<p class="text-red-500">Fehler: ${data.error || 'Unbekannt'}</p>`;
-                return;
-            }
-
-            // Ergebnis rendern
-            let html = '';
-
-            // Offene Ports
-            html += `<div class="mb-3"><span class="font-semibold text-gray-900 dark:text-white">Offene Ports:</span> `;
-            if (data.ports && data.ports.length > 0) {
-                html += data.ports.map(p => `<span class="inline-block px-2 py-0.5 bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100 rounded text-xs mr-1">${p}</span>`).join('');
-            } else {
-                html += '<span class="text-gray-500">Keine gefunden</span>';
-            }
-            html += '</div>';
-
-            // Streams
-            html += '<div class="mb-3"><span class="font-semibold text-gray-900 dark:text-white">Erkannte Streams:</span>';
-            if (data.streams && data.streams.length > 0) {
-                html += '<div class="mt-1 space-y-1">';
-                data.streams.forEach(s => {
-                    const label = s.stream_type === 'mainstream' ? 'Main' : 'Sub';
-                    const badge = s.stream_type === 'mainstream'
-                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-100'
-                        : 'bg-purple-100 text-purple-800 dark:bg-purple-800 dark:text-purple-100';
-                    html += `<div class="flex items-center space-x-2">
-                        <span class="px-2 py-0.5 rounded text-xs ${badge}">${label}</span>
-                        <span class="font-mono text-xs text-gray-700 dark:text-gray-300">${s.url}</span>
-                        <span class="text-xs text-gray-500">${s.codec} ${s.width}x${s.height} ${s.fps || '?'}fps</span>
-                    </div>`;
-                });
-                html += '</div>';
-            } else {
-                html += ' <span class="text-gray-500">Keine gefunden</span>';
-            }
-            html += '</div>';
-
-            // ONVIF
-            html += '<div class="mb-3"><span class="font-semibold text-gray-900 dark:text-white">ONVIF:</span> ';
-            if (data.onvif && data.onvif.available) {
-                html += `<span class="text-green-600 dark:text-green-400">Ja (Port ${data.onvif.port})</span>`;
-                if (data.onvif.device_info) {
-                    const di = data.onvif.device_info;
-                    html += `<span class="text-xs text-gray-500 ml-2">${di.manufacturer} ${di.model}</span>`;
-                }
-                if (data.onvif.ptz_available) {
-                    html += ' <span class="px-2 py-0.5 bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100 rounded text-xs">PTZ</span>';
-                }
-            } else {
-                html += '<span class="text-gray-500">Nicht gefunden</span>';
-            }
-            html += '</div>';
-
-            // Snapshot
-            html += '<div class="mb-3"><span class="font-semibold text-gray-900 dark:text-white">Snapshot:</span> ';
-            if (data.snapshot) {
-                html += `<span class="text-green-600 dark:text-green-400 font-mono text-xs">${data.snapshot.url}</span>`;
-            } else {
-                html += '<span class="text-gray-500">Nicht gefunden</span>';
-            }
-            html += '</div>';
-
-            // Uebernehmen-Button
-            if (data.streams && data.streams.length > 0) {
-                // Daten fuer Uebernahme vorbereiten
-                const mainstream = data.streams.find(s => s.stream_type === 'mainstream');
-                const substream = data.streams.find(s => s.stream_type === 'substream');
-                const mainUrl = mainstream ? mainstream.url : (data.streams[0] ? data.streams[0].url : '');
-                const subUrl = substream ? substream.url : '';
-
-                html += `<button id="diagnose-apply-btn" class="mt-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
-                    data-main-url="${mainUrl}"
-                    data-sub-url="${subUrl}"
-                    data-onvif-port="${data.onvif ? data.onvif.port : ''}"
-                    data-host="${ip}">
-                    Uebernehmen
-                </button>`;
-            }
-
-            resultPanel.innerHTML = html;
-
-            // Uebernehmen-Handler
-            const applyBtn = document.getElementById('diagnose-apply-btn');
-            if (applyBtn) {
-                applyBtn.addEventListener('click', () => {
-                    const nameInput = document.getElementById('camera-name');
-                    const urlInput = document.getElementById('camera-rtsp-url');
-                    if (nameInput) nameInput.value = `Kamera ${applyBtn.dataset.host}`;
-                    if (urlInput) urlInput.value = applyBtn.dataset.mainUrl;
-                });
-            }
-
-            if (typeof lucide !== 'undefined') lucide.createIcons();
-
-        } catch (e) {
-            resultPanel.innerHTML = `<p class="text-red-500">Verbindungsfehler: ${e.message}</p>`;
-        } finally {
-            btn.disabled = false;
-            btn.innerHTML = '<i data-lucide="search" class="w-4 h-4"></i><span>Diagnose</span>';
-            if (typeof lucide !== 'undefined') lucide.createIcons();
-        }
-    }
-
-    async _refreshRingStatus() {
-        const statusEl = document.getElementById('ring-status');
-        const userAgentInput = document.getElementById('ring-user-agent');
-        if (!statusEl) return { available: false, configured: false };
-
-        try {
-            const resp = await fetch('/api/ring/status');
-            const data = await resp.json();
-
-            if (!resp.ok) {
-                statusEl.textContent = `Ring Status: Fehler (${data.error || 'Unbekannt'})`;
-                return { available: false, configured: false };
-            }
-
-            if (userAgentInput && data.user_agent && !userAgentInput.value) {
-                userAgentInput.value = data.user_agent;
-            }
-
-            if (!data.available) {
-                statusEl.textContent = 'Ring Status: Modul nicht installiert (ring_doorbell fehlt)';
-            } else if (data.configured) {
-                statusEl.textContent = `Ring Status: verbunden (User-Agent: ${data.user_agent || 'n/a'})`;
-            } else {
-                statusEl.textContent = 'Ring Status: nicht verbunden';
-            }
-
-            return data;
-        } catch (e) {
-            statusEl.textContent = `Ring Status: Fehler (${e.message})`;
-            return { available: false, configured: false };
-        }
-    }
-
-    async _ringAuthenticateFromForm() {
-        const username = document.getElementById('ring-username')?.value?.trim();
-        const password = document.getElementById('ring-password')?.value || '';
-        const otpRaw = document.getElementById('ring-otp')?.value?.trim() || '';
-        const otp = otpRaw.replace(/\D/g, '');
-        const userAgent = document.getElementById('ring-user-agent')?.value?.trim() || '';
-
-        if (!username || !password) {
-            alert('Bitte Ring Benutzer/E-Mail und Passwort eintragen.');
-            return false;
-        }
-
-        const resp = await fetch('/api/ring/auth', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                username,
-                password,
-                otp: otp || undefined,
-                user_agent: userAgent || undefined
-            })
-        });
-        const data = await resp.json();
-        if (!resp.ok || !data.success) {
-            alert(`Ring-Authentifizierung fehlgeschlagen: ${data.error || 'Unbekannt'}`);
-            await this._refreshRingStatus();
-            return false;
-        }
-
-        // OTP nach Erfolg leeren
-        const otpInput = document.getElementById('ring-otp');
-        if (otpInput) otpInput.value = '';
-
-        await this._refreshRingStatus();
-        return true;
-    }
-
-    async _ringEnsureAuthenticated() {
-        const status = await this._refreshRingStatus();
-        if (!status.available) {
-            alert('Ring-Integration ist nicht verfügbar. Bitte ring_doorbell installieren.');
-            return false;
-        }
-        if (status.configured) return true;
-
-        return await this._ringAuthenticateFromForm();
-    }
-
-    async _openRingImport() {
-        const panel = document.getElementById('ring-import-result');
-        if (!panel) return;
-
-        panel.classList.remove('hidden');
-        panel.innerHTML = '<p class="text-gray-500 animate-pulse">Lade Ring-Kameras...</p>';
-
-        try {
-            const ok = await this._ringEnsureAuthenticated();
-            if (!ok) {
-                panel.innerHTML = '<p class="text-yellow-600">Ring-Authentifizierung abgebrochen.</p>';
-                return;
-            }
-
-            const resp = await fetch('/api/ring/cameras');
-            const data = await resp.json();
-            if (!resp.ok || !data.success) {
-                // Token kann als "configured" gelten, aber serverseitig ungueltig sein.
-                // Bei 401 versuchen wir automatisch einen Re-Auth mit den Formdaten.
-                if (resp.status === 401) {
-                    const reauthed = await this._ringAuthenticateFromForm();
-                    if (reauthed) {
-                        const retryResp = await fetch('/api/ring/cameras');
-                        const retryData = await retryResp.json();
-                        if (retryResp.ok && retryData.success) {
-                            return this._renderRingImportPanel(panel, retryData.cameras || []);
-                        }
-                        panel.innerHTML = `<p class=\"text-red-500\">Fehler nach Re-Auth: ${retryData.error || 'Unbekannt'}</p>`;
-                        return;
-                    }
-                }
-                panel.innerHTML = `<p class=\"text-red-500\">Fehler: ${data.error || 'Unbekannt'}</p>`;
-                return;
-            }
-
-            this._renderRingImportPanel(panel, data.cameras || []);
-        } catch (e) {
-            panel.innerHTML = `<p class=\"text-red-500\">Fehler: ${e.message}</p>`;
-        }
-    }
-
-    _renderRingImportPanel(panel, cameras) {
-        if (!panel) return;
-        if (!cameras || cameras.length === 0) {
-            panel.innerHTML = '<p class="text-gray-500">Keine Ring-Kameras gefunden.</p>';
-            return;
-        }
-
-        let html = '<div class="space-y-2">';
-        cameras.forEach((cam) => {
-            html += `
-                <div class="flex items-center justify-between p-2 rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800">
-                    <div class="min-w-0">
-                        <p class="font-medium text-gray-900 dark:text-white">${cam.name}</p>
-                        <p class="text-xs text-gray-500 font-mono">device_id: ${cam.device_id}</p>
-                    </div>
-                    <button class="ring-import-device-btn px-3 py-1.5 bg-orange-600 text-white text-xs rounded hover:bg-orange-700"
-                            data-device-id="${cam.device_id}" data-device-name="${cam.name}">
-                        Importieren
-                    </button>
-                </div>
-            `;
-        });
-        html += '</div>';
-        panel.innerHTML = html;
-
-        panel.querySelectorAll('.ring-import-device-btn').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const ringDeviceId = btn.getAttribute('data-device-id');
-                const ringDeviceName = btn.getAttribute('data-device-name');
-                await this._importRingDevice(ringDeviceId, ringDeviceName);
-            });
-        });
-    }
-
-    async _importRingDevice(ringDeviceId, ringDeviceName) {
-        const camId = `ring_${ringDeviceId}`;
-        const resp = await fetch('/api/ring/cameras/import', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                id: camId,
-                ring_device_id: ringDeviceId,
-                name: ringDeviceName
-            })
-        });
-        const data = await resp.json();
-        if (!resp.ok || !data.success) {
-            alert(`Import fehlgeschlagen: ${data.error || 'Unbekannt'}`);
-            return;
-        }
-
-        this.loadSavedCameras();
-    }
-
-    async addCamera() {
-        const nameInput = document.getElementById('camera-name');
-        const urlInput = document.getElementById('camera-rtsp-url');
-
-        const name = nameInput?.value?.trim();
-        const streamUrl = urlInput?.value?.trim();
-
-        if (!name || !streamUrl) {
-            alert('Bitte Name und Stream-URL eingeben!');
-            return;
-        }
-
-        // Validiere Stream-URL (RTSP oder MJPEG/HTTP)
-        const isRTSP = streamUrl.startsWith('rtsp://');
-        const isMJPEG = streamUrl.startsWith('http://') || streamUrl.startsWith('https://');
-
-        if (!isRTSP && !isMJPEG) {
-            alert('Ungültige Stream-URL! Format: rtsp://... oder http(s)://...');
-            return;
-        }
-
-        const streamType = isRTSP ? 'rtsp' : 'mjpeg';
-        const camId = 'cam_' + Date.now();
-
-        try {
-            const resp = await fetch('/api/cameras', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    id: camId,
-                    name: name,
-                    url: streamUrl,
-                    type: streamType,
-                    autostart: true
-                })
-            });
-            const result = await resp.json();
-            if (!resp.ok) {
-                alert('Fehler: ' + (result.error || 'Unbekannt'));
-                return;
-            }
-            console.log(`Kamera hinzugefuegt: ${name} (${camId})`);
-        } catch (e) {
-            console.error('Fehler beim Hinzufuegen der Kamera:', e);
-            alert('Server nicht erreichbar');
-            return;
-        }
-
-        // Leere Inputs
-        if (nameInput) nameInput.value = '';
-        if (urlInput) urlInput.value = '';
-
-        // Lade Liste neu
-        this.loadSavedCameras();
-    }
-
-    async loadSavedCameras() {
-        const cameraListContainer = document.getElementById('camera-list');
-        const camerasGridContainer = document.getElementById('cameras-grid');
-
-        if (!cameraListContainer || !camerasGridContainer) return;
-
-        // Lade Kameras vom Server
-        let cameras = {};
-        try {
-            const resp = await fetch('/api/cameras');
-            const data = await resp.json();
-            cameras = data.cameras || {};
-        } catch (e) {
-            console.error('Fehler beim Laden der Kameras:', e);
-            cameraListContainer.innerHTML = '<p class="text-sm text-red-500">Server nicht erreichbar</p>';
-            return;
-        }
-
-        const camIds = Object.keys(cameras);
-        this._clearRtspSnapshotTimers();
-        this._clearRingSnapshotTimers();
-        for (const timer of Object.values(this._hlsRetryTimers)) {
-            clearTimeout(timer);
-        }
-        this._hlsRetryTimers = {};
-        for (const [camId, hls] of Object.entries(this._hlsInstances)) {
-            try { hls.destroy(); } catch (e) {}
-        }
-        this._hlsInstances = {};
-        if (camIds.length === 0) {
-            cameraListContainer.innerHTML = '<p class="text-sm text-gray-500">Keine Kameras konfiguriert</p>';
-            camerasGridContainer.innerHTML = '<p class="text-gray-500">Kameras werden nach Konfiguration hier angezeigt...</p>';
-            return;
-        }
-
-        // Rendere Kamera-Liste (Config-Bereich)
-        let listHtml = '<div class="space-y-2">';
-        camIds.forEach(camId => {
-            const cam = cameras[camId];
-            const streamType = (cam.type || 'rtsp').toUpperCase();
-            const statusDot = cam.stream_running
-                ? '<span class="w-2 h-2 rounded-full bg-green-500 inline-block mr-1"></span>'
-                : '<span class="w-2 h-2 rounded-full bg-gray-400 inline-block mr-1"></span>';
-
-            const onvifHost = cam.onvif?.host || '';
-            const onvifPort = cam.onvif?.port || '';
-            const onvifUser = cam.onvif?.user || 'admin';
-            const onvifPass = cam.onvif?.password || 'admin';
-
-            listHtml += `
-                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg" id="cam-entry-${camId}">
-                    <!-- Anzeige-Modus -->
-                    <div class="cam-display flex items-center justify-between">
-                        <div class="flex items-center space-x-3 min-w-0">
-                            <i data-lucide="video" class="w-5 h-5 text-blue-500 flex-shrink-0"></i>
-                            <div class="min-w-0">
-                                <p class="font-medium text-gray-900 dark:text-white">${statusDot}${cam.name}</p>
-                                <p class="text-xs text-gray-500 font-mono truncate">${cam.url}</p>
-                                ${cam.substream_url ? `<p class="text-xs text-gray-400 font-mono truncate">Sub: ${cam.substream_url}</p>` : ''}
-                                <div class="flex items-center space-x-1 mt-0.5">
-                                    <span class="text-xs px-2 py-0.5 rounded ${streamType === 'MJPEG' ? 'bg-green-100 text-green-800' : streamType === 'RING' ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800'}">${streamType}</span>
-                                    ${cam.onvif ? '<span class="text-xs px-2 py-0.5 rounded bg-yellow-100 text-yellow-800">ONVIF</span>' : ''}
-                                </div>
-                            </div>
-                        </div>
-                        <div class="flex items-center space-x-2 flex-shrink-0">
-                            <button class="px-3 py-1 bg-gray-500 text-white text-sm rounded hover:bg-gray-600 edit-camera-btn"
-                                    data-camera-id="${camId}">
-                                <i data-lucide="pencil" class="w-4 h-4 inline"></i>
-                            </button>
-                            <button class="px-3 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600 remove-camera-btn"
-                                    data-camera-id="${camId}">
-                                <i data-lucide="trash-2" class="w-4 h-4 inline"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <!-- Edit-Modus (versteckt) -->
-                    <div class="cam-edit hidden mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
-                            <div>
-                                <label class="text-xs text-gray-500 dark:text-gray-400">Name</label>
-                                <input type="text" class="cam-edit-name w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value="${cam.name}">
-                            </div>
-                            <div>
-                                <label class="text-xs text-gray-500 dark:text-gray-400">Typ</label>
-                                <select class="cam-edit-type w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
-                                    <option value="rtsp" ${cam.type === 'rtsp' ? 'selected' : ''}>RTSP</option>
-                                    <option value="mjpeg" ${cam.type === 'mjpeg' ? 'selected' : ''}>MJPEG</option>
-                                    <option value="ring" ${cam.type === 'ring' ? 'selected' : ''}>Ring Snapshot</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="space-y-2 mb-2">
-                            <div>
-                                <label class="text-xs text-gray-500 dark:text-gray-400">Stream-URL (MainStream)</label>
-                                <input type="text" class="cam-edit-url w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono" value="${cam.url}">
-                            </div>
-                            <div>
-                                <label class="text-xs text-gray-500 dark:text-gray-400">SubStream-URL (optional, fuer Widget)</label>
-                                <input type="text" class="cam-edit-substream w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono" value="${cam.substream_url || ''}">
-                            </div>
-                        </div>
-                        <details class="mb-2">
-                            <summary class="text-xs font-semibold text-gray-600 dark:text-gray-400 cursor-pointer">ONVIF-Konfiguration</summary>
-                            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
-                                <div>
-                                    <label class="text-xs text-gray-500 dark:text-gray-400">Host</label>
-                                    <input type="text" class="cam-edit-onvif-host w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value="${onvifHost}">
-                                </div>
-                                <div>
-                                    <label class="text-xs text-gray-500 dark:text-gray-400">Port</label>
-                                    <input type="number" class="cam-edit-onvif-port w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value="${onvifPort}">
-                                </div>
-                                <div>
-                                    <label class="text-xs text-gray-500 dark:text-gray-400">User</label>
-                                    <input type="text" class="cam-edit-onvif-user w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value="${onvifUser}">
-                                </div>
-                                <div>
-                                    <label class="text-xs text-gray-500 dark:text-gray-400">Passwort</label>
-                                    <input type="text" class="cam-edit-onvif-pass w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value="${onvifPass}">
-                                </div>
-                            </div>
-                        </details>
-                        <div class="flex items-center space-x-2">
-                            <button class="save-camera-btn px-4 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700" data-camera-id="${camId}">Speichern</button>
-                            <button class="cancel-edit-btn px-4 py-1.5 bg-gray-400 text-white text-sm rounded hover:bg-gray-500" data-camera-id="${camId}">Abbrechen</button>
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-        listHtml += '</div>';
-        cameraListContainer.innerHTML = listHtml;
-
-        // On-Demand: Starte Widget-Streams (640x360) für RTSP-Kameras
-        const rtspCams = camIds.filter(id => (cameras[id].type || 'rtsp') === 'rtsp');
-        const startedRtspCams = new Set();
-        this._activeCameraStreams = [];
-        for (const camId of rtspCams) {
-            try {
-                await fetch(`/api/cameras/${camId}/start`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ use_substream: true })
-                });
-                this._activeCameraStreams.push(camId);
-                startedRtspCams.add(camId);
-                console.log(`On-Demand Stream gestartet: ${camId} (SubStream)`);
-            } catch (e) {
-                console.error(`Stream-Start fehlgeschlagen fuer ${camId}:`, e);
-            }
-        }
-
-        // Rendere Live-Streams (Grid) - alle bekommen Video-Element
-        let gridHtml = '';
-        camIds.forEach(camId => {
-            const cam = cameras[camId];
-            const streamType = (cam.type || 'rtsp').toLowerCase();
-
-            if (streamType === 'mjpeg') {
-                gridHtml += `
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4 camera-card" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="mjpeg">
-                        <h3 class="font-semibold text-gray-900 dark:text-white mb-2">${cam.name}</h3>
-                        <div class="aspect-video bg-gray-900 rounded overflow-hidden relative">
-                            <img id="cam-image-${camId}" src="${cam.url}" alt="${cam.name}" class="w-full h-full object-cover"
-                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                            <div class="w-full h-full flex items-center justify-center text-white bg-gray-900" style="display:none;">
-                                <div class="text-center">
-                                    <i data-lucide="alert-circle" class="w-12 h-12 mx-auto mb-2 text-red-500"></i>
-                                    <p class="text-sm">Stream nicht erreichbar</p>
-                                </div>
-                            </div>
-                        </div>
-                        <!-- Toolbar -->
-                        <div class="flex items-center space-x-2 mt-2">
-                            <button class="cam-fullscreen-btn px-3 py-1.5 bg-gray-700 text-white text-xs rounded hover:bg-gray-600 flex items-center space-x-1"
-                                    data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="mjpeg">
-                                <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i><span>Vollbild</span>
-                            </button>
-                            <button class="cam-ptz-toggle-btn px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-500 flex items-center space-x-1"
-                                    data-cam-id="${camId}" style="display:none;">
-                                <i data-lucide="move" class="w-3.5 h-3.5"></i><span>PTZ</span>
-                            </button>
-                            <span class="text-xs px-2 py-0.5 rounded bg-green-100 text-green-800">MJPEG</span>
-                        </div>
-                        <!-- Inline PTZ Controls (versteckt) -->
-                        <div id="widget-ptz-${camId}" class="widget-ptz-panel hidden mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg select-none"></div>
-                    </div>
-                `;
-            } else if (streamType === 'ring') {
-                gridHtml += `
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4 camera-card" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="ring">
-                        <h3 class="font-semibold text-gray-900 dark:text-white mb-2">${cam.name}</h3>
-                        <div class="aspect-video bg-gray-900 rounded overflow-hidden relative">
-                            <video id="ring-video-${camId}" class="w-full h-full object-cover" muted autoplay playsinline style="display:none;"></video>
-                            <img id="cam-image-${camId}" src="" alt="${cam.name}" class="w-full h-full object-cover">
-                            <div id="ring-snapshot-ts-${camId}" class="absolute bottom-2 right-2 text-[11px] text-white bg-black/70 px-2 py-1 rounded pointer-events-none z-10 hidden">
-                                Snapshot: -
-                            </div>
-                            <div id="ring-loading-${camId}" class="absolute inset-0 flex items-center justify-center text-white bg-gray-900 bg-opacity-60">
-                                <div class="text-center">
-                                    <i data-lucide="loader" class="w-8 h-8 mx-auto mb-2 animate-spin"></i>
-                                    <p class="text-sm">Ring Stream wird geladen...</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="flex items-center space-x-2 mt-2">
-                            <button class="cam-fullscreen-btn px-3 py-1.5 bg-gray-700 text-white text-xs rounded hover:bg-gray-600 flex items-center space-x-1"
-                                    data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="ring">
-                                <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i><span>Vollbild</span>
-                            </button>
-                            <button class="ring-widget-mode-btn px-3 py-1.5 bg-orange-600 text-white text-xs rounded hover:bg-orange-500 flex items-center space-x-1"
-                                    data-cam-id="${camId}" data-mode="snapshot">
-                                <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span id="ring-mode-label-${camId}">Snapshot</span>
-                            </button>
-                            <span class="text-xs px-2 py-0.5 rounded bg-orange-100 text-orange-800">RING</span>
-                        </div>
-                        <div id="widget-ptz-${camId}" class="widget-ptz-panel hidden mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg select-none"></div>
-                    </div>
-                `;
-            } else {
-                // RTSP: Video wird nach kurzer Verzögerung via HLS geladen
-                gridHtml += `
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4 camera-card" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="rtsp">
-                        <h3 class="font-semibold text-gray-900 dark:text-white mb-2">${cam.name}</h3>
-                        <div class="aspect-video bg-gray-900 rounded overflow-hidden relative">
-                            <img id="cam-image-${camId}" src="" alt="${cam.name}" class="w-full h-full object-cover">
-                            <video id="hls-video-${camId}" class="w-full h-full object-cover" muted autoplay playsinline style="display:none;"></video>
-                            <div id="hls-loading-${camId}" class="absolute inset-0 flex items-center justify-center text-white bg-gray-900">
-                                <div class="text-center">
-                                    <i data-lucide="loader" class="w-8 h-8 mx-auto mb-2 animate-spin"></i>
-                                    <p class="text-sm">Stream wird geladen...</p>
-                                </div>
-                            </div>
-                        </div>
-                        <!-- Toolbar -->
-                        <div class="flex items-center space-x-2 mt-2">
-                            <button class="cam-fullscreen-btn px-3 py-1.5 bg-gray-700 text-white text-xs rounded hover:bg-gray-600 flex items-center space-x-1"
-                                    data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="rtsp">
-                                <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i><span>Vollbild</span>
-                            </button>
-                            <button class="cam-ptz-toggle-btn px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-500 flex items-center space-x-1"
-                                    data-cam-id="${camId}" style="display:none;">
-                                <i data-lucide="move" class="w-3.5 h-3.5"></i><span>PTZ</span>
-                            </button>
-                            <span class="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-800">HLS</span>
-                        </div>
-                        <!-- Inline PTZ Controls (versteckt) -->
-                        <div id="widget-ptz-${camId}" class="widget-ptz-panel hidden mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg select-none"></div>
-                    </div>
-                `;
-            }
-        });
-        camerasGridContainer.innerHTML = gridHtml;
-
-        // Icons aktualisieren
-        if (typeof lucide !== 'undefined') {
-            lucide.createIcons();
-        }
-
-        // RTSP-Snapshot sofort anzeigen, bis HLS erfolgreich gestartet ist.
-        rtspCams.forEach(camId => {
-            this._loadRtspSnapshot(camId, `cam-image-${camId}`, 4500);
-            this._startRtspSnapshotRefresh(camId, `cam-image-${camId}`, 3500);
-        });
-
-        // HLS.js Player nach kurzer Verzoegerung initialisieren (FFmpeg braucht Zeit)
-        setTimeout(() => {
-            (async () => {
-                for (const camId of rtspCams) {
-                    const videoEl = document.getElementById(`hls-video-${camId}`);
-                    if (!videoEl) continue;
-
-                    let hlsUrl = `/static/hls/${camId}.m3u8`;
-                    if (!startedRtspCams.has(camId)) {
-                        try {
-                            const startResp = await fetch(`/api/cameras/${camId}/start`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ use_substream: true })
-                            });
-                            const startData = await startResp.json();
-                            if (startResp.ok && startData.success && startData.hls_url) {
-                                hlsUrl = startData.hls_url;
-                            }
-                        } catch (e) {}
-                    }
-
-                    this._initHlsPlayer(videoEl, hlsUrl, camId);
-                }
-            })();
-        }, 1200);
-
-        let ringStatus = { available: false, configured: false };
-        try {
-            const ringStatusResp = await fetch('/api/ring/status');
-            ringStatus = await ringStatusResp.json();
-            this._ringLiveEnabled = !!ringStatus.live_enabled;
-        } catch (e) {}
-
-        camIds.forEach(camId => {
-            const cam = cameras[camId];
-            if ((cam.type || 'rtsp').toLowerCase() === 'ring') {
-                const loadingEl = document.getElementById(`ring-loading-${camId}`);
-
-                if (!ringStatus.available || !ringStatus.configured) {
-                    if (loadingEl) {
-                        loadingEl.innerHTML = '<p class="text-sm text-yellow-300 px-3 text-center">Ring nicht verbunden. Bitte im Bereich "Ring Integration" erneut anmelden.</p>';
-                    }
-                    return;
-                }
-
-                this._syncRingWidgetModeButton(camId);
-                this._applyRingWidgetMode(camId, ringStatus).catch((e) => {
-                    console.warn(`Ring-Widget-Modus konnte nicht gesetzt werden (${camId}):`, e);
-                    if (loadingEl) loadingEl.style.display = 'none';
-                });
-            }
-        });
-
-        // Event-Listener: Loeschen-Buttons
-        document.querySelectorAll('.remove-camera-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const cameraId = btn.getAttribute('data-camera-id');
-                if (confirm(`Kamera "${cameras[cameraId]?.name || cameraId}" wirklich loeschen?`)) {
-                    this.removeCamera(cameraId);
-                }
-            });
-        });
-
-        // Event-Listener: Edit-Buttons
-        document.querySelectorAll('.edit-camera-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const camId = btn.getAttribute('data-camera-id');
-                const entry = document.getElementById(`cam-entry-${camId}`);
-                if (entry) {
-                    entry.querySelector('.cam-display').classList.add('hidden');
-                    entry.querySelector('.cam-edit').classList.remove('hidden');
-                }
-            });
-        });
-
-        // Event-Listener: Cancel-Buttons
-        document.querySelectorAll('.cancel-edit-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const camId = btn.getAttribute('data-camera-id');
-                const entry = document.getElementById(`cam-entry-${camId}`);
-                if (entry) {
-                    entry.querySelector('.cam-display').classList.remove('hidden');
-                    entry.querySelector('.cam-edit').classList.add('hidden');
-                }
-            });
-        });
-
-        // Event-Listener: Save-Buttons
-        document.querySelectorAll('.save-camera-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const camId = btn.getAttribute('data-camera-id');
-                this._saveCamera(camId);
-            });
-        });
-
-        document.querySelectorAll('.ring-widget-mode-btn').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const camId = btn.getAttribute('data-cam-id');
-                await this._toggleRingWidgetMode(camId);
-            });
-        });
-
-        // Event-Listener: Vollbild-Buttons
-        document.querySelectorAll('.cam-fullscreen-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const camId = btn.getAttribute('data-cam-id');
-                const camName = btn.getAttribute('data-cam-name');
-                const camType = btn.getAttribute('data-cam-type');
-                this.openCameraFullscreen(camId, camName, camType);
-            });
-        });
-
-        // PTZ-Faehigkeit pruefen und Buttons einblenden
-        camIds.forEach(camId => {
-            this._checkWidgetPTZ(camId);
-        });
-
-        // Event-Listener: PTZ-Toggle-Buttons
-        document.querySelectorAll('.cam-ptz-toggle-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const camId = btn.getAttribute('data-cam-id');
-                this._toggleWidgetPTZ(camId);
-            });
-        });
-    }
-
-    async _saveCamera(camId) {
-        const entry = document.getElementById(`cam-entry-${camId}`);
-        if (!entry) return;
-
-        const name = entry.querySelector('.cam-edit-name')?.value?.trim();
-        const url = entry.querySelector('.cam-edit-url')?.value?.trim();
-        const substreamUrl = entry.querySelector('.cam-edit-substream')?.value?.trim();
-        const type = entry.querySelector('.cam-edit-type')?.value;
-        const onvifHost = entry.querySelector('.cam-edit-onvif-host')?.value?.trim();
-        const onvifPort = entry.querySelector('.cam-edit-onvif-port')?.value?.trim();
-        const onvifUser = entry.querySelector('.cam-edit-onvif-user')?.value?.trim();
-        const onvifPass = entry.querySelector('.cam-edit-onvif-pass')?.value?.trim();
-
-        if (!name || !url) {
-            alert('Name und Stream-URL sind Pflichtfelder');
-            return;
-        }
-
-        const data = { name, url, type, substream_url: substreamUrl || '' };
-
-        // ONVIF nur wenn Host angegeben
-        if (onvifHost) {
-            data.onvif = {
-                host: onvifHost,
-                port: parseInt(onvifPort) || 80,
-                user: onvifUser || 'admin',
-                password: onvifPass || 'admin'
-            };
-        } else {
-            data.onvif = null;
-        }
-
-        try {
-            const resp = await fetch(`/api/cameras/${camId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
-            const result = await resp.json();
-            if (!resp.ok) {
-                alert('Fehler: ' + (result.error || 'Unbekannt'));
-                return;
-            }
-            console.log(`Kamera aktualisiert: ${camId}`);
-            // Liste neu laden (Stream wird ggf. neu gestartet)
-            this.loadSavedCameras();
-        } catch (e) {
-            console.error('Fehler beim Speichern:', e);
-            alert('Server nicht erreichbar');
-        }
-    }
-
     _initHlsPlayer(videoEl, hlsUrl, camId) {
         const cacheBustedHlsUrl = `${hlsUrl}${hlsUrl.includes('?') ? '&' : '?'}ts=${Date.now()}`;
         if (typeof Hls !== 'undefined' && Hls.isSupported()) {
@@ -2338,10 +1391,8 @@ class SmartHomeApp {
         if (!camId) return 'snapshot';
         if (this._ringWidgetModes[camId]) return this._ringWidgetModes[camId];
 
-        const stored = localStorage.getItem(`ringWidgetMode:${camId}`);
-        const mode = stored === 'live' ? 'live' : 'snapshot';
-        this._ringWidgetModes[camId] = mode;
-        return mode;
+        this._ringWidgetModes[camId] = 'snapshot';
+        return 'snapshot';
     }
 
     _setRingWidgetMode(camId, mode) {
@@ -2393,88 +1444,141 @@ class SmartHomeApp {
         await this._applyRingWidgetMode(camId);
     }
 
-    async _stopRingWidgetLive(camId) {
+    async _stopRingWidgetLive(camId, stopBackend = true) {
         const hls = this._ringWidgetHls[camId];
         if (hls) {
             try { hls.destroy(); } catch (e) {}
             delete this._ringWidgetHls[camId];
         }
         await this._stopRingWidgetWebrtc(camId);
+        if (!stopBackend) return;
         try {
             await fetch(`/api/cameras/${camId}/stop`, { method: 'POST' });
         } catch (e) {}
     }
 
+    async _waitForRingWidgetManifest(hlsUrl, maxAttempts = 24, delayMs = 500) {
+        let lastStatus = null;
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            try {
+                const resp = await fetch(`${hlsUrl}${hlsUrl.includes('?') ? '&' : '?'}probe=${Date.now()}`, {
+                    cache: 'no-store'
+                });
+                lastStatus = resp.status;
+                if (resp.ok) {
+                    const body = await resp.text();
+                    if (body && body.includes('#EXTM3U') && body.includes('.ts')) {
+                        return true;
+                    }
+                }
+            } catch (e) {}
+            if (attempt < maxAttempts - 1) {
+                await new Promise(r => setTimeout(r, delayMs));
+            }
+        }
+        throw new Error(`Ring HLS Manifest nicht bereit${lastStatus ? ` (HTTP ${lastStatus})` : ''}`);
+    }
+
     async _startRingWidgetLiveHls(camId, videoEl, imageEl, loadingEl) {
-        await this._stopRingWidgetLive(camId);
+        await this._stopRingWidgetLive(camId, false);
 
         const startResp = await fetch(`/api/cameras/${camId}/start`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
         });
         const startData = await startResp.json();
         if (!startResp.ok || !startData.success || !startData.hls_url) {
             throw new Error(startData.error || 'Ring Live-Start fehlgeschlagen');
         }
 
-        const hlsUrl = `${startData.hls_url}${startData.hls_url.includes('?') ? '&' : '?'}ts=${Date.now()}`;
+        const baseHlsUrl = startData.hls_url;
+        await this._waitForRingWidgetManifest(baseHlsUrl, 24, 500);
+        let lastError = null;
 
-        await new Promise((resolve, reject) => {
-            if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-                const hls = new Hls({
-                    enableWorker: true,
-                    lowLatencyMode: true,
-                    liveSyncDurationCount: 1,
-                    liveMaxLatencyDurationCount: 3,
-                    maxBufferLength: 2,
-                    backBufferLength: 0
-                });
-                this._ringWidgetHls[camId] = hls;
-                let settled = false;
+        for (let attempt = 0; attempt < 4; attempt++) {
+            const hlsUrl = `${baseHlsUrl}${baseHlsUrl.includes('?') ? '&' : '?'}ts=${Date.now()}`;
+            try {
+                await new Promise((resolve, reject) => {
+                    if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                        const hls = new Hls({
+                            enableWorker: true,
+                            lowLatencyMode: true,
+                            liveSyncDurationCount: 1,
+                            liveMaxLatencyDurationCount: 3,
+                            maxBufferLength: 2,
+                            backBufferLength: 0
+                        });
+                        this._ringWidgetHls[camId] = hls;
+                        let settled = false;
+                        const timeoutId = setTimeout(() => {
+                            if (settled) return;
+                            settled = true;
+                            try { hls.destroy(); } catch (e) {}
+                            delete this._ringWidgetHls[camId];
+                            reject(new Error('HLS manifest timeout'));
+                        }, 4000 + (attempt * 1000));
 
-                const fail = (err) => {
-                    if (settled) return;
-                    settled = true;
-                    try { hls.destroy(); } catch (e) {}
-                    delete this._ringWidgetHls[camId];
-                    reject(err);
-                };
+                        const fail = (err) => {
+                            if (settled) return;
+                            settled = true;
+                            clearTimeout(timeoutId);
+                            try { hls.destroy(); } catch (e) {}
+                            delete this._ringWidgetHls[camId];
+                            reject(err);
+                        };
 
-                hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    if (settled) return;
-                    settled = true;
-                    videoEl.play().catch(() => {});
-                    videoEl.style.display = '';
-                    imageEl.style.display = 'none';
-                    if (loadingEl) loadingEl.style.display = 'none';
-                    resolve();
-                });
-                hls.on(Hls.Events.ERROR, (event, data) => {
-                    if (data && data.fatal) {
-                        fail(new Error(data.type || 'HLS fatal'));
+                        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                            if (settled) return;
+                            settled = true;
+                            clearTimeout(timeoutId);
+                            videoEl.play().catch(() => {});
+                            videoEl.style.display = '';
+                            imageEl.style.display = 'none';
+                            if (loadingEl) loadingEl.style.display = 'none';
+                            resolve();
+                        });
+                        hls.on(Hls.Events.ERROR, (event, data) => {
+                            if (data && data.fatal) {
+                                fail(new Error(data.type || 'HLS fatal'));
+                            }
+                        });
+
+                        hls.loadSource(hlsUrl);
+                        hls.attachMedia(videoEl);
+                        return;
                     }
+
+                    if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+                        const timeoutId = setTimeout(() => reject(new Error('Native HLS timeout')), 4000 + (attempt * 1000));
+                        videoEl.src = hlsUrl;
+                        videoEl.onloadedmetadata = () => {
+                            clearTimeout(timeoutId);
+                            videoEl.play().catch(() => {});
+                            videoEl.style.display = '';
+                            imageEl.style.display = 'none';
+                            if (loadingEl) loadingEl.style.display = 'none';
+                            resolve();
+                        };
+                        videoEl.onerror = () => {
+                            clearTimeout(timeoutId);
+                            reject(new Error('Native HLS Fehler'));
+                        };
+                        return;
+                    }
+
+                    reject(new Error('HLS im Browser nicht unterstützt'));
                 });
-
-                hls.loadSource(hlsUrl);
-                hls.attachMedia(videoEl);
                 return;
+            } catch (err) {
+                lastError = err;
+                if (attempt < 3) {
+                    await new Promise(r => setTimeout(r, 700 + (attempt * 500)));
+                }
             }
+        }
 
-            if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-                videoEl.src = hlsUrl;
-                videoEl.onloadedmetadata = () => {
-                    videoEl.play().catch(() => {});
-                    videoEl.style.display = '';
-                    imageEl.style.display = 'none';
-                    if (loadingEl) loadingEl.style.display = 'none';
-                    resolve();
-                };
-                videoEl.onerror = () => reject(new Error('Native HLS Fehler'));
-                return;
-            }
-
-            reject(new Error('HLS im Browser nicht unterstützt'));
-        });
+        throw lastError || new Error('Ring HLS konnte nicht geladen werden');
     }
 
     async _applyRingWidgetMode(camId, ringStatus = null) {
@@ -3070,7 +2174,8 @@ class SmartHomeApp {
                 try {
                     const bridgeResp = await fetch(`/api/cameras/${camId}/start`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' }
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({})
                     });
                     const bridgeData = await bridgeResp.json();
                     if (bridgeResp.ok && bridgeData.success && bridgeData.hls_url) {
@@ -3529,16 +2634,6 @@ class SmartHomeApp {
             return hls;
         }
         return null;
-    }
-
-    async removeCamera(cameraId) {
-        try {
-            await fetch(`/api/cameras/${cameraId}`, { method: 'DELETE' });
-            console.log(`Kamera entfernt: ${cameraId}`);
-        } catch (e) {
-            console.error('Fehler beim Entfernen der Kamera:', e);
-        }
-        this.loadSavedCameras();
     }
 
     __OLD_loadCamerasPage_BACKUP() {
@@ -7911,6 +7006,13 @@ class SmartHomeApp {
             }
         } catch (e) {}
     }
+}
+
+if (typeof window.extendSmartHomeAppWithRingUI === 'function') {
+    window.extendSmartHomeAppWithRingUI(SmartHomeApp);
+}
+if (typeof window.extendSmartHomeAppWithCameraPageUI === 'function') {
+    window.extendSmartHomeAppWithCameraPageUI(SmartHomeApp);
 }
 
 // ========================================================================

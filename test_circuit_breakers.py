@@ -1,5 +1,6 @@
 import os
 import time
+import logging
 from types import SimpleNamespace
 
 from modules.core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
@@ -104,3 +105,59 @@ def test_stream_manager_breaker_blocks_repeated_start_failures(monkeypatch, tmp_
     stats = sm.get_circuit_breaker_stats()["stream:rtsp:cam01"]
     assert stats["state"] == "open"
     assert stats["total_rejected"] >= 1
+
+
+def test_stream_manager_ring_recovery_logs_expected_retry_noise_as_info(monkeypatch, caplog, tmp_path):
+    monkeypatch.setenv("SMARTHOME_STREAM_CB_FAILURE_THRESHOLD", "1")
+    monkeypatch.setenv("SMARTHOME_STREAM_CB_RECOVERY_SECONDS", "60")
+
+    sm = StreamManager()
+    sm.has_ffmpeg = True
+    sm.has_node = True
+    sm.has_ring_client_api = True
+    sm.hls_dir = str(tmp_path / "hls")
+    os.makedirs(sm.hls_dir, exist_ok=True)
+
+    breaker = sm._get_stream_breaker("ring_cam01", "ring")
+    breaker.record_failure("early_exit")
+
+    desired_spec = {
+        "type": "ring",
+        "camera_id": "ring_cam01",
+        "ring_device_id": "ring-device-01",
+        "refresh_token": "token",
+    }
+    sm._desired_streams["ring_cam01"] = desired_spec
+    sm._recovery_state["ring_cam01"] = {
+        "retry_timestamps": [],
+        "cooldown_until": 0.0,
+    }
+
+    caplog.set_level(logging.INFO, logger="StreamManager")
+
+    with caplog.at_level(logging.INFO, logger="StreamManager"):
+        sm._recovery_tick()
+
+    records = [r for r in caplog.records if r.name == "StreamManager"]
+    messages = [r.getMessage() for r in records]
+
+    assert any("Stream recovery scheduled: camera=ring_cam01" in m for m in messages)
+    assert any("Ring stream start blocked by circuit breaker: camera=ring_cam01" in m for m in messages)
+    assert any("Stream recovery deferred by circuit breaker: camera=ring_cam01" in m for m in messages)
+    assert not any(r.levelno >= logging.WARNING for r in records)
+
+
+def test_stream_manager_detects_missing_ring_client_api(monkeypatch):
+    import modules.gateway.stream_manager as sm_mod
+
+    class _Proc:
+        returncode = 1
+
+    def _fake_run(*args, **kwargs):
+        return _Proc()
+
+    monkeypatch.setattr(sm_mod.subprocess, "run", _fake_run)
+
+    sm = StreamManager()
+
+    assert sm.has_ring_client_api is False

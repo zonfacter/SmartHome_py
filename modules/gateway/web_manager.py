@@ -39,6 +39,7 @@ try:
     from modules.plc.symbol_browser import get_symbol_browser
     from modules.gateway.plc_config_manager import PLCConfigManager
     from modules.gateway.camera_trigger_store import CameraTriggerStore
+    from modules.gateway import ring_support
     from modules.plc.variable_manager import create_variable_manager
     MANAGERS_AVAILABLE = True
 except ImportError:
@@ -93,6 +94,8 @@ class WebManager(BaseModule):
         self._ring_event_thread = None
         self._ring_event_active = False
         self._ring_last_event_ids = {}
+        self._ring_event_history = deque(maxlen=200)
+        self._ring_event_history_lock = threading.Lock()
         self._ring_doorbell_until = {}
         self._ring_live_until = {}
         self._ring_doorbell_pulse_seconds = 10.0
@@ -3121,106 +3124,6 @@ class WebManager(BaseModule):
                 return jsonify({'success': False, 'error': str(e)}), 500
 
         # ==========================================
-        # RING API ENDPOINTS
-        # ==========================================
-
-        @self.app.route('/api/ring/status', methods=['GET'])
-        def ring_status():
-            try:
-                from modules.integrations.ring_module import get_ring_status
-                status = get_ring_status()
-                status['live_enabled'] = _is_ring_live_enabled()
-                status['live_on_ding'] = _is_ring_live_on_ding_enabled()
-                status['live_on_ding_seconds'] = _ring_live_on_ding_seconds()
-                status['live_on_ding_active'] = [
-                    cam_id for cam_id, until in self._ring_live_until.items()
-                    if until and time.time() < float(until)
-                ]
-                return jsonify(status)
-            except Exception as e:
-                logger.error(f"Fehler bei GET /api/ring/status: {e}", exc_info=True)
-                return jsonify({'available': False, 'configured': False, 'error': str(e)}), 500
-
-        @self.app.route('/api/gateway/ring-live-settings', methods=['GET', 'POST'])
-        def gateway_ring_live_settings():
-            """Gateway-Parameter fuer Ring-Live-Freigabe (Klingel/Trigger)."""
-            try:
-                if request.method == 'GET':
-                    return jsonify({'success': True, 'settings': self._load_gateway_settings()})
-
-                payload = request.get_json(silent=True) or {}
-                saved = self._save_gateway_settings(payload)
-                return jsonify({'success': True, 'settings': saved})
-            except Exception as e:
-                logger.error(f"Fehler bei /api/gateway/ring-live-settings: {e}", exc_info=True)
-                return jsonify({'success': False, 'error': str(e)}), 500
-
-        @self.app.route('/api/ring/auth', methods=['POST'])
-        def ring_auth():
-            try:
-                data = request.json or {}
-                username = (data.get('username') or '').strip()
-                password = data.get('password') or ''
-                otp_raw = (data.get('otp') or '').strip()
-                otp = ''.join(ch for ch in otp_raw if ch.isdigit()) or None
-                user_agent = (data.get('user_agent') or '').strip() or None
-
-                if not username or not password:
-                    return jsonify({'success': False, 'error': 'username und password erforderlich'}), 400
-
-                from modules.integrations.ring_module import authenticate_ring
-                result = authenticate_ring(username, password, otp=otp, user_agent=user_agent)
-
-                status = 200 if result.get('success') else 401
-                return jsonify(result), status
-            except Exception as e:
-                logger.error(f"Fehler bei POST /api/ring/auth: {e}", exc_info=True)
-                return jsonify({'success': False, 'error': str(e)}), 500
-
-        @self.app.route('/api/ring/cameras', methods=['GET'])
-        def ring_list_cameras():
-            try:
-                from modules.integrations.ring_module import list_ring_cameras
-                result = list_ring_cameras()
-                if result.get('success'):
-                    return jsonify(result)
-                return jsonify(result), 401
-            except Exception as e:
-                logger.error(f"Fehler bei GET /api/ring/cameras: {e}", exc_info=True)
-                return jsonify({'success': False, 'error': str(e)}), 500
-
-        @self.app.route('/api/ring/cameras/import', methods=['POST'])
-        def ring_import_camera():
-            """Importiert eine Ring-Kamera in cameras.json."""
-            try:
-                data = request.json or {}
-                ring_device_id = str(data.get('ring_device_id', '')).strip()
-                if not ring_device_id:
-                    return jsonify({'success': False, 'error': 'ring_device_id erforderlich'}), 400
-
-                cam_id = str(data.get('id', '')).strip() or f"ring_{ring_device_id}"
-                cam_name = data.get('name') or f"Ring {ring_device_id}"
-
-                config = _load_cameras_config()
-                config.setdefault('cameras', {})
-
-                config['cameras'][cam_id] = {
-                    'name': cam_name,
-                    'url': f"/api/cameras/{cam_id}/snapshot",
-                    'type': 'ring',
-                    'autostart': False,
-                    'ring': {
-                        'device_id': ring_device_id
-                    }
-                }
-                _save_cameras_config(config)
-
-                return jsonify({'success': True, 'camera_id': cam_id})
-            except Exception as e:
-                logger.error(f"Fehler bei POST /api/ring/cameras/import: {e}", exc_info=True)
-                return jsonify({'success': False, 'error': str(e)}), 500
-
-        # ==========================================
         # CAMERA / STREAM API ENDPOINTS
         # ==========================================
 
@@ -3315,6 +3218,12 @@ class WebManager(BaseModule):
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=2)
 
+        # ==========================================
+        # RING API ENDPOINTS
+        # ==========================================
+
+        ring_support.register_ring_routes(self, _load_cameras_config, _save_cameras_config)
+
         def _feature_flags_path():
             return os.path.join(os.path.abspath(os.getcwd()), 'config', 'feature_flags.json')
 
@@ -3331,32 +3240,16 @@ class WebManager(BaseModule):
             return {'flags': {}}
 
         def _is_ring_live_enabled() -> bool:
-            flags_doc = _load_feature_flags()
-            flags = flags_doc.get('flags', {}) if isinstance(flags_doc, dict) else {}
-            # Conservative default: explicit opt-in required for Ring live sessions.
-            return bool(flags.get('ui.ring.webrtc', False))
+            return ring_support.is_ring_live_enabled(_load_feature_flags)
 
         def _is_ring_live_on_ding_enabled() -> bool:
-            settings = self._load_gateway_settings()
-            ring_live = settings.get('ring_live', {}) if isinstance(settings, dict) else {}
-            if 'on_ding_enabled' in ring_live:
-                return bool(ring_live.get('on_ding_enabled'))
-            flags_doc = _load_feature_flags()
-            flags = flags_doc.get('flags', {}) if isinstance(flags_doc, dict) else {}
-            return bool(flags.get('ui.ring.live_on_ding', True))
+            return ring_support.is_ring_live_on_ding_enabled(self, _load_feature_flags)
 
         def _ring_live_on_ding_seconds() -> int:
-            settings = self._load_gateway_settings()
-            ring_live = settings.get('ring_live', {}) if isinstance(settings, dict) else {}
-            return max(5, min(int(ring_live.get('on_ding_seconds', 30)), 300))
+            return ring_support.ring_live_on_ding_seconds(self)
 
         def _is_ring_live_allowed_for_camera(cam_id: str) -> bool:
-            if _is_ring_live_enabled():
-                return True
-            if not _is_ring_live_on_ding_enabled():
-                return False
-            until = self._ring_live_until.get(cam_id)
-            return bool(until and time.time() < float(until))
+            return ring_support.is_ring_live_allowed_for_camera(self, cam_id, _load_feature_flags)
 
         @self.app.route('/api/routing/config', methods=['GET', 'POST'])
         def routing_config():
@@ -4492,21 +4385,7 @@ class WebManager(BaseModule):
         return {"cameras": {}}
 
     def _get_ring_camera_configs(self) -> List[Dict[str, str]]:
-        config = self._load_cameras_config_for_monitor()
-        cameras = config.get('cameras', {}) or {}
-        ring_cams = []
-        for cam_id, cam_cfg in cameras.items():
-            if (cam_cfg.get('type') or '').lower() != 'ring':
-                continue
-            device_id = str((cam_cfg.get('ring') or {}).get('device_id') or '').strip()
-            if not device_id:
-                continue
-            ring_cams.append({
-                'cam_id': str(cam_id),
-                'device_id': device_id,
-                'name': cam_cfg.get('name') or str(cam_id)
-            })
-        return ring_cams
+        return ring_support.get_ring_camera_configs(self)
 
     def _get_gateway_virtual_symbols(self) -> List[Dict[str, Any]]:
         """Gateway-eigene Variablen für die Symbolauswahl (z. B. Ring)."""
@@ -4736,66 +4615,13 @@ class WebManager(BaseModule):
         return os.path.join(os.path.abspath(os.getcwd()), 'config', 'gateway_settings.json')
 
     def _default_gateway_settings(self) -> Dict[str, Any]:
-        return {
-            "version": "1.0",
-            "ring_live": {
-                "on_ding_enabled": True,
-                "on_ding_seconds": 30,
-                "on_trigger_enabled": True,
-                "on_trigger_use_rule_duration": True,
-                "on_trigger_seconds": 30
-            }
-        }
+        return ring_support.default_gateway_settings()
 
     def _load_gateway_settings(self) -> Dict[str, Any]:
-        path = self._gateway_settings_path()
-        data = {}
-        if os.path.exists(path):
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    loaded = json.load(f) or {}
-                    if isinstance(loaded, dict):
-                        data = loaded
-            except Exception as e:
-                logger.warning(f"Konnte gateway_settings.json nicht laden: {e}")
-
-        defaults = self._default_gateway_settings()
-        ring_live = data.get('ring_live') if isinstance(data.get('ring_live'), dict) else {}
-        merged = {
-            "version": str(data.get('version') or defaults['version']),
-            "ring_live": {
-                "on_ding_enabled": bool(ring_live.get("on_ding_enabled", defaults["ring_live"]["on_ding_enabled"])),
-                "on_ding_seconds": max(5, min(int(ring_live.get("on_ding_seconds", defaults["ring_live"]["on_ding_seconds"])), 300)),
-                "on_trigger_enabled": bool(ring_live.get("on_trigger_enabled", defaults["ring_live"]["on_trigger_enabled"])),
-                "on_trigger_use_rule_duration": bool(ring_live.get("on_trigger_use_rule_duration", defaults["ring_live"]["on_trigger_use_rule_duration"])),
-                "on_trigger_seconds": max(5, min(int(ring_live.get("on_trigger_seconds", defaults["ring_live"]["on_trigger_seconds"])), 300)),
-            }
-        }
-        return merged
+        return ring_support.load_gateway_settings(self)
 
     def _save_gateway_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
-        merged = self._default_gateway_settings()
-        if isinstance(settings, dict):
-            merged = self._load_gateway_settings()
-            incoming = settings.get('ring_live') if isinstance(settings.get('ring_live'), dict) else settings
-            if isinstance(incoming, dict):
-                ring_live = merged['ring_live']
-                if 'on_ding_enabled' in incoming:
-                    ring_live['on_ding_enabled'] = bool(incoming.get('on_ding_enabled'))
-                if 'on_ding_seconds' in incoming:
-                    ring_live['on_ding_seconds'] = max(5, min(int(incoming.get('on_ding_seconds')), 300))
-                if 'on_trigger_enabled' in incoming:
-                    ring_live['on_trigger_enabled'] = bool(incoming.get('on_trigger_enabled'))
-                if 'on_trigger_use_rule_duration' in incoming:
-                    ring_live['on_trigger_use_rule_duration'] = bool(incoming.get('on_trigger_use_rule_duration'))
-                if 'on_trigger_seconds' in incoming:
-                    ring_live['on_trigger_seconds'] = max(5, min(int(incoming.get('on_trigger_seconds')), 300))
-
-        path = self._gateway_settings_path()
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(merged, f, indent=2, ensure_ascii=False)
-        return merged
+        return ring_support.save_gateway_settings(self, settings)
 
     @staticmethod
     def _camera_trigger_schema_version() -> str:
@@ -5071,106 +4897,19 @@ class WebManager(BaseModule):
                 })
 
     def _set_ring_doorbell_state(self, cam_id: str, cam_name: str, event_id: str, ding_ts: Any, active: bool):
-        if not self.data_gateway:
-            return
+        ring_support.set_ring_doorbell_state(self, cam_id, cam_name, event_id, ding_ts, active)
 
-        base = f"GATEWAY.RING.{cam_id}"
-        self.data_gateway.update_telemetry(f"{base}.doorbell", bool(active))
-        if event_id:
-            self.data_gateway.update_telemetry(f"{base}.last_event_id", str(event_id))
-        if ding_ts is not None:
-            self.data_gateway.update_telemetry(f"{base}.last_ding_ts", ding_ts)
+    def _record_ring_event(self, cam_id: str, cam_name: str, device_id: str, event: Dict[str, Any]) -> None:
+        ring_support.record_ring_event(self, cam_id, cam_name, device_id, event)
 
-        if active:
-            # Ring-Bridge beim Klingeln vorwärmen: reduziert Zeit bis Live-Bild sichtbar.
-            try:
-                stream_mgr = self.app_context.module_manager.get_module('stream_manager') if self.app_context else None
-                if stream_mgr:
-                    from modules.integrations.ring_module import get_ring_refresh_token
-                    refresh_token = get_ring_refresh_token()
-                    ring_cams = {c['cam_id']: c for c in self._get_ring_camera_configs()}
-                    ring_cfg = ring_cams.get(cam_id)
-                    if ring_cfg and refresh_token:
-                        stream_mgr.start_ring_stream(cam_id, ring_cfg['device_id'], refresh_token)
-            except Exception:
-                pass
-
-            self.broadcast_event('camera_alert', {
-                'cam_id': cam_id,
-                'name': cam_name,
-                'type': 'ring',
-                'source': 'ring_doorbell',
-                'event_id': event_id,
-                'timestamp': int(time.time()),
-                'timestamp_utc': self._utc_iso()
-            })
+    def _list_ring_events(self, limit: int = 25, kinds: str = '') -> Dict[str, Any]:
+        return ring_support.list_ring_events(self, limit=limit, kinds=kinds)
 
     def _ring_event_loop(self):
-        while self._ring_event_active:
-            try:
-                ring_cams = self._get_ring_camera_configs()
-                if not ring_cams:
-                    time.sleep(3.0)
-                    continue
-
-                for cam in ring_cams:
-                    cam_id = cam['cam_id']
-                    device_id = cam['device_id']
-                    cam_name = cam['name']
-
-                    # Auto-reset des Doorbell-Pulses
-                    until = self._ring_doorbell_until.get(cam_id)
-                    if until and time.time() >= until:
-                        self._ring_doorbell_until.pop(cam_id, None)
-                        self._set_ring_doorbell_state(cam_id, cam_name, self._ring_last_event_ids.get(cam_id), None, False)
-                    live_until = self._ring_live_until.get(cam_id)
-                    if live_until and time.time() >= live_until:
-                        self._ring_live_until.pop(cam_id, None)
-
-                    try:
-                        from modules.integrations.ring_module import get_ring_latest_ding
-                        result = get_ring_latest_ding(device_id)
-                    except Exception:
-                        continue
-
-                    if not result.get('success'):
-                        continue
-                    event = result.get('event')
-                    if not event:
-                        continue
-
-                    event_id = str(event.get('id') or '')
-                    if not event_id:
-                        continue
-
-                    if self._ring_last_event_ids.get(cam_id) != event_id:
-                        self._ring_last_event_ids[cam_id] = event_id
-                        ding_ts = event.get('ding_ts')
-                        self._ring_doorbell_until[cam_id] = time.time() + self._ring_doorbell_pulse_seconds
-                        if self._load_gateway_settings().get('ring_live', {}).get('on_ding_enabled', True):
-                            ding_window = max(5, min(int(self._load_gateway_settings().get('ring_live', {}).get('on_ding_seconds', 30)), 300))
-                            self._ring_live_until[cam_id] = time.time() + ding_window
-                        self._set_ring_doorbell_state(cam_id, cam_name, event_id, ding_ts, True)
-
-                time.sleep(2.0)
-            except Exception as e:
-                logger.warning(f"Ring-Event-Monitor Fehler: {e}")
-                time.sleep(3.0)
+        ring_support.ring_event_loop(self)
 
     def _start_ring_event_monitor(self):
-        if self._ring_event_active:
-            return
-        # Trigger-Regeln aktualisieren (z. B. nach Ring-Import neuer Kameras)
-        self._load_camera_trigger_rules()
-        # Initialisiere bekannte Ring-Variablen mit Defaultwerten,
-        # damit sie sofort im Gateway lesbar sind.
-        if self.data_gateway:
-            for cam in self._get_ring_camera_configs():
-                self._set_ring_doorbell_state(cam['cam_id'], cam['name'], '', None, False)
-        self._ring_event_active = True
-        self._ring_event_thread = threading.Thread(target=self._ring_event_loop, daemon=True)
-        self._ring_event_thread.start()
-        logger.info("Ring Event Monitor gestartet")
+        ring_support.start_ring_event_monitor(self)
 
     def _stop_ring_event_monitor(self):
         self._ring_event_active = False

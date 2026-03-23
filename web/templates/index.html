@@ -318,6 +318,24 @@
                     </div>
                     <div id="ring-import-result" class="hidden mt-2 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg text-sm"></div>
 
+                    <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600 space-y-3">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300">Ring Ereignisse</h3>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">API-Historie mit Datum, Uhrzeit und Trigger-Ereignis</p>
+                            </div>
+                            <button id="refresh-ring-events-btn" class="px-3 py-2 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-800">
+                                Aktualisieren
+                            </button>
+                        </div>
+                        <div id="ring-events-status" class="text-xs text-gray-500 dark:text-gray-400">Ereignisse werden geladen...</div>
+                        <div id="ring-events-panel" class="rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                            <div class="p-4 text-sm text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700">
+                                Noch keine Ring-Ereignisse geladen.
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Netzwerk-Scan + Kamera-Diagnose -->
                     <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
                         <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Kamera suchen</h3>
@@ -1566,7 +1584,9 @@
          ================================================================ -->
     <script defer src="/static/js/socket_handler.js"></script>
     <script defer src="/static/js/variable-manager.js"></script> <!-- ⭐ v4.6.0 -->
-    <script defer src="/static/js/app.js"></script>
+    <script defer src="/static/js/ring-ui.js?v=20260323-ring-ui-split"></script>
+    <script defer src="/static/js/camera-page-ui.js?v=20260323-camera-ui-split"></script>
+    <script defer src="/static/js/app.js?v=20260323-camera-ui-split"></script>
 
     <!-- Lucide Icons initialisieren -->
     <script>

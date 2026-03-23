@@ -467,6 +467,72 @@ def get_ring_latest_ding(device_id: str) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+def _serialize_ring_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    created_at = event.get("created_at")
+    ding_ts = None
+    created_at_iso = None
+    created_at_local = None
+
+    if isinstance(created_at, datetime):
+        ding_ts = int(created_at.timestamp())
+        created_at_iso = created_at.isoformat()
+        created_at_local = created_at.strftime("%Y-%m-%d %H:%M:%S")
+    elif isinstance(created_at, str):
+        created_at_iso = created_at
+        created_at_local = created_at
+
+    return {
+        "id": str(event.get("id")) if event.get("id") is not None else None,
+        "kind": event.get("kind"),
+        "answered": event.get("answered"),
+        "state": event.get("state"),
+        "ding_ts": ding_ts,
+        "created_at": created_at_iso,
+        "created_at_local": created_at_local,
+    }
+
+
+async def _async_get_history(
+    device_id: str,
+    limit: int = 20,
+    kind: Optional[str] = None,
+) -> Dict[str, Any]:
+    auth, ring, http_session = await _async_with_ring()
+    try:
+        target_id = str(device_id)
+        camera = next((c for c in ring.video_devices() if str(c.device_api_id) == target_id), None)
+        if not camera:
+            raise RuntimeError(f"Ring-Kamera mit device_id '{device_id}' nicht gefunden")
+
+        kwargs = {
+            "limit": max(1, min(int(limit), 100)),
+            "enforce_limit": True,
+            "retry": 1,
+            "convert_timezone": False,
+        }
+        if kind:
+            kwargs["kind"] = kind
+
+        events = await camera.async_history(**kwargs)
+        serialized = [_serialize_ring_event(event or {}) for event in (events or [])]
+        return {"success": True, "events": serialized}
+    finally:
+        await auth.async_close()
+        await _close_http_session(http_session)
+
+
+def get_ring_history(device_id: str, limit: int = 20, kind: Optional[str] = None) -> Dict[str, Any]:
+    """Liefert die Ring-Ereignishistorie fuer ein Device."""
+    if not RING_AVAILABLE:
+        return {"success": False, "error": "ring_doorbell nicht installiert"}
+
+    try:
+        timeout = max(12, min(45, int(limit) + 10))
+        return _RUNTIME.run(_async_get_history(device_id, limit=limit, kind=kind), timeout=timeout)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 async def _async_start_webrtc(device_id: str, sdp_offer: str, keep_alive_timeout: int = 30) -> Dict[str, Any]:
     session_id = _extract_sdp_session_id(sdp_offer)
     if not session_id:
