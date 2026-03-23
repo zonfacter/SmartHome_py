@@ -93,6 +93,8 @@ class WebManager(BaseModule):
         self._ring_event_thread = None
         self._ring_event_active = False
         self._ring_last_event_ids = {}
+        self._ring_event_history = deque(maxlen=200)
+        self._ring_event_history_lock = threading.Lock()
         self._ring_doorbell_until = {}
         self._ring_live_until = {}
         self._ring_doorbell_pulse_seconds = 10.0
@@ -3189,6 +3191,18 @@ class WebManager(BaseModule):
                 logger.error(f"Fehler bei GET /api/ring/cameras: {e}", exc_info=True)
                 return jsonify({'success': False, 'error': str(e)}), 500
 
+        @self.app.route('/api/ring/events', methods=['GET'])
+        def ring_list_events():
+            try:
+                limit = max(1, min(int(request.args.get('limit', 25)), 100))
+                kinds = str(request.args.get('kinds', '') or '').strip()
+                result = self._list_ring_events(limit=limit, kinds=kinds)
+                status = 200 if result.get('success') else 500
+                return jsonify(result), status
+            except Exception as e:
+                logger.error(f"Fehler bei GET /api/ring/events: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e), 'events': []}), 500
+
         @self.app.route('/api/ring/cameras/import', methods=['POST'])
         def ring_import_camera():
             """Importiert eine Ring-Kamera in cameras.json."""
@@ -5105,6 +5119,105 @@ class WebManager(BaseModule):
                 'timestamp_utc': self._utc_iso()
             })
 
+    def _record_ring_event(self, cam_id: str, cam_name: str, device_id: str, event: Dict[str, Any]) -> None:
+        event_id = str(event.get('id') or '').strip()
+        if not event_id:
+            return
+
+        entry = {
+            'id': event_id,
+            'cam_id': str(cam_id or '').strip(),
+            'camera_name': str(cam_name or cam_id or 'Ring Kamera').strip(),
+            'device_id': str(device_id or '').strip(),
+            'kind': str(event.get('kind') or 'unknown').strip() or 'unknown',
+            'trigger': str(event.get('kind') or 'unknown').strip() or 'unknown',
+            'created_at': event.get('created_at'),
+            'created_at_local': event.get('created_at_local'),
+            'ding_ts': event.get('ding_ts'),
+            'answered': event.get('answered'),
+            'state': event.get('state'),
+            'source': 'ring_api',
+        }
+
+        with self._ring_event_history_lock:
+            if any(str(item.get('id') or '') == event_id for item in self._ring_event_history):
+                return
+            self._ring_event_history.appendleft(entry)
+
+    def _list_ring_events(self, limit: int = 25, kinds: str = '') -> Dict[str, Any]:
+        ring_cams = self._get_ring_camera_configs()
+        if not ring_cams:
+            return {'success': True, 'events': []}
+
+        requested_limit = max(1, min(int(limit), 100))
+        per_camera_limit = max(1, min(requested_limit, 50))
+        kind_filter = {part.strip().lower() for part in str(kinds or '').split(',') if part.strip()}
+        collected = []
+
+        try:
+            from modules.integrations.ring_module import get_ring_history
+
+            for cam in ring_cams:
+                result = get_ring_history(cam['device_id'], limit=per_camera_limit)
+                if not result.get('success'):
+                    continue
+
+                for event in result.get('events') or []:
+                    normalized = {
+                        'id': str(event.get('id') or '').strip(),
+                        'cam_id': cam['cam_id'],
+                        'camera_name': cam['name'],
+                        'device_id': cam['device_id'],
+                        'kind': str(event.get('kind') or 'unknown').strip() or 'unknown',
+                        'trigger': str(event.get('kind') or 'unknown').strip() or 'unknown',
+                        'created_at': event.get('created_at'),
+                        'created_at_local': event.get('created_at_local'),
+                        'ding_ts': event.get('ding_ts'),
+                        'answered': event.get('answered'),
+                        'state': event.get('state'),
+                        'source': 'ring_api',
+                    }
+                    if not normalized['id']:
+                        continue
+                    if kind_filter and normalized['kind'].lower() not in kind_filter:
+                        continue
+                    collected.append(normalized)
+                    self._record_ring_event(cam['cam_id'], cam['name'], cam['device_id'], event)
+        except Exception as e:
+            logger.warning("Ring-Ereignisse konnten nicht von der API geladen werden: %s", e)
+
+        seen_ids = set()
+        merged = []
+        for event in sorted(
+            collected,
+            key=lambda item: (
+                float(item.get('ding_ts') or 0),
+                str(item.get('created_at') or ''),
+                str(item.get('id') or ''),
+            ),
+            reverse=True,
+        ):
+            event_id = str(event.get('id') or '')
+            if event_id in seen_ids:
+                continue
+            seen_ids.add(event_id)
+            merged.append(event)
+
+        if len(merged) < requested_limit:
+            with self._ring_event_history_lock:
+                for event in list(self._ring_event_history):
+                    event_id = str(event.get('id') or '')
+                    if not event_id or event_id in seen_ids:
+                        continue
+                    if kind_filter and str(event.get('kind') or '').lower() not in kind_filter:
+                        continue
+                    merged.append(dict(event))
+                    seen_ids.add(event_id)
+                    if len(merged) >= requested_limit:
+                        break
+
+        return {'success': True, 'events': merged[:requested_limit]}
+
     def _ring_event_loop(self):
         while self._ring_event_active:
             try:
@@ -5145,6 +5258,7 @@ class WebManager(BaseModule):
 
                     if self._ring_last_event_ids.get(cam_id) != event_id:
                         self._ring_last_event_ids[cam_id] = event_id
+                        self._record_ring_event(cam_id, cam_name, device_id, event)
                         ding_ts = event.get('ding_ts')
                         self._ring_doorbell_until[cam_id] = time.time() + self._ring_doorbell_pulse_seconds
                         if self._load_gateway_settings().get('ring_live', {}).get('on_ding_enabled', True):

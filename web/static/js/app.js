@@ -50,6 +50,7 @@ class SmartHomeApp {
         this._ringWidgetHls = {};
         this._ringWidgetModes = {};
         this._ringLiveEnabled = false;
+        this._ringEventsRefreshTimer = null;
         this._cameraAlertTimer = null;
         this._cameraAlertRestorePage = null;
         this._cameraTriggerRules = [];
@@ -520,6 +521,7 @@ class SmartHomeApp {
         // Cleanup beim Verlassen der Kamera-Seiten
         if (this.currentPage === 'cameras' && pageName !== 'cameras') {
             this._cleanupCameraStreams();
+            this._clearRingEventsRefreshTimer();
         }
         if (this.currentPage === 'camera-wall' && pageName !== 'camera-wall') {
             this._cleanupCameraWallStreams();
@@ -719,6 +721,11 @@ class SmartHomeApp {
 
         this.socket.registerCallback('camera_alert', (data) => {
             this._handleCameraAlert(data);
+            if (data && data.source === 'ring_doorbell') {
+                this.loadRingEvents().catch((error) => {
+                    console.error('Ring-Ereignisse konnten nach Alert nicht aktualisiert werden:', error);
+                });
+            }
         });
     }
 
@@ -1267,6 +1274,11 @@ class SmartHomeApp {
         const ringAuthBtn = document.getElementById('ring-auth-btn');
         if (ringAuthBtn) this._bindScopedListener(ringAuthBtn, 'click', () => this._ringAuthenticateFromForm(), { scope, key: 'cameras:ring-auth' });
 
+        const refreshRingEventsBtn = document.getElementById('refresh-ring-events-btn');
+        if (refreshRingEventsBtn) {
+            this._bindScopedListener(refreshRingEventsBtn, 'click', () => this.loadRingEvents(), { scope, key: 'cameras:ring-events-refresh' });
+        }
+
         const ringWebrtcPreferred = document.getElementById('ring-webrtc-preferred');
         if (ringWebrtcPreferred) {
             const stored = localStorage.getItem('ringWebrtcPreferred');
@@ -1277,6 +1289,7 @@ class SmartHomeApp {
         }
 
         this._refreshRingStatus();
+        this.loadRingEvents();
 
         // Lade gespeicherte Kameras und starte On-Demand Streams
         this.loadSavedCameras();
@@ -1545,6 +1558,115 @@ class SmartHomeApp {
         }
     }
 
+    _clearRingEventsRefreshTimer() {
+        if (this._ringEventsRefreshTimer) {
+            clearTimeout(this._ringEventsRefreshTimer);
+            this._ringEventsRefreshTimer = null;
+        }
+    }
+
+    _scheduleRingEventsRefresh(delayMs = 30000) {
+        this._clearRingEventsRefreshTimer();
+        if (this.currentPage !== 'cameras') return;
+        this._ringEventsRefreshTimer = setTimeout(() => {
+            this.loadRingEvents().catch((error) => {
+                console.error('Fehler beim Aktualisieren der Ring-Ereignisse:', error);
+            });
+        }, Math.max(5000, Number(delayMs) || 30000));
+    }
+
+    _formatRingEventTimestamp(event) {
+        const epochSeconds = Number(event?.ding_ts || 0);
+        if (Number.isFinite(epochSeconds) && epochSeconds > 0) {
+            try {
+                return new Date(epochSeconds * 1000).toLocaleString('de-DE');
+            } catch (e) {}
+        }
+        if (event?.created_at) {
+            try {
+                return new Date(event.created_at).toLocaleString('de-DE');
+            } catch (e) {}
+        }
+        return event?.created_at_local || '-';
+    }
+
+    _renderRingEvents(events) {
+        const panel = document.getElementById('ring-events-panel');
+        if (!panel) return;
+
+        const items = Array.isArray(events) ? events : [];
+        if (items.length === 0) {
+            panel.innerHTML = `
+                <div class="p-4 text-sm text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700">
+                    Keine Ring-Ereignisse gefunden.
+                </div>
+            `;
+            return;
+        }
+
+        panel.innerHTML = `
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-gray-50 dark:bg-gray-700/60 text-gray-600 dark:text-gray-300">
+                        <tr>
+                            <th class="px-4 py-3 text-left font-semibold">Zeit</th>
+                            <th class="px-4 py-3 text-left font-semibold">Kamera</th>
+                            <th class="px-4 py-3 text-left font-semibold">Trigger</th>
+                            <th class="px-4 py-3 text-left font-semibold">Event-ID</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-800">
+                        ${items.map((event) => {
+                            const trigger = this.escapeHtml(event.trigger || event.kind || 'unknown');
+                            const timeLabel = this.escapeHtml(this._formatRingEventTimestamp(event));
+                            const cameraName = this.escapeHtml(event.camera_name || event.cam_id || '-');
+                            const eventId = this.escapeHtml(event.id || '-');
+                            return `
+                                <tr>
+                                    <td class="px-4 py-3 whitespace-nowrap text-gray-900 dark:text-gray-100">${timeLabel}</td>
+                                    <td class="px-4 py-3 text-gray-700 dark:text-gray-200">${cameraName}</td>
+                                    <td class="px-4 py-3">
+                                        <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200">${trigger}</span>
+                                    </td>
+                                    <td class="px-4 py-3 font-mono text-xs text-gray-500 dark:text-gray-400">${eventId}</td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    async loadRingEvents() {
+        const panel = document.getElementById('ring-events-panel');
+        const statusEl = document.getElementById('ring-events-status');
+        if (!panel || !statusEl) return;
+
+        statusEl.textContent = 'Ring-Ereignisse werden geladen...';
+
+        try {
+            const response = await fetch('/api/ring/events?limit=25');
+            const payload = await response.json();
+            if (!response.ok || !payload.success) {
+                throw new Error(payload.error || 'Ring-Ereignisse konnten nicht geladen werden');
+            }
+
+            const events = Array.isArray(payload.events) ? payload.events : [];
+            this._renderRingEvents(events);
+            statusEl.textContent = `${events.length} Ereignisse geladen`;
+        } catch (error) {
+            panel.innerHTML = `
+                <div class="p-4 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20">
+                    Fehler beim Laden der Ring-Ereignisse: ${this.escapeHtml(error.message || String(error))}
+                </div>
+            `;
+            statusEl.textContent = 'Ring-Ereignisse konnten nicht geladen werden';
+        } finally {
+            this._scheduleRingEventsRefresh(30000);
+        }
+    }
+
     async _ringAuthenticateFromForm() {
         const username = document.getElementById('ring-username')?.value?.trim();
         const password = document.getElementById('ring-password')?.value || '';
@@ -1579,6 +1701,7 @@ class SmartHomeApp {
         if (otpInput) otpInput.value = '';
 
         await this._refreshRingStatus();
+        await this.loadRingEvents();
         return true;
     }
 
@@ -1629,6 +1752,7 @@ class SmartHomeApp {
             }
 
             this._renderRingImportPanel(panel, data.cameras || []);
+            await this.loadRingEvents();
         } catch (e) {
             panel.innerHTML = `<p class=\"text-red-500\">Fehler: ${e.message}</p>`;
         }
