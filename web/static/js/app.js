@@ -278,6 +278,10 @@ class SmartHomeApp {
 
                 return response;
             } catch (e) {
+                // Snapshot/timeouts intentionally use AbortController; don't log those as auth noise.
+                if (e && (e.name === 'AbortError' || String(e).includes('signal is aborted'))) {
+                    return originalFetch(input, init);
+                }
                 console.warn('API-Key Injection übersprungen:', e);
                 return originalFetch(input, init);
             }
