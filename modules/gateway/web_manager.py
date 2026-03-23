@@ -3124,12 +3124,6 @@ class WebManager(BaseModule):
                 return jsonify({'success': False, 'error': str(e)}), 500
 
         # ==========================================
-        # RING API ENDPOINTS
-        # ==========================================
-
-        ring_support.register_ring_routes(self, _load_cameras_config, _save_cameras_config)
-
-        # ==========================================
         # CAMERA / STREAM API ENDPOINTS
         # ==========================================
 
@@ -3223,6 +3217,12 @@ class WebManager(BaseModule):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=2)
+
+        # ==========================================
+        # RING API ENDPOINTS
+        # ==========================================
+
+        ring_support.register_ring_routes(self, _load_cameras_config, _save_cameras_config)
 
         def _feature_flags_path():
             return os.path.join(os.path.abspath(os.getcwd()), 'config', 'feature_flags.json')
