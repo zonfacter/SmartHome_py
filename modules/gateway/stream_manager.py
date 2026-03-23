@@ -25,6 +25,9 @@ import glob
 from modules.core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 
 
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+
 class StreamManager(BaseModule):
     """
     Stream Manager v1.0.0
@@ -137,7 +140,7 @@ class StreamManager(BaseModule):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
-                cwd=os.path.abspath(os.getcwd()),
+                cwd=_PROJECT_ROOT,
                 timeout=5,
                 check=False,
             )
