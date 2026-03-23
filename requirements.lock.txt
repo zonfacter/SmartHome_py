@@ -473,9 +473,9 @@ firebase-messaging==0.4.5 \
     --hash=sha256:11f19509ea839e53f995d93d25d63a4a1385572a37fc2cff2c1b389534cb80f1 \
     --hash=sha256:b566b5dedb15463fa35540d42acfda41040a2ae19c562b33b52f226e90212168
     # via ring-doorbell
-flask==3.0.0 \
-    --hash=sha256:21128f47e4e3b9d597a3e8521a329bf56909b690fcc3fa3e477725aa81367638 \
-    --hash=sha256:cfadcdb638b609361d29ec22360d6070a77d7463dcb3ab08d2c2f2f168845f58
+flask==3.1.3 \
+    --hash=sha256:0ef0e52b8a9cd932855379197dd8f94047b359ca0a78695144304cb45f87c9eb \
+    --hash=sha256:f4bcbefc124291925f1a26446da31a5178f9483862233b23c0c96a20701f670c
     # via
     #   -r requirements.txt
     #   flask-socketio
@@ -879,6 +879,7 @@ markupsafe==3.0.3 \
     --hash=sha256:f9e130248f4462aaa8e2552d547f36ddadbeaa573879158d721bbd33dfe4743a \
     --hash=sha256:fed51ac40f757d41b7c48425901843666a6677e3e8eb0abcff09e4ba6e664f50
     # via
+    #   flask
     #   jinja2
     #   werkzeug
 msgpack==1.1.2 \

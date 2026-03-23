@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate that documented API endpoints exist in web_manager routes."""
+"""Validate that documented API endpoints exist in gateway routes."""
 
 import re
 import sys
@@ -7,11 +7,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DOC = ROOT / "docs" / "05_api_reference.md"
-SRC = ROOT / "modules" / "gateway" / "web_manager.py"
+SRC_DIR = ROOT / "modules" / "gateway"
 
 DOC_PATTERN = re.compile(r"^\s*-\s*`(GET|POST|PUT|DELETE|PATCH)\s+(/api/[^`]+)`\s*$")
 ROUTE_PATTERN = re.compile(
-    r"@self\.app\.route\('\s*(/api[^']*)\s*'(?:,\s*methods=\[(.*?)\])?"
+    r"@(?:self\.app|app)\.route\('\s*(/api[^']*)\s*'(?:,\s*methods=\[(.*?)\])?"
 )
 METHOD_PATTERN = re.compile(r"'([A-Z]+)'")
 
@@ -27,15 +27,16 @@ def load_documented() -> set[tuple[str, str]]:
 
 def load_routes() -> set[tuple[str, str]]:
     routes: set[tuple[str, str]] = set()
-    content = SRC.read_text(encoding="utf-8")
-    for m in ROUTE_PATTERN.finditer(content):
-        path = m.group(1).strip()
-        methods_group = m.group(2)
-        methods = ["GET"]
-        if methods_group:
-            methods = METHOD_PATTERN.findall(methods_group) or ["GET"]
-        for method in methods:
-            routes.add((method, path))
+    for src in SRC_DIR.glob("*.py"):
+        content = src.read_text(encoding="utf-8")
+        for m in ROUTE_PATTERN.finditer(content):
+            path = m.group(1).strip()
+            methods_group = m.group(2)
+            methods = ["GET"]
+            if methods_group:
+                methods = METHOD_PATTERN.findall(methods_group) or ["GET"]
+            for method in methods:
+                routes.add((method, path))
     return routes
 
 
