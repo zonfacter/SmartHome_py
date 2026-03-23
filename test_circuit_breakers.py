@@ -114,6 +114,7 @@ def test_stream_manager_ring_recovery_logs_expected_retry_noise_as_info(monkeypa
     sm = StreamManager()
     sm.has_ffmpeg = True
     sm.has_node = True
+    sm.has_ring_client_api = True
     sm.hls_dir = str(tmp_path / "hls")
     os.makedirs(sm.hls_dir, exist_ok=True)
 
