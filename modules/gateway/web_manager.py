@@ -1,5 +1,5 @@
 """
-Web Manager Module v4.6.2
+Web Manager Module v4.7.0
 FINAL FIX: Beseitigt NoneType-Pfadfehler durch synchrone Initialisierung.
 
 📁 SPEICHERORT: modules/gateway/web_manager.py
@@ -16,6 +16,7 @@ import sqlite3
 import logging
 import traceback
 import hmac
+import re
 import secrets
 import ipaddress
 from collections import deque
@@ -58,12 +59,12 @@ logger = logging.getLogger(__name__)
 
 class WebManager(BaseModule):
     """
-    Web Manager v4.6.2
+    Web Manager v4.7.0
     Verwaltet das Web-Interface und die Kommunikation zum Frontend.
     """
 
     NAME = "web_manager"
-    VERSION = "4.6.2"
+    VERSION = "4.7.0"
     DESCRIPTION = "Flask + SocketIO Web-HMI Server"
     AUTHOR = "TwinCAT Team"
     API_MAJOR_VERSION = "1"
@@ -157,7 +158,7 @@ class WebManager(BaseModule):
         super().initialize(app_context)
         self.app_context = app_context
 
-        logger.info("=== Web Manager v4.6.2 Initialisierung START ===")
+        logger.info("=== Web Manager v4.7.0 Initialisierung START ===")
 
         # Initialize Sentry if available
         if SENTRY_AVAILABLE:
@@ -259,7 +260,7 @@ class WebManager(BaseModule):
                 print("  [ERROR] Flask nicht verfuegbar!")
 
             print(f"  [OK] {self.NAME} v{self.VERSION} initialisiert")
-            logger.info("=== Web Manager v4.6.2 Initialisierung ABGESCHLOSSEN ===")
+            logger.info("=== Web Manager v4.7.0 Initialisierung ABGESCHLOSSEN ===")
 
             if self.sentry:
                 self.sentry.add_breadcrumb(
@@ -1589,15 +1590,68 @@ class WebManager(BaseModule):
             if not isinstance(settings, dict):
                 settings = {}
 
+            default_widget_style = {
+                'hover_effects': True,
+                'rounded': 'xl',
+                'shadow': 'soft',
+                'compact': False
+            }
+            default_theme_config = {
+                'preset': 'slate',
+                'accent_color': '#3b82f6',
+                'surface_style': 'soft',
+                'chrome_tint': True
+            }
+
+            def _normalize_widget_style(payload):
+                source = payload if isinstance(payload, dict) else {}
+                rounded = str(source.get('rounded', default_widget_style['rounded']) or default_widget_style['rounded']).strip().lower()
+                shadow = str(source.get('shadow', default_widget_style['shadow']) or default_widget_style['shadow']).strip().lower()
+                if rounded not in {'lg', 'xl', '2xl'}:
+                    rounded = default_widget_style['rounded']
+                if shadow not in {'soft', 'medium', 'strong'}:
+                    shadow = default_widget_style['shadow']
+                return {
+                    'hover_effects': bool(source.get('hover_effects', default_widget_style['hover_effects'])),
+                    'rounded': rounded,
+                    'shadow': shadow,
+                    'compact': bool(source.get('compact', default_widget_style['compact']))
+                }
+
+            def _normalize_theme_config(payload):
+                source = payload if isinstance(payload, dict) else {}
+                preset = str(source.get('preset', default_theme_config['preset']) or default_theme_config['preset']).strip().lower()
+                surface_style = str(source.get('surface_style', default_theme_config['surface_style']) or default_theme_config['surface_style']).strip().lower()
+                accent_color = str(source.get('accent_color', default_theme_config['accent_color']) or default_theme_config['accent_color']).strip()
+                if preset not in {'slate', 'ocean', 'forest', 'ember', 'mono', 'aurora', 'sand', 'graphite', 'berry'}:
+                    preset = default_theme_config['preset']
+                if surface_style not in {'soft', 'glass', 'contrast'}:
+                    surface_style = default_theme_config['surface_style']
+                if not re.fullmatch(r'#[0-9a-fA-F]{6}', accent_color or ''):
+                    accent_color = default_theme_config['accent_color']
+                return {
+                    'preset': preset,
+                    'accent_color': accent_color.lower(),
+                    'surface_style': surface_style,
+                    'chrome_tint': bool(source.get('chrome_tint', default_theme_config['chrome_tint']))
+                }
+
+            widget_style = _normalize_widget_style(settings.get('widget_style'))
+            theme_config = _normalize_theme_config(settings.get('theme_config'))
+
             if request.method == 'GET':
                 return jsonify({
                     'default_page': settings.get('default_page', 'dashboard'),
-                    'kiosk_default': bool(settings.get('kiosk_default', False))
+                    'kiosk_default': bool(settings.get('kiosk_default', False)),
+                    'widget_style': widget_style,
+                    'theme_config': theme_config
                 })
 
             data = request.json or {}
             default_page = str(data.get('default_page') or settings.get('default_page') or 'dashboard').strip()
             kiosk_default = bool(data.get('kiosk_default', settings.get('kiosk_default', False)))
+            next_widget_style = _normalize_widget_style(data.get('widget_style', settings.get('widget_style')))
+            next_theme_config = _normalize_theme_config(data.get('theme_config', settings.get('theme_config')))
 
             pages = config_mgr.get_config_value('pages', {})
             if not isinstance(pages, dict):
@@ -1613,6 +1667,8 @@ class WebManager(BaseModule):
             new_settings = {
                 'default_page': default_page,
                 'kiosk_default': kiosk_default,
+                'widget_style': next_widget_style,
+                'theme_config': next_theme_config,
                 'modified': time.time()
             }
             config_mgr.set_config_value('ui_settings', new_settings)

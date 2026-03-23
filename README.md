@@ -1,6 +1,6 @@
 # SmartHome Web
 
-Aktiver Stand ab **v4.6.2**.
+Aktiver Stand ab **v4.7.0**.
 
 Dieses Repository wurde dokumentationsseitig bereinigt: historische Texte wurden nach `docs/legacy/` verschoben, die aktive Doku ist schlank und versioniert.
 
@@ -25,8 +25,8 @@ Wichtige Kern-Dokumente:
 
 ## Projektstatus
 
-- Aktuelle Release-Linie: `v4.6.x`
-- Letzter Release: `v4.6.2` (2026-02-21)
+- Aktuelle Release-Linie: `v4.7.x`
+- Letzter Release: `v4.7.0` (2026-03-23)
 - Changelog ab Neustart: `CHANGELOG.md`
 - Offene technische Arbeiten: `TODO.md`
 

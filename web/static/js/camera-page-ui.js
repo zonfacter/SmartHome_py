@@ -187,7 +187,7 @@
                         const portsLabel = (dev.ports || []).map(p => `<span class="px-1.5 py-0.5 rounded text-xs bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300">${p}</span>`).join(' ');
 
                         html += `
-                            <div class="flex items-center justify-between p-2 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-600">
+                            <div class="theme-subpanel flex items-center justify-between p-2 rounded-xl">
                                 <div class="flex items-center space-x-3">
                                     <span class="font-mono text-sm font-semibold text-gray-900 dark:text-white">${dev.host}</span>
                                     <span class="px-1.5 py-0.5 rounded text-xs ${typeColor}">${typeLabel}</span>
@@ -196,7 +196,7 @@
                                 </div>
                                 <div class="flex items-center space-x-2">
                                     <span class="text-xs text-gray-400">Ports: ${portsLabel}</span>
-                                    <button class="scan-diagnose-btn px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700" data-host="${dev.host}">Diagnose</button>
+                                    <button class="scan-diagnose-btn theme-accent-button px-3 py-1 text-xs rounded" data-host="${dev.host}">Diagnose</button>
                                 </div>
                             </div>`;
                     });
@@ -312,7 +312,7 @@
                     const mainUrl = mainstream ? mainstream.url : (data.streams[0] ? data.streams[0].url : '');
                     const subUrl = substream ? substream.url : '';
 
-                    html += `<button id="diagnose-apply-btn" class="mt-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+                    html += `<button id="diagnose-apply-btn" class="theme-accent-button mt-2 px-4 py-2 text-sm rounded-lg"
                         data-main-url="${mainUrl}"
                         data-sub-url="${subUrl}"
                         data-onvif-port="${data.onvif ? data.onvif.port : ''}"
@@ -442,10 +442,10 @@
                 const onvifPass = cam.onvif?.password || 'admin';
 
                 listHtml += `
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg" id="cam-entry-${camId}">
+                    <div class="theme-subpanel p-3 rounded-xl" id="cam-entry-${camId}">
                         <div class="cam-display flex items-center justify-between">
                             <div class="flex items-center space-x-3 min-w-0">
-                                <i data-lucide="video" class="w-5 h-5 text-blue-500 flex-shrink-0"></i>
+                                <i data-lucide="video" class="widget-accent-text w-5 h-5 flex-shrink-0"></i>
                                 <div class="min-w-0">
                                     <p class="font-medium text-gray-900 dark:text-white">${statusDot}${cam.name}</p>
                                     <p class="text-xs text-gray-500 font-mono truncate">${cam.url}</p>
@@ -457,11 +457,11 @@
                                 </div>
                             </div>
                             <div class="flex items-center space-x-2 flex-shrink-0">
-                                <button class="px-3 py-1 bg-gray-500 text-white text-sm rounded hover:bg-gray-600 edit-camera-btn"
+                                <button class="theme-outline-button px-3 py-1 text-sm rounded edit-camera-btn"
                                         data-camera-id="${camId}">
                                     <i data-lucide="pencil" class="w-4 h-4 inline"></i>
                                 </button>
-                                <button class="px-3 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600 remove-camera-btn"
+                                <button class="theme-outline-button px-3 py-1 text-sm rounded text-red-600 dark:text-red-400 remove-camera-btn"
                                         data-camera-id="${camId}">
                                     <i data-lucide="trash-2" class="w-4 h-4 inline"></i>
                                 </button>
@@ -514,8 +514,8 @@
                                 </div>
                             </details>
                             <div class="flex items-center space-x-2">
-                                <button class="save-camera-btn px-4 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700" data-camera-id="${camId}">Speichern</button>
-                                <button class="cancel-edit-btn px-4 py-1.5 bg-gray-400 text-white text-sm rounded hover:bg-gray-500" data-camera-id="${camId}">Abbrechen</button>
+                                <button class="save-camera-btn theme-accent-button px-4 py-1.5 text-sm rounded" data-camera-id="${camId}">Speichern</button>
+                                <button class="cancel-edit-btn theme-outline-button px-4 py-1.5 text-sm rounded" data-camera-id="${camId}">Abbrechen</button>
                             </div>
                         </div>
                     </div>
@@ -547,23 +547,23 @@
             orderedIds.forEach(cardId => {
                 if (cardId === RING_EVENTS_CARD_ID) {
                     gridHtml += `
-                <div class="bg-white/95 dark:bg-gray-800/95 rounded-2xl border border-gray-200/80 dark:border-gray-700 shadow-sm hover:shadow-lg hover:-translate-y-0.5 p-4 camera-card transition-transform transition-shadow duration-200" data-cam-type="ring-events" data-card-id="${RING_EVENTS_CARD_ID}">
+                <div class="camera-card theme-panel rounded-2xl p-4 transition-transform transition-shadow duration-200 hover:-translate-y-0.5 hover:shadow-lg" data-cam-type="ring-events" data-card-id="${RING_EVENTS_CARD_ID}">
                     <div class="flex items-start justify-between gap-3 mb-3">
                         <div>
                             <div class="flex items-center gap-2">
-                                <button class="camera-card-drag-handle p-1.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-grab" title="Kachel verschieben">
+                                <button class="camera-card-drag-handle theme-subpanel p-1.5 rounded-full text-gray-500 cursor-grab" title="Kachel verschieben">
                                     <i data-lucide="grip" class="w-4 h-4"></i>
                                 </button>
                                 <h3 class="font-semibold text-gray-900 dark:text-white">Ring Ereignisse</h3>
                             </div>
                             <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Klingeln, Bewegung und weitere API-Historie</p>
                         </div>
-                        <button id="refresh-ring-events-btn" class="px-3 py-1.5 bg-slate-700 text-white text-xs rounded hover:bg-slate-800">
+                        <button id="refresh-ring-events-btn" class="theme-accent-button px-3 py-1.5 text-xs rounded">
                             Aktualisieren
                         </button>
                     </div>
                     <div id="ring-events-status" class="text-xs text-gray-500 dark:text-gray-400 mb-3">Ereignisse werden geladen...</div>
-                    <div id="ring-events-panel" class="rounded-xl border border-gray-200 dark:border-gray-600 overflow-hidden bg-gray-50 dark:bg-gray-700">
+                    <div id="ring-events-panel" class="theme-subpanel rounded-xl overflow-hidden">
                         <div class="p-4 text-sm text-gray-500 dark:text-gray-400">
                             Noch keine Ring-Ereignisse geladen.
                         </div>
@@ -579,9 +579,9 @@
 
                 if (streamType === 'mjpeg') {
                     gridHtml += `
-                        <div class="bg-white/95 dark:bg-gray-800/95 rounded-2xl border border-gray-200/80 dark:border-gray-700 shadow-sm hover:shadow-lg hover:-translate-y-0.5 p-4 camera-card transition-transform transition-shadow duration-200" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="mjpeg" data-card-id="${camId}">
+                        <div class="camera-card theme-panel rounded-2xl p-4 transition-transform transition-shadow duration-200 hover:-translate-y-0.5 hover:shadow-lg" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="mjpeg" data-card-id="${camId}">
                             <div class="flex items-center gap-2 mb-2">
-                                <button class="camera-card-drag-handle p-1.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-grab" title="Kachel verschieben">
+                                <button class="camera-card-drag-handle theme-subpanel p-1.5 rounded-full text-gray-500 cursor-grab" title="Kachel verschieben">
                                     <i data-lucide="grip" class="w-4 h-4"></i>
                                 </button>
                                 <h3 class="font-semibold text-gray-900 dark:text-white">${cam.name}</h3>
@@ -597,24 +597,24 @@
                                 </div>
                             </div>
                             <div class="flex items-center space-x-2 mt-2">
-                                <button class="cam-fullscreen-btn px-3 py-1.5 bg-gray-700 text-white text-xs rounded hover:bg-gray-600 flex items-center space-x-1"
+                                <button class="cam-fullscreen-btn theme-outline-button px-3 py-1.5 text-xs rounded flex items-center space-x-1"
                                         data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="mjpeg">
                                     <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i><span>Vollbild</span>
                                 </button>
-                                <button class="cam-ptz-toggle-btn px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-500 flex items-center space-x-1"
+                                <button class="cam-ptz-toggle-btn theme-accent-button px-3 py-1.5 text-xs rounded flex items-center space-x-1"
                                         data-cam-id="${camId}" style="display:none;">
                                     <i data-lucide="move" class="w-3.5 h-3.5"></i><span>PTZ</span>
                                 </button>
                                 <span class="text-xs px-2 py-0.5 rounded bg-green-100 text-green-800">MJPEG</span>
                             </div>
-                            <div id="widget-ptz-${camId}" class="widget-ptz-panel hidden mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg select-none"></div>
+                            <div id="widget-ptz-${camId}" class="widget-ptz-panel theme-subpanel hidden mt-2 p-2 rounded-lg select-none"></div>
                         </div>
                     `;
                 } else if (streamType === 'ring') {
                     gridHtml += `
-                        <div class="bg-white/95 dark:bg-gray-800/95 rounded-2xl border border-gray-200/80 dark:border-gray-700 shadow-sm hover:shadow-lg hover:-translate-y-0.5 p-4 camera-card transition-transform transition-shadow duration-200" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="ring" data-card-id="${camId}">
+                        <div class="camera-card theme-panel rounded-2xl p-4 transition-transform transition-shadow duration-200 hover:-translate-y-0.5 hover:shadow-lg" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="ring" data-card-id="${camId}">
                             <div class="flex items-center gap-2 mb-2">
-                                <button class="camera-card-drag-handle p-1.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-grab" title="Kachel verschieben">
+                                <button class="camera-card-drag-handle theme-subpanel p-1.5 rounded-full text-gray-500 cursor-grab" title="Kachel verschieben">
                                     <i data-lucide="grip" class="w-4 h-4"></i>
                                 </button>
                                 <h3 class="font-semibold text-gray-900 dark:text-white">${cam.name}</h3>
@@ -633,24 +633,24 @@
                                 </div>
                             </div>
                             <div class="flex items-center space-x-2 mt-2">
-                                <button class="cam-fullscreen-btn px-3 py-1.5 bg-gray-700 text-white text-xs rounded hover:bg-gray-600 flex items-center space-x-1"
+                                <button class="cam-fullscreen-btn theme-outline-button px-3 py-1.5 text-xs rounded flex items-center space-x-1"
                                         data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="ring">
                                     <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i><span>Vollbild</span>
                                 </button>
-                                <button class="ring-widget-mode-btn px-3 py-1.5 bg-orange-600 text-white text-xs rounded hover:bg-orange-500 flex items-center space-x-1"
+                                <button class="ring-widget-mode-btn theme-accent-button px-3 py-1.5 text-xs rounded flex items-center space-x-1"
                                         data-cam-id="${camId}" data-mode="snapshot">
                                     <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span id="ring-mode-label-${camId}">Snapshot</span>
                                 </button>
                                 <span class="text-xs px-2 py-0.5 rounded bg-orange-100 text-orange-800">RING</span>
                             </div>
-                            <div id="widget-ptz-${camId}" class="widget-ptz-panel hidden mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg select-none"></div>
+                            <div id="widget-ptz-${camId}" class="widget-ptz-panel theme-subpanel hidden mt-2 p-2 rounded-lg select-none"></div>
                         </div>
                     `;
                 } else {
                     gridHtml += `
-                        <div class="bg-white/95 dark:bg-gray-800/95 rounded-2xl border border-gray-200/80 dark:border-gray-700 shadow-sm hover:shadow-lg hover:-translate-y-0.5 p-4 camera-card transition-transform transition-shadow duration-200" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="rtsp" data-card-id="${camId}">
+                        <div class="camera-card theme-panel rounded-2xl p-4 transition-transform transition-shadow duration-200 hover:-translate-y-0.5 hover:shadow-lg" data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="rtsp" data-card-id="${camId}">
                             <div class="flex items-center gap-2 mb-2">
-                                <button class="camera-card-drag-handle p-1.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-grab" title="Kachel verschieben">
+                                <button class="camera-card-drag-handle theme-subpanel p-1.5 rounded-full text-gray-500 cursor-grab" title="Kachel verschieben">
                                     <i data-lucide="grip" class="w-4 h-4"></i>
                                 </button>
                                 <h3 class="font-semibold text-gray-900 dark:text-white">${cam.name}</h3>
@@ -666,17 +666,17 @@
                                 </div>
                             </div>
                             <div class="flex items-center space-x-2 mt-2">
-                                <button class="cam-fullscreen-btn px-3 py-1.5 bg-gray-700 text-white text-xs rounded hover:bg-gray-600 flex items-center space-x-1"
+                                <button class="cam-fullscreen-btn theme-outline-button px-3 py-1.5 text-xs rounded flex items-center space-x-1"
                                         data-cam-id="${camId}" data-cam-name="${cam.name}" data-cam-type="rtsp">
                                     <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i><span>Vollbild</span>
                                 </button>
-                                <button class="cam-ptz-toggle-btn px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-500 flex items-center space-x-1"
+                                <button class="cam-ptz-toggle-btn theme-accent-button px-3 py-1.5 text-xs rounded flex items-center space-x-1"
                                         data-cam-id="${camId}" style="display:none;">
                                     <i data-lucide="move" class="w-3.5 h-3.5"></i><span>PTZ</span>
                                 </button>
                                 <span class="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-800">HLS</span>
                             </div>
-                            <div id="widget-ptz-${camId}" class="widget-ptz-panel hidden mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg select-none"></div>
+                            <div id="widget-ptz-${camId}" class="widget-ptz-panel theme-subpanel hidden mt-2 p-2 rounded-lg select-none"></div>
                         </div>
                     `;
                 }

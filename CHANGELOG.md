@@ -3,16 +3,25 @@
 Dieses Changelog startet bewusst neu ab **v4.6.2**.
 Ältere Änderungen wurden nach `docs/legacy/` ausgelagert.
 
-## [Unreleased]
+## [4.7.0] - 2026-03-23
 
 ### Added
-- TBD
+- Globales Theme-System mit Presets, Akzentfarbe, Flächenstil und Chrome-Tint
+- Live-Vorschau für Theme- und Widget-Stil-Einstellungen
+- Weitere Theme-Presets: `aurora`, `sand`, `graphite`, `berry`
+- Ring-Ereignis-Kachel als Teil des Kamera-Layouts
+- Persistente Widget-Stil-Konfiguration für Standard-Widgets
 
 ### Changed
-- TBD
+- Standard-Widget-System visuell vereinheitlicht, inklusive moderner Schalterdarstellung
+- Hauptseiten wie Dashboard, Setup, Admin, Widgets und Kameras auf gemeinsame Theme-Tokens gezogen
+- Kamera-Kacheln, PLC-Verwaltung und Widget-/Raumlisten an den gemeinsamen UI-Standard angepasst
+- Versionsmarker auf `4.7.0` synchronisiert (Runtime/UI/WebManager/Doku)
 
 ### Fixed
-- TBD
+- Speichern des Theme-Configs stabilisiert
+- Widget-Stil-Vorschau reagiert jetzt sofort auf Formänderungen
+- Icon-Schnellauswahl im Widget-Editor zeigt die aktuelle Auswahl konsistent an
 
 ## [4.6.2] - 2026-02-21
 
