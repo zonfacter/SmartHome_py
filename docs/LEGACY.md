@@ -15,5 +15,5 @@ Alle früheren Texte liegen im Archivordner:
 
 Legacy-Dokumente sind nicht automatisch auf Konsistenz mit aktuellem Code geprüft.
 Für den Betrieb und die Weiterentwicklung gelten ausschließlich die Dokumente aus `docs/README.md`.
-Die versionsuebergreifende Zuordnung, welche Doku fuer welche Release-Linie verbindlich ist,
+Die versionsübergreifende Zuordnung, welche Doku für welche Release-Linie verbindlich ist,
 steht in `docs/17_release_version_history.md`.
