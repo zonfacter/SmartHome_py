@@ -28,6 +28,7 @@ Wichtige Kern-Dokumente:
 - Aktuelle Release-Linie: `v4.8.x`
 - Letzter Release: `v4.8.0` (2026-03-24)
 - Changelog ab Neustart: `CHANGELOG.md`
+- Zentrale Release-/Versionshistorie: `docs/17_release_version_history.md`
 - Offene technische Arbeiten: `TODO.md`
 
 ## Historische Dokumentation

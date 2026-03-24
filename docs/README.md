@@ -23,6 +23,7 @@ Diese Dokumentation ist die **verbindliche aktive Doku ab v4.8.0**.
 - `DOCKER_DEPLOYMENT.md`
 - `DOCKER_LEAST_PRIVILEGE.md`
 - `RELEASE_VERIFICATION.md`
+- `17_release_version_history.md`
 - `SECURITY_INCIDENT_SENTRY_DSN.md`
 
 ## Architektur und Engineering-Entscheidungen
@@ -42,3 +43,10 @@ Diese Dokumentation ist die **verbindliche aktive Doku ab v4.8.0**.
 Historische Dokumente wurden bewusst ausgelagert:
 - `LEGACY.md`
 - Ordner: `legacy/`
+
+## Release- und Versionshistorie
+
+Die zentrale, verbindliche Uebersicht zu Releases, Tags, Branch-Bezug, groesseren Umbauten
+und zur Frage, welche Doku ab welcher Version gilt, steht in:
+
+- `17_release_version_history.md`

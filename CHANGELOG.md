@@ -2,6 +2,7 @@
 
 Dieses Changelog startet bewusst neu ab **v4.6.2**.
 Ältere Änderungen wurden nach `docs/legacy/` ausgelagert.
+Die konsolidierte Release-/Versionshistorie inklusive Tags, Branch-Bezug und Doku-Gueltigkeit steht in `docs/17_release_version_history.md`.
 
 ## [4.8.0] - 2026-03-24
 
