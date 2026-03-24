@@ -27,6 +27,7 @@ Diese Dokumentation ist die **verbindliche aktive Doku ab v4.8.0**.
 
 ## Architektur und Engineering-Entscheidungen
 
+- `REPOSITORY_STRUCTURE.md`
 - `09_module_boundaries_ownership.md`
 - `10_blue_green_atomic_deployment.md`
 - `11_caching_strategy.md`

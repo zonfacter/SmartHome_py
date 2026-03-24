@@ -16,6 +16,7 @@ Dieses Repository wurde dokumentationsseitig bereinigt: historische Texte wurden
 Zentrale Übersicht: `docs/README.md`
 
 Wichtige Kern-Dokumente:
+- `docs/REPOSITORY_STRUCTURE.md`
 - `docs/05_api_reference.md`
 - `docs/openapi.json`
 - `docs/06_api_lifecycle_policy.md`
