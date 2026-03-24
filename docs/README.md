@@ -35,6 +35,7 @@ Diese Dokumentation ist die **verbindliche aktive Doku ab v4.8.0**.
 - `14_ux_notifications.md`
 - `15_error_recovery_actions.md`
 - `16_frontend_performance.md`
+- `17_milestone_status.md`
 - `ADR/README.md`
 
 ## Legacy
