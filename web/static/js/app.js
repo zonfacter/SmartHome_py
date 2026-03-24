@@ -84,8 +84,34 @@ class SmartHomeApp {
                 rounded: 'xl',
                 shadow: 'soft',
                 compact: false
+            },
+            ring_event_storage: {
+                backend: 'sqlite',
+                max_entries: 2000,
+                sqlite: {
+                    mode: 'internal',
+                    path: 'config/ring_events.db'
+                },
+                mysql: {
+                    host: '127.0.0.1',
+                    port: 3306,
+                    database: 'smarthome',
+                    user: '',
+                    password: '',
+                    table: 'ring_events',
+                    ssl: false
+                },
+                influxdb: {
+                    url: 'http://127.0.0.1:8086',
+                    org: 'smarthome',
+                    bucket: 'ring_events',
+                    token: '',
+                    measurement: 'ring_events'
+                }
             }
         };
+        this.ringEventStorageStatus = null;
+        this.ringEventStorageBackends = [];
 
         // Initialisierung
         this.init();
@@ -447,8 +473,11 @@ class SmartHomeApp {
                 default_page: data.default_page || 'dashboard',
                 kiosk_default: !!data.kiosk_default,
                 theme_config: this.normalizeThemeConfigSettings(data.theme_config),
-                widget_style: this.normalizeWidgetStyleSettings(data.widget_style)
+                widget_style: this.normalizeWidgetStyleSettings(data.widget_style),
+                ring_event_storage: this.normalizeRingEventStorageSettings(data.ring_event_storage)
             };
+            this.ringEventStorageStatus = this.normalizeRingEventStorageStatus(data.ring_event_storage_status);
+            this.ringEventStorageBackends = Array.isArray(data.ring_event_storage_backends) ? data.ring_event_storage_backends : [];
             this.applyThemeConfig();
         } catch (error) {
             console.warn('⚠️ UI-Settings konnten nicht geladen werden:', error.message);
@@ -548,6 +577,111 @@ class SmartHomeApp {
             rounded: 'xl',
             shadow: 'soft',
             compact: false
+        };
+    }
+
+    getDefaultRingEventStorageSettings() {
+        return {
+            backend: 'sqlite',
+            max_entries: 2000,
+            sqlite: {
+                mode: 'internal',
+                path: 'config/ring_events.db'
+            },
+            mysql: {
+                host: '127.0.0.1',
+                port: 3306,
+                database: 'smarthome',
+                user: '',
+                password: '',
+                table: 'ring_events',
+                ssl: false
+            },
+            influxdb: {
+                url: 'http://127.0.0.1:8086',
+                org: 'smarthome',
+                bucket: 'ring_events',
+                token: '',
+                measurement: 'ring_events'
+            }
+        };
+    }
+
+    normalizeRingEventStorageSettings(settings) {
+        const defaults = this.getDefaultRingEventStorageSettings();
+        const source = settings && typeof settings === 'object' ? settings : {};
+        const sqlite = source.sqlite && typeof source.sqlite === 'object' ? source.sqlite : {};
+        const mysql = source.mysql && typeof source.mysql === 'object' ? source.mysql : {};
+        const influxdb = source.influxdb && typeof source.influxdb === 'object' ? source.influxdb : {};
+        const backend = ['memory', 'sqlite', 'mysql', 'influxdb'].includes(source.backend) ? source.backend : defaults.backend;
+        const sqliteMode = ['internal', 'external'].includes(sqlite.mode) ? sqlite.mode : defaults.sqlite.mode;
+        const maxEntries = Math.max(100, Math.min(parseInt(source.max_entries, 10) || defaults.max_entries, 50000));
+        return {
+            backend,
+            max_entries: maxEntries,
+            sqlite: {
+                mode: sqliteMode,
+                path: String(sqlite.path || defaults.sqlite.path).trim() || defaults.sqlite.path
+            },
+            mysql: {
+                host: String(mysql.host || defaults.mysql.host).trim() || defaults.mysql.host,
+                port: Math.max(1, Math.min(parseInt(mysql.port, 10) || defaults.mysql.port, 65535)),
+                database: String(mysql.database || defaults.mysql.database).trim() || defaults.mysql.database,
+                user: String(mysql.user || defaults.mysql.user).trim(),
+                password: String(mysql.password || defaults.mysql.password),
+                table: String(mysql.table || defaults.mysql.table).trim() || defaults.mysql.table,
+                ssl: mysql.ssl !== undefined ? !!mysql.ssl : defaults.mysql.ssl
+            },
+            influxdb: {
+                url: String(influxdb.url || defaults.influxdb.url).trim() || defaults.influxdb.url,
+                org: String(influxdb.org || defaults.influxdb.org).trim() || defaults.influxdb.org,
+                bucket: String(influxdb.bucket || defaults.influxdb.bucket).trim() || defaults.influxdb.bucket,
+                token: String(influxdb.token || defaults.influxdb.token),
+                measurement: String(influxdb.measurement || defaults.influxdb.measurement).trim() || defaults.influxdb.measurement
+            }
+        };
+    }
+
+    getRingEventStorageSettings() {
+        return this.normalizeRingEventStorageSettings(this.uiSettings?.ring_event_storage);
+    }
+
+    getPendingRingEventStorageSettings() {
+        return this.normalizeRingEventStorageSettings({
+            backend: document.getElementById('ring-event-storage-backend')?.value,
+            max_entries: document.getElementById('ring-event-storage-max-entries')?.value,
+            sqlite: {
+                mode: document.getElementById('ring-event-sqlite-mode')?.value,
+                path: document.getElementById('ring-event-sqlite-path')?.value
+            },
+            mysql: {
+                host: document.getElementById('ring-event-mysql-host')?.value,
+                port: document.getElementById('ring-event-mysql-port')?.value,
+                database: document.getElementById('ring-event-mysql-database')?.value,
+                user: document.getElementById('ring-event-mysql-user')?.value,
+                password: document.getElementById('ring-event-mysql-password')?.value
+            },
+            influxdb: {
+                url: document.getElementById('ring-event-influx-url')?.value,
+                org: document.getElementById('ring-event-influx-org')?.value,
+                bucket: document.getElementById('ring-event-influx-bucket')?.value,
+                token: document.getElementById('ring-event-influx-token')?.value,
+                measurement: document.getElementById('ring-event-influx-measurement')?.value
+            }
+        });
+    }
+
+    normalizeRingEventStorageStatus(status) {
+        if (!status || typeof status !== 'object') return null;
+        return {
+            requested_backend: String(status.requested_backend || ''),
+            active_backend: String(status.active_backend || ''),
+            runtime_supported: !!status.runtime_supported,
+            persistent: !!status.persistent,
+            max_entries: parseInt(status.max_entries, 10) || 0,
+            location_label: String(status.location_label || ''),
+            note: String(status.note || ''),
+            sqlite: status.sqlite && typeof status.sqlite === 'object' ? status.sqlite : {}
         };
     }
 
@@ -1779,21 +1913,37 @@ class SmartHomeApp {
     _syncRingWidgetModeButton(camId) {
         const btn = document.querySelector(`.ring-widget-mode-btn[data-cam-id="${camId}"]`);
         const label = document.getElementById(`ring-mode-label-${camId}`);
+        const note = document.getElementById(`ring-live-note-${camId}`);
         const mode = this._getRingWidgetMode(camId);
         if (!btn || !label) return;
 
         if (!this._ringLiveEnabled) {
+            const hint = this._lastRingHealth?.last_error_message
+                ? `Live aktuell deaktiviert: ${this._lastRingHealth.last_error_message}`
+                : 'Live aktuell deaktiviert: Ring WebRTC ist derzeit nicht verfügbar.';
             btn.setAttribute('data-mode', 'snapshot');
             btn.disabled = true;
             btn.classList.remove('bg-green-600', 'hover:bg-green-500');
             btn.classList.remove('bg-orange-600', 'hover:bg-orange-500');
             btn.classList.add('bg-gray-500');
+            btn.setAttribute('title', hint);
+            btn.setAttribute('aria-label', btn.getAttribute('title') || 'Live nicht verfügbar');
             label.textContent = 'Snapshot';
+            if (note) {
+                note.textContent = hint;
+                note.classList.remove('hidden');
+            }
             return;
         }
 
         btn.disabled = false;
         btn.classList.remove('bg-gray-500');
+        btn.setAttribute('title', mode === 'live' ? 'Live aktiv' : 'Zu Live umschalten');
+        btn.setAttribute('aria-label', btn.getAttribute('title') || 'Ring Live');
+        if (note) {
+            note.textContent = '';
+            note.classList.add('hidden');
+        }
 
         if (mode === 'live') {
             btn.setAttribute('data-mode', 'live');
@@ -1979,6 +2129,7 @@ class SmartHomeApp {
                 loadingEl.innerHTML = '<p class="text-sm text-yellow-300 px-3 text-center">Ring nicht verbunden.</p>';
                 loadingEl.style.display = '';
             }
+            this._syncRingWidgetModeButton(camId);
             return;
         }
 
@@ -2004,18 +2155,34 @@ class SmartHomeApp {
         await this._stopRingWidgetLive(camId);
         videoEl.style.display = 'none';
         imageEl.style.display = '';
-        if (loadingEl) loadingEl.style.display = 'none';
+        if (loadingEl) {
+            loadingEl.innerHTML = '<div class="text-center"><i data-lucide="loader" class="w-8 h-8 mx-auto mb-2 animate-spin"></i><p class="text-sm">Ring Snapshot wird geladen...</p></div>';
+            loadingEl.style.display = '';
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
 
-        await this._loadRingSnapshot(camId, imgElementId, 9000, 1, 1, 8);
+        const snapshotOk = await this._loadRingSnapshot(camId, imgElementId, 9000, 1, 1, 8);
+        if (snapshotOk) {
+            if (loadingEl) loadingEl.style.display = 'none';
+        } else if (loadingEl) {
+            const lastError = String(this._lastRingHealth?.last_error_message || '').trim();
+            loadingEl.innerHTML = `
+                <div class="px-4 text-center">
+                    <p class="text-sm text-yellow-300 mb-1">Kein Ring-Snapshot verfügbar.</p>
+                    <p class="text-[11px] text-gray-200">${this.escapeHtml(lastError || 'Die Ring-API hat kein aktuelles Bild geliefert.')}</p>
+                </div>
+            `;
+            loadingEl.style.display = '';
+        }
         this._startRingSnapshotRefresh(camId, imgElementId, 15000);
     }
 
     async _loadRingSnapshot(camId, imgElementId, timeoutMs = 9000, retries = 1, delay = 1, timeoutSec = 8) {
         const key = `${camId}:${imgElementId}`;
-        if (this._ringSnapshotInFlight[key]) return;
+        if (this._ringSnapshotInFlight[key]) return false;
 
         const img = document.getElementById(imgElementId);
-        if (!img) return;
+        if (!img) return false;
 
         this._ringSnapshotInFlight[key] = true;
         const controller = new AbortController();
@@ -2026,10 +2193,10 @@ class SmartHomeApp {
                 signal: controller.signal,
                 cache: 'no-store'
             });
-            if (!resp.ok) return;
+            if (!resp.ok) return false;
 
             const blob = await resp.blob();
-            if (!blob || !blob.size) return;
+            if (!blob || !blob.size) return false;
 
             const newUrl = URL.createObjectURL(blob);
             img.src = newUrl;
@@ -2039,8 +2206,10 @@ class SmartHomeApp {
             }
             this._ringSnapshotObjectUrls[key] = newUrl;
             this._setRingSnapshotTimestamp(camId, imgElementId, Date.now());
+            return true;
         } catch (e) {
             // Snapshot-Ausfall ist tolerierbar; WebRTC oder nächster Zyklus übernimmt.
+            return false;
         } finally {
             clearTimeout(timeoutHandle);
             this._ringSnapshotInFlight[key] = false;
@@ -5323,6 +5492,7 @@ class SmartHomeApp {
         const savePanelBtn = document.getElementById('save-panel-settings-btn');
         const saveThemeConfigBtn = document.getElementById('save-theme-config-btn');
         const saveWidgetStyleBtn = document.getElementById('save-widget-style-btn');
+        const saveRingEventStorageBtn = document.getElementById('save-ring-event-storage-btn');
 
         if (addBtn) {
             this._bindScopedListener(addBtn, 'click', () => this.openWidgetEditor(), { scope, key: 'widgets:add-open-editor' });
@@ -5362,6 +5532,9 @@ class SmartHomeApp {
         if (saveWidgetStyleBtn) {
             this._bindScopedListener(saveWidgetStyleBtn, 'click', () => this.saveWidgetStyleSettings(), { scope, key: 'widgets:save-widget-style' });
         }
+        if (saveRingEventStorageBtn) {
+            this._bindScopedListener(saveRingEventStorageBtn, 'click', () => this.saveRingEventStorageSettings(), { scope, key: 'widgets:save-ring-event-storage' });
+        }
 
         [
             document.getElementById('theme-preset'),
@@ -5386,6 +5559,30 @@ class SmartHomeApp {
             this._bindScopedListener(control, 'change', () => {
                 this.refreshWidgetStyleSettingsUI({ syncForm: false, previewStyle: this.getPendingWidgetStyleSettings() });
             }, { scope, key: `widgets:widget-style-preview:${index}` });
+        });
+
+        [
+            document.getElementById('ring-event-storage-backend'),
+            document.getElementById('ring-event-storage-max-entries'),
+            document.getElementById('ring-event-sqlite-mode'),
+            document.getElementById('ring-event-sqlite-path'),
+            document.getElementById('ring-event-mysql-host'),
+            document.getElementById('ring-event-mysql-port'),
+            document.getElementById('ring-event-mysql-database'),
+            document.getElementById('ring-event-mysql-user'),
+            document.getElementById('ring-event-mysql-password'),
+            document.getElementById('ring-event-influx-url'),
+            document.getElementById('ring-event-influx-org'),
+            document.getElementById('ring-event-influx-bucket'),
+            document.getElementById('ring-event-influx-measurement'),
+            document.getElementById('ring-event-influx-token')
+        ].filter(Boolean).forEach((control, index) => {
+            this._bindScopedListener(control, 'input', () => {
+                this.refreshRingEventStorageUI({ syncForm: false, previewConfig: this.getPendingRingEventStorageSettings() });
+            }, { scope, key: `widgets:ring-event-storage-input:${index}` });
+            this._bindScopedListener(control, 'change', () => {
+                this.refreshRingEventStorageUI({ syncForm: false, previewConfig: this.getPendingRingEventStorageSettings() });
+            }, { scope, key: `widgets:ring-event-storage-change:${index}` });
         });
 
         const iconInput = document.getElementById('widget-icon');
@@ -5420,6 +5617,7 @@ class SmartHomeApp {
         this.refreshPanelSettingsUI();
         this.refreshThemeConfigUI();
         this.refreshWidgetStyleSettingsUI();
+        this.refreshRingEventStorageUI();
         this.renderWidgetIconQuickpick();
     }
 
@@ -5584,6 +5782,87 @@ class SmartHomeApp {
                 </div>
             `;
             if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+    }
+
+    refreshRingEventStorageUI({ syncForm = true, previewConfig = null } = {}) {
+        const settings = this.getRingEventStorageSettings();
+        const activeConfig = this.normalizeRingEventStorageSettings(previewConfig || settings);
+
+        const backend = document.getElementById('ring-event-storage-backend');
+        const maxEntries = document.getElementById('ring-event-storage-max-entries');
+        const sqliteMode = document.getElementById('ring-event-sqlite-mode');
+        const sqlitePath = document.getElementById('ring-event-sqlite-path');
+        const mysqlHost = document.getElementById('ring-event-mysql-host');
+        const mysqlPort = document.getElementById('ring-event-mysql-port');
+        const mysqlDatabase = document.getElementById('ring-event-mysql-database');
+        const mysqlUser = document.getElementById('ring-event-mysql-user');
+        const mysqlPassword = document.getElementById('ring-event-mysql-password');
+        const influxUrl = document.getElementById('ring-event-influx-url');
+        const influxOrg = document.getElementById('ring-event-influx-org');
+        const influxBucket = document.getElementById('ring-event-influx-bucket');
+        const influxMeasurement = document.getElementById('ring-event-influx-measurement');
+        const influxToken = document.getElementById('ring-event-influx-token');
+
+        if (syncForm) {
+            if (backend) backend.value = settings.backend;
+            if (maxEntries) maxEntries.value = String(settings.max_entries);
+            if (sqliteMode) sqliteMode.value = settings.sqlite.mode;
+            if (sqlitePath) sqlitePath.value = settings.sqlite.path;
+            if (mysqlHost) mysqlHost.value = settings.mysql.host;
+            if (mysqlPort) mysqlPort.value = String(settings.mysql.port);
+            if (mysqlDatabase) mysqlDatabase.value = settings.mysql.database;
+            if (mysqlUser) mysqlUser.value = settings.mysql.user;
+            if (mysqlPassword) mysqlPassword.value = settings.mysql.password;
+            if (influxUrl) influxUrl.value = settings.influxdb.url;
+            if (influxOrg) influxOrg.value = settings.influxdb.org;
+            if (influxBucket) influxBucket.value = settings.influxdb.bucket;
+            if (influxMeasurement) influxMeasurement.value = settings.influxdb.measurement;
+            if (influxToken) influxToken.value = settings.influxdb.token;
+        }
+
+        const sqliteWrap = document.getElementById('ring-event-sqlite-mode-wrap');
+        const sqlitePathWrap = document.getElementById('ring-event-sqlite-path-wrap');
+        const mysqlFields = document.getElementById('ring-event-mysql-fields');
+        const influxFields = document.getElementById('ring-event-influx-fields');
+
+        const showSqlite = activeConfig.backend === 'sqlite';
+        const showMysql = activeConfig.backend === 'mysql';
+        const showInflux = activeConfig.backend === 'influxdb';
+
+        if (sqliteWrap) sqliteWrap.classList.toggle('hidden', !showSqlite);
+        if (sqlitePathWrap) {
+            const hideSqlitePath = !showSqlite || activeConfig.sqlite.mode !== 'external';
+            sqlitePathWrap.classList.toggle('hidden', hideSqlitePath);
+        }
+        if (mysqlFields) mysqlFields.classList.toggle('hidden', !showMysql);
+        if (influxFields) influxFields.classList.toggle('hidden', !showInflux);
+
+        const statusEl = document.getElementById('ring-event-storage-status');
+        if (statusEl) {
+            const status = this.ringEventStorageStatus;
+            const activeBackend = status?.active_backend || activeConfig.backend;
+            const requestedBackend = status?.requested_backend || activeConfig.backend;
+            const persistent = status?.persistent ? 'persistent' : 'nur laufzeitbezogen';
+            const runtimeBadge = status?.runtime_supported === false
+                ? '<span class="widget-accent-badge inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium">Fallback aktiv</span>'
+                : '<span class="widget-accent-badge inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium">Direkt aktiv</span>';
+            const note = status?.note
+                ? `<div class="text-xs text-amber-600 dark:text-amber-300 mt-2">${this.escapeHtml(status.note)}</div>`
+                : '';
+            const locationLabel = status?.location_label
+                ? this.escapeHtml(status.location_label)
+                : (activeConfig.backend === 'memory' ? 'Nur im laufenden Prozessspeicher' : this.escapeHtml(activeConfig.sqlite.path));
+            statusEl.innerHTML = `
+                <div class="flex flex-wrap items-center gap-2">
+                    ${runtimeBadge}
+                    <span class="font-medium text-gray-900 dark:text-white">Angefordert: ${this.escapeHtml(requestedBackend)}</span>
+                    <span class="text-gray-500 dark:text-gray-400">Aktiv: ${this.escapeHtml(activeBackend)} (${persistent})</span>
+                </div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mt-2">Ort: ${locationLabel}</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Aufbewahrung: ${this.escapeHtml(String(status?.max_entries || activeConfig.max_entries))} Einträge</div>
+                ${note}
+            `;
         }
     }
 
@@ -6213,8 +6492,10 @@ class SmartHomeApp {
                 default_page: data.default_page || defaultPage,
                 kiosk_default: !!data.kiosk_default,
                 theme_config: this.normalizeThemeConfigSettings(data.theme_config),
-                widget_style: this.normalizeWidgetStyleSettings(data.widget_style)
+                widget_style: this.normalizeWidgetStyleSettings(data.widget_style),
+                ring_event_storage: this.normalizeRingEventStorageSettings(data.ring_event_storage)
             };
+            this.ringEventStorageStatus = this.normalizeRingEventStorageStatus(data.ring_event_storage_status);
             this.applyThemeConfig();
             this.applyKioskMode(this.uiSettings.kiosk_default);
             this.showToast('Panel-Einstellungen gespeichert.', { level: 'success' });
@@ -6234,7 +6515,8 @@ class SmartHomeApp {
                     default_page: this.uiSettings?.default_page || 'dashboard',
                     kiosk_default: !!this.uiSettings?.kiosk_default,
                     widget_style: this.getWidgetStyleSettings(),
-                    theme_config: themeConfig
+                    theme_config: themeConfig,
+                    ring_event_storage: this.getRingEventStorageSettings()
                 })
             });
             const data = await this.parseJsonResponse(response, 'Theme konnte nicht gespeichert werden.');
@@ -6246,10 +6528,13 @@ class SmartHomeApp {
                 default_page: data.default_page || this.uiSettings?.default_page || 'dashboard',
                 kiosk_default: !!data.kiosk_default,
                 theme_config: this.normalizeThemeConfigSettings(data.theme_config),
-                widget_style: this.normalizeWidgetStyleSettings(data.widget_style)
+                widget_style: this.normalizeWidgetStyleSettings(data.widget_style),
+                ring_event_storage: this.normalizeRingEventStorageSettings(data.ring_event_storage)
             };
+            this.ringEventStorageStatus = this.normalizeRingEventStorageStatus(data.ring_event_storage_status);
             this.applyThemeConfig();
             this.refreshThemeConfigUI();
+            this.refreshRingEventStorageUI();
             await this.loadAndRenderWidgets(this.currentPage);
             this.showToast('Theme gespeichert.', { level: 'success' });
         } catch (error) {
@@ -6276,7 +6561,9 @@ class SmartHomeApp {
                 body: JSON.stringify({
                     default_page: this.uiSettings?.default_page || 'dashboard',
                     kiosk_default: !!this.uiSettings?.kiosk_default,
-                    widget_style: widgetStyle
+                    widget_style: widgetStyle,
+                    theme_config: this.getThemeConfigSettings(),
+                    ring_event_storage: this.getRingEventStorageSettings()
                 })
             });
             const data = await this.parseJsonResponse(response, 'Widget-Stil konnte nicht gespeichert werden.');
@@ -6288,14 +6575,56 @@ class SmartHomeApp {
                 default_page: data.default_page || this.uiSettings?.default_page || 'dashboard',
                 kiosk_default: !!data.kiosk_default,
                 theme_config: this.normalizeThemeConfigSettings(data.theme_config),
-                widget_style: this.normalizeWidgetStyleSettings(data.widget_style)
+                widget_style: this.normalizeWidgetStyleSettings(data.widget_style),
+                ring_event_storage: this.normalizeRingEventStorageSettings(data.ring_event_storage)
             };
+            this.ringEventStorageStatus = this.normalizeRingEventStorageStatus(data.ring_event_storage_status);
             this.applyThemeConfig();
             this.refreshWidgetStyleSettingsUI();
+            this.refreshRingEventStorageUI();
             await this.loadAndRenderWidgets(this.currentPage);
             this.showToast('Widget-Stil gespeichert.', { level: 'success' });
         } catch (error) {
             this.showToast(`Widget-Stil konnte nicht gespeichert werden: ${error.message}`, { level: 'error' });
+        }
+    }
+
+    async saveRingEventStorageSettings() {
+        const ringEventStorage = this.getPendingRingEventStorageSettings();
+
+        try {
+            const response = await fetch('/api/ui-settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    default_page: this.uiSettings?.default_page || 'dashboard',
+                    kiosk_default: !!this.uiSettings?.kiosk_default,
+                    widget_style: this.getWidgetStyleSettings(),
+                    theme_config: this.getThemeConfigSettings(),
+                    ring_event_storage: ringEventStorage
+                })
+            });
+            const data = await this.parseJsonResponse(response, 'Ring Ereignis-Speicher konnte nicht gespeichert werden.');
+            if (!response.ok) {
+                this.showToast(data.error || 'Ring Ereignis-Speicher konnte nicht gespeichert werden.', { level: 'error' });
+                return;
+            }
+            this.uiSettings = {
+                default_page: data.default_page || this.uiSettings?.default_page || 'dashboard',
+                kiosk_default: !!data.kiosk_default,
+                theme_config: this.normalizeThemeConfigSettings(data.theme_config),
+                widget_style: this.normalizeWidgetStyleSettings(data.widget_style),
+                ring_event_storage: this.normalizeRingEventStorageSettings(data.ring_event_storage)
+            };
+            this.ringEventStorageStatus = this.normalizeRingEventStorageStatus(data.ring_event_storage_status);
+            this.applyThemeConfig();
+            this.refreshRingEventStorageUI();
+            if (this.currentPage === 'cameras' && typeof this.loadRingEvents === 'function') {
+                await this.loadRingEvents();
+            }
+            this.showToast('Ring Ereignis-Speicher gespeichert.', { level: 'success' });
+        } catch (error) {
+            this.showToast(`Ring Ereignis-Speicher konnte nicht gespeichert werden: ${error.message}`, { level: 'error' });
         }
     }
 

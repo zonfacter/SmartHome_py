@@ -1,5 +1,5 @@
 """
-Web Manager Module v4.7.0
+Web Manager Module v4.8.0
 FINAL FIX: Beseitigt NoneType-Pfadfehler durch synchrone Initialisierung.
 
 📁 SPEICHERORT: modules/gateway/web_manager.py
@@ -40,6 +40,7 @@ try:
     from modules.plc.symbol_browser import get_symbol_browser
     from modules.gateway.plc_config_manager import PLCConfigManager
     from modules.gateway.camera_trigger_store import CameraTriggerStore
+    from modules.gateway.ring_event_store import RingEventStore
     from modules.gateway import ring_support
     from modules.plc.variable_manager import create_variable_manager
     MANAGERS_AVAILABLE = True
@@ -59,12 +60,12 @@ logger = logging.getLogger(__name__)
 
 class WebManager(BaseModule):
     """
-    Web Manager v4.7.0
+    Web Manager v4.8.0
     Verwaltet das Web-Interface und die Kommunikation zum Frontend.
     """
 
     NAME = "web_manager"
-    VERSION = "4.7.0"
+    VERSION = "4.8.0"
     DESCRIPTION = "Flask + SocketIO Web-HMI Server"
     AUTHOR = "TwinCAT Team"
     API_MAJOR_VERSION = "1"
@@ -97,6 +98,7 @@ class WebManager(BaseModule):
         self._ring_last_event_ids = {}
         self._ring_event_history = deque(maxlen=200)
         self._ring_event_history_lock = threading.Lock()
+        self._ring_event_store = None
         self._ring_doorbell_until = {}
         self._ring_live_until = {}
         self._ring_doorbell_pulse_seconds = 10.0
@@ -158,7 +160,7 @@ class WebManager(BaseModule):
         super().initialize(app_context)
         self.app_context = app_context
 
-        logger.info("=== Web Manager v4.7.0 Initialisierung START ===")
+        logger.info("=== Web Manager v4.8.0 Initialisierung START ===")
 
         # Initialize Sentry if available
         if SENTRY_AVAILABLE:
@@ -214,6 +216,8 @@ class WebManager(BaseModule):
                 logger.info("Initialisiere Variable Manager...")
                 self.variable_manager = create_variable_manager()
                 self._trigger_store = CameraTriggerStore(os.path.join(conf_dir, 'automation_rules.db'))
+                self._ring_event_store = RingEventStore(root_dir, conf_dir)
+                self._configure_ring_event_store()
 
                 # Register symbols from cache
                 if self.symbol_browser:
@@ -260,7 +264,7 @@ class WebManager(BaseModule):
                 print("  [ERROR] Flask nicht verfuegbar!")
 
             print(f"  [OK] {self.NAME} v{self.VERSION} initialisiert")
-            logger.info("=== Web Manager v4.7.0 Initialisierung ABGESCHLOSSEN ===")
+            logger.info("=== Web Manager v4.8.0 Initialisierung ABGESCHLOSSEN ===")
 
             if self.sentry:
                 self.sentry.add_breadcrumb(
@@ -591,6 +595,73 @@ class WebManager(BaseModule):
     def _api_keys_db_path(self, config_dir: str = None) -> str:
         base = str(config_dir or os.path.join(os.path.abspath(os.getcwd()), 'config'))
         return os.path.join(base, 'auth_keys.db')
+
+    def _default_ring_event_storage_settings(self) -> Dict[str, Any]:
+        if self._ring_event_store:
+            return self._ring_event_store.default_config()
+        return {
+            'backend': 'sqlite',
+            'max_entries': 2000,
+            'sqlite': {'mode': 'internal', 'path': 'config/ring_events.db'},
+            'mysql': {'host': '127.0.0.1', 'port': 3306, 'database': 'smarthome', 'user': '', 'password': '', 'table': 'ring_events', 'ssl': False},
+            'influxdb': {'url': 'http://127.0.0.1:8086', 'org': 'smarthome', 'bucket': 'ring_events', 'token': '', 'measurement': 'ring_events'},
+        }
+
+    def _normalize_ring_event_storage_settings(self, payload: Dict[str, Any] = None) -> Dict[str, Any]:
+        if self._ring_event_store:
+            return self._ring_event_store.normalize_config(payload)
+        return self._default_ring_event_storage_settings()
+
+    def _get_ui_settings_config(self) -> Dict[str, Any]:
+        config_mgr = self.app_context.module_manager.get_module('config_manager') if self.app_context else None
+        settings = config_mgr.get_config_value('ui_settings', {}) if config_mgr else {}
+        return settings if isinstance(settings, dict) else {}
+
+    def _get_ring_event_storage_settings(self) -> Dict[str, Any]:
+        settings = self._get_ui_settings_config()
+        return self._normalize_ring_event_storage_settings(settings.get('ring_event_storage'))
+
+    def _configure_ring_event_store(self, settings: Dict[str, Any] = None) -> Dict[str, Any]:
+        normalized = self._normalize_ring_event_storage_settings(settings or self._get_ring_event_storage_settings())
+        if not self._ring_event_store:
+            return {
+                'requested_backend': normalized.get('backend', 'sqlite'),
+                'active_backend': 'memory',
+                'runtime_supported': False,
+                'persistent': False,
+                'max_entries': normalized.get('max_entries', 2000),
+                'location_label': 'RingEventStore nicht initialisiert',
+                'note': 'RingEventStore nicht initialisiert',
+                'sqlite': {'mode': 'internal', 'path': ''},
+                'available_backends': [],
+            }
+        return self._ring_event_store.configure(normalized)
+
+    def _get_ring_event_storage_status(self, settings: Dict[str, Any] = None) -> Dict[str, Any]:
+        normalized = self._normalize_ring_event_storage_settings(settings or self._get_ring_event_storage_settings())
+        if not self._ring_event_store:
+            return self._configure_ring_event_store(normalized)
+        return self._ring_event_store.get_status(normalized)
+
+    def _store_ring_event(self, event: Dict[str, Any]) -> bool:
+        if not self._ring_event_store:
+            return False
+        return self._ring_event_store.record_event(event, self._get_ring_event_storage_settings())
+
+    def _read_ring_events(self, limit: int = 25, kinds: List[str] = None) -> List[Dict[str, Any]]:
+        if not self._ring_event_store:
+            return []
+        return self._ring_event_store.list_events(limit=limit, kinds=kinds, config=self._get_ring_event_storage_settings())
+
+    def _record_ring_event_health(self, snapshot: Dict[str, Any]) -> Dict[str, Any]:
+        if not self._ring_event_store:
+            return {}
+        return self._ring_event_store.record_health_status(snapshot, self._get_ring_event_storage_settings())
+
+    def _get_ring_event_health(self) -> Dict[str, Any]:
+        if not self._ring_event_store:
+            return {}
+        return self._ring_event_store.get_health_status(self._get_ring_event_storage_settings())
 
     def _init_api_keys_db(self, config_dir: str = None):
         db_path = self._api_keys_db_path(config_dir)
@@ -1602,6 +1673,7 @@ class WebManager(BaseModule):
                 'surface_style': 'soft',
                 'chrome_tint': True
             }
+            default_ring_event_storage = self._default_ring_event_storage_settings()
 
             def _normalize_widget_style(payload):
                 source = payload if isinstance(payload, dict) else {}
@@ -1638,13 +1710,18 @@ class WebManager(BaseModule):
 
             widget_style = _normalize_widget_style(settings.get('widget_style'))
             theme_config = _normalize_theme_config(settings.get('theme_config'))
+            ring_event_storage = self._normalize_ring_event_storage_settings(settings.get('ring_event_storage') or default_ring_event_storage)
+            ring_event_storage_status = self._get_ring_event_storage_status(ring_event_storage)
 
             if request.method == 'GET':
                 return jsonify({
                     'default_page': settings.get('default_page', 'dashboard'),
                     'kiosk_default': bool(settings.get('kiosk_default', False)),
                     'widget_style': widget_style,
-                    'theme_config': theme_config
+                    'theme_config': theme_config,
+                    'ring_event_storage': ring_event_storage,
+                    'ring_event_storage_status': ring_event_storage_status,
+                    'ring_event_storage_backends': ring_event_storage_status.get('available_backends', []),
                 })
 
             data = request.json or {}
@@ -1652,6 +1729,9 @@ class WebManager(BaseModule):
             kiosk_default = bool(data.get('kiosk_default', settings.get('kiosk_default', False)))
             next_widget_style = _normalize_widget_style(data.get('widget_style', settings.get('widget_style')))
             next_theme_config = _normalize_theme_config(data.get('theme_config', settings.get('theme_config')))
+            next_ring_event_storage = self._normalize_ring_event_storage_settings(
+                data.get('ring_event_storage', settings.get('ring_event_storage') or default_ring_event_storage)
+            )
 
             pages = config_mgr.get_config_value('pages', {})
             if not isinstance(pages, dict):
@@ -1669,11 +1749,18 @@ class WebManager(BaseModule):
                 'kiosk_default': kiosk_default,
                 'widget_style': next_widget_style,
                 'theme_config': next_theme_config,
+                'ring_event_storage': next_ring_event_storage,
                 'modified': time.time()
             }
             config_mgr.set_config_value('ui_settings', new_settings)
             config_mgr.save_config()
-            return jsonify({'success': True, **new_settings})
+            storage_status = self._configure_ring_event_store(next_ring_event_storage)
+            return jsonify({
+                'success': True,
+                **new_settings,
+                'ring_event_storage_status': storage_status,
+                'ring_event_storage_backends': storage_status.get('available_backends', []),
+            })
 
         @self.app.route('/api/debug/config', methods=['GET'])
         def debug_config():

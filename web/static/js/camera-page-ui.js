@@ -25,6 +25,12 @@
             const ringAuthBtn = document.getElementById('ring-auth-btn');
             if (ringAuthBtn) this._bindScopedListener(ringAuthBtn, 'click', () => this._ringAuthenticateFromForm(), { scope, key: 'cameras:ring-auth' });
 
+            const ringAuthHelpBtn = document.getElementById('ring-auth-help-btn');
+            if (ringAuthHelpBtn) this._bindScopedListener(ringAuthHelpBtn, 'click', () => this.openRingHelpModal(), { scope, key: 'cameras:ring-auth-help' });
+
+            const ringHelpCloseBtn = document.getElementById('ring-help-close-btn');
+            if (ringHelpCloseBtn) this._bindScopedListener(ringHelpCloseBtn, 'click', () => this.closeRingHelpModal(), { scope, key: 'cameras:ring-help-close' });
+
             const ringWebrtcPreferred = document.getElementById('ring-webrtc-preferred');
             if (ringWebrtcPreferred) {
                 const stored = localStorage.getItem('ringWebrtcPreferred');
@@ -40,6 +46,11 @@
             const refreshRingEventsBtn = document.getElementById('refresh-ring-events-btn');
             if (refreshRingEventsBtn) {
                 this._bindScopedListener(refreshRingEventsBtn, 'click', () => this.loadRingEvents(), { scope, key: 'cameras:ring-events-refresh' });
+            }
+
+            const ringEventsHelpBtn = document.getElementById('ring-events-help-btn');
+            if (ringEventsHelpBtn) {
+                this._bindScopedListener(ringEventsHelpBtn, 'click', () => this.openRingHelpModal(), { scope, key: 'cameras:ring-events-help' });
             }
 
             this.loadRingEvents();
@@ -555,14 +566,22 @@
                                     <i data-lucide="grip" class="w-4 h-4"></i>
                                 </button>
                                 <h3 class="font-semibold text-gray-900 dark:text-white">Ring Ereignisse</h3>
+                                <span id="ring-events-health-badge" class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">Prüfung…</span>
                             </div>
                             <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Klingeln, Bewegung und weitere API-Historie</p>
                         </div>
-                        <button id="refresh-ring-events-btn" class="theme-accent-button px-3 py-1.5 text-xs rounded">
-                            Aktualisieren
-                        </button>
+                        <div class="flex items-center gap-2">
+                            <button id="ring-events-help-btn" type="button" class="theme-outline-button px-2.5 py-1.5 text-xs rounded inline-flex items-center gap-1" title="Hinweise zu Ring-Diagnose">
+                                <span class="inline-flex h-4 w-4 items-center justify-center rounded-full border border-current text-[10px] font-bold">i</span>
+                                <span>Hilfe</span>
+                            </button>
+                            <button id="refresh-ring-events-btn" class="theme-accent-button px-3 py-1.5 text-xs rounded">
+                                Aktualisieren
+                            </button>
+                        </div>
                     </div>
                     <div id="ring-events-status" class="text-xs text-gray-500 dark:text-gray-400 mb-3">Ereignisse werden geladen...</div>
+                    <div id="ring-events-guidance" class="hidden mb-3"></div>
                     <div id="ring-events-panel" class="theme-subpanel rounded-xl overflow-hidden">
                         <div class="p-4 text-sm text-gray-500 dark:text-gray-400">
                             Noch keine Ring-Ereignisse geladen.
@@ -643,6 +662,7 @@
                                 </button>
                                 <span class="text-xs px-2 py-0.5 rounded bg-orange-100 text-orange-800">RING</span>
                             </div>
+                            <div id="ring-live-note-${camId}" class="mt-2 hidden text-[11px] text-amber-600 dark:text-amber-300"></div>
                             <div id="widget-ptz-${camId}" class="widget-ptz-panel theme-subpanel hidden mt-2 p-2 rounded-lg select-none"></div>
                         </div>
                     `;

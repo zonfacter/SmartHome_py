@@ -3,6 +3,30 @@
 Dieses Changelog startet bewusst neu ab **v4.6.2**.
 Ältere Änderungen wurden nach `docs/legacy/` ausgelagert.
 
+## [4.8.0] - 2026-03-24
+
+### Added
+- Persistenter Ring-Ereignis-Speicher mit konfigurierbaren Backends `memory`, `sqlite`, `mysql`, `influxdb`
+- Neue lokale Standarddatenbank `config/ring_events.db` fuer globale Ring-Events ueber mehrere Browser-Sessions hinweg
+- Ring-Diagnose-Endpunkt mit Ursache/Hinweisen fuer `406`, Re-Auth, 2FA und Timeout-Faelle
+- Ring-Hilfe in der UI mit Popup, offiziellen Links und konkreten Re-Auth-Schritten
+- Persistente Ring-Health-Metadaten: letzter erfolgreicher Abruf, letzter Fehler, Re-Auth-Empfehlung und geschaetztes Re-Auth-Fenster
+- Timeline im Ring-Info-/Diagnosebereich mit letztem Event, letztem Erfolg und Stoerungsbeginn
+- Verschluesselte lokale Speicherung der Ring-Zugangsdaten und Tokens fuer spaetere Re-Auths ohne erneute Eingabe
+
+### Changed
+- Ring-Ereignis-Widget erkennt jetzt Trigger wie `Klingeln`, `Bewegung`, `Paket` und `On-Demand` klarer
+- Ring-Kachel zeigt jetzt Diagnose-Badge sowie sichtbare Hinweise, wenn Live oder Event-History gerade nicht verfuegbar sind
+- Ring-Snapshot-Verhalten im Kamera-Widget ist robuster und zeigt Fehler sichtbar anstatt still leer zu bleiben
+- Live-Umschaltung fuer Ring wird in der UI klar deaktiviert, wenn der WebRTC-/Session-Pfad von Ring blockiert wird
+- `.gitignore` deckt jetzt auch die lokale Ring-Event-DB explizit ab
+
+### Fixed
+- Ring-Events waren zuvor nicht persistent und gingen bei Neustarts oder Backend-Wechsel verloren
+- Fehler in der Ring-History-Abfrage wurden bislang nur implizit sichtbar; jetzt werden sie dauerhaft gespeichert und in der UI erklaert
+- Snapshot-Ausfaelle der Ring-Kamera fuehren nicht mehr nur zu einer leeren Kachel, sondern zu einer konkreten Rueckmeldung im Overlay
+- Ring-Re-Auth kann jetzt vorhandene lokal gespeicherte Zugangsdaten wiederverwenden
+
 ## [4.7.0] - 2026-03-23
 
 ### Added

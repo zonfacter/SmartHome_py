@@ -14,6 +14,7 @@ node_modules/
 
 # Runtime data
 config/system_logs.db
+config/ring_events.db
 config/cache/
 *.log
 web/static/hls/

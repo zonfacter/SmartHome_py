@@ -6,7 +6,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="mobile-web-app-capable" content="yes">
-    <title>SmartHome OS v4.7.0</title>
+    <title>SmartHome OS v4.8.0</title>
 
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🏠</text></svg>">
@@ -30,7 +30,7 @@
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="/static/css/main.css?v=4.7.0-release">
+    <link rel="stylesheet" href="/static/css/main.css?v=4.8.0-release">
 
     <style>
         .page { display: none; }
@@ -60,7 +60,7 @@
                 </div>
                 <div>
                     <h1 class="text-lg font-bold text-gray-900 dark:text-white">SmartHome</h1>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">OS v4.7.0</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">OS v4.8.0</p>
                 </div>
             </div>
         </div>
@@ -314,6 +314,10 @@
                                 <i data-lucide="key-round" class="w-4 h-4"></i>
                                 <span>Ring verbinden</span>
                             </button>
+                            <button id="ring-auth-help-btn" type="button" class="theme-outline-button px-3 py-2 text-sm rounded-lg inline-flex items-center gap-1.5" title="Hinweise zur Ring-Anmeldung">
+                                <span class="inline-flex h-4 w-4 items-center justify-center rounded-full border border-current text-[10px] font-bold">i</span>
+                                <span>Hilfe</span>
+                            </button>
                             <button id="import-ring-btn" class="px-4 py-2 bg-orange-700 text-white text-sm rounded-lg hover:bg-orange-800 flex items-center space-x-1">
                                 <i data-lucide="bell-ring" class="w-4 h-4"></i>
                                 <span>Ring Kameras laden</span>
@@ -324,6 +328,7 @@
                             </label>
                         </div>
                         <div id="ring-status" class="text-xs text-gray-500 dark:text-gray-400">Ring Status: unbekannt</div>
+                        <div id="ring-auth-help-inline" class="hidden theme-subpanel rounded-xl p-3 text-xs text-gray-600 dark:text-gray-300"></div>
                     </div>
                     <div id="ring-import-result" class="theme-subpanel hidden mt-2 p-3 rounded-xl text-sm"></div>
 
@@ -1324,6 +1329,82 @@
                     <div id="widget-style-preview" class="max-w-sm"></div>
                 </div>
             </div>
+
+            <div class="theme-panel rounded-2xl p-6 mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Ring Ereignis-Speicher</h2>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Legt fest, ob Ring-Events nur im Speicher liegen oder persistent fuer alle User in einer Datenbank abgelegt werden.</p>
+                    </div>
+                    <button id="save-ring-event-storage-btn" class="theme-accent-button px-4 py-2 rounded-lg">
+                        <i data-lucide="database" class="w-4 h-4 inline mr-1"></i> Speicher speichern
+                    </button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Backend</label>
+                        <select id="ring-event-storage-backend"
+                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                            <option value="sqlite">SQLite</option>
+                            <option value="memory">Memory</option>
+                            <option value="mysql">MySQL (vorbereitet)</option>
+                            <option value="influxdb">InfluxDB (vorbereitet)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Aufbewahrung</label>
+                        <input id="ring-event-storage-max-entries" type="number" min="100" max="50000"
+                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                    <div id="ring-event-sqlite-mode-wrap">
+                        <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">SQLite Ort</label>
+                        <select id="ring-event-sqlite-mode"
+                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                            <option value="internal">Intern / Projekt</option>
+                            <option value="external">Externer Pfad</option>
+                        </select>
+                    </div>
+                    <div id="ring-event-sqlite-path-wrap">
+                        <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">SQLite Pfad</label>
+                        <input id="ring-event-sqlite-path" type="text" placeholder="config/ring_events.db"
+                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                </div>
+                <div id="ring-event-mysql-fields" class="theme-subpanel mt-4 rounded-xl p-4 hidden">
+                    <div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3">MySQL Verbindung</div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                        <input id="ring-event-mysql-host" type="text" placeholder="Host"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        <input id="ring-event-mysql-port" type="number" min="1" max="65535" placeholder="Port"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        <input id="ring-event-mysql-database" type="text" placeholder="Datenbank"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        <input id="ring-event-mysql-user" type="text" placeholder="Benutzer"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        <input id="ring-event-mysql-password" type="password" placeholder="Passwort"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                </div>
+                <div id="ring-event-influx-fields" class="theme-subpanel mt-4 rounded-xl p-4 hidden">
+                    <div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3">InfluxDB Verbindung</div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                        <input id="ring-event-influx-url" type="text" placeholder="URL"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        <input id="ring-event-influx-org" type="text" placeholder="Organisation"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        <input id="ring-event-influx-bucket" type="text" placeholder="Bucket"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        <input id="ring-event-influx-measurement" type="text" placeholder="Measurement"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        <input id="ring-event-influx-token" type="password" placeholder="Token"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    </div>
+                </div>
+                <div class="theme-subpanel mt-4 rounded-xl p-4">
+                    <div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Laufzeitstatus</div>
+                    <div id="ring-event-storage-status" class="text-sm text-gray-700 dark:text-gray-200"></div>
+                </div>
+            </div>
         </div>
 
         <!-- Widget Editor Modal (versteckt) -->
@@ -1681,9 +1762,22 @@
          ================================================================ -->
     <script defer src="/static/js/socket_handler.js"></script>
     <script defer src="/static/js/variable-manager.js"></script> <!-- ⭐ v4.6.0 -->
-    <script defer src="/static/js/ring-ui.js?v=4.7.0-release"></script>
-    <script defer src="/static/js/camera-page-ui.js?v=4.7.0-release"></script>
-    <script defer src="/static/js/app.js?v=4.7.0-release"></script>
+    <script defer src="/static/js/ring-ui.js?v=4.8.0-release"></script>
+    <script defer src="/static/js/camera-page-ui.js?v=4.8.0-release"></script>
+    <script defer src="/static/js/app.js?v=4.8.0-release"></script>
+
+    <div id="ring-help-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-4">
+        <div class="theme-panel w-full max-w-2xl rounded-2xl p-6 shadow-2xl">
+            <div class="flex items-start justify-between gap-4 mb-4">
+                <div>
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Ring Hilfe & Re-Auth</h3>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">Wenn Ring-Ereignisse leer bleiben oder `406 /clients_api/session` auftaucht, hilft meist eine frische Ring-Anmeldung oder eine Bestätigung im Ring-Konto.</p>
+                </div>
+                <button id="ring-help-close-btn" type="button" class="theme-outline-button px-3 py-2 rounded-lg text-sm">Schließen</button>
+            </div>
+            <div id="ring-help-modal-body" class="space-y-4 text-sm text-gray-700 dark:text-gray-200"></div>
+        </div>
+    </div>
 
     <!-- Lucide Icons initialisieren -->
     <script>
