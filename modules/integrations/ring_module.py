@@ -7,6 +7,7 @@ for the Flask web API.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import re
@@ -15,6 +16,12 @@ import time
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+try:
+    from cryptography.fernet import Fernet, InvalidToken
+except ImportError:
+    Fernet = None
+    InvalidToken = Exception
 
 try:
     from aiohttp import ClientSession
@@ -98,6 +105,7 @@ class _AsyncRuntime:
 
 _RUNTIME = _AsyncRuntime()
 _WEBRTC_SESSIONS: Dict[str, Dict[str, Any]] = {}
+_FERNET: Optional[Any] = None
 
 
 def _config_path() -> str:
@@ -107,31 +115,126 @@ def _config_path() -> str:
     return os.path.join(cache_dir, "ring_auth.json")
 
 
-def _load_auth_data() -> Dict[str, Any]:
+def _key_path() -> str:
+    return os.path.join(os.path.dirname(_config_path()), "ring_auth.key")
+
+
+def _get_fernet() -> Optional[Any]:
+    global _FERNET
+    if _FERNET is not None:
+        return _FERNET
+    if Fernet is None:
+        return None
+
+    key_file = _key_path()
+    try:
+        if os.path.exists(key_file):
+            with open(key_file, "rb") as f:
+                key = f.read().strip()
+        else:
+            key = Fernet.generate_key()
+            with open(key_file, "wb") as f:
+                f.write(key)
+            try:
+                os.chmod(key_file, 0o600)
+            except Exception:
+                pass
+        _FERNET = Fernet(key)
+        return _FERNET
+    except Exception:
+        return None
+
+
+def _encrypt_payload(payload: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not payload:
+        return None
+    fernet = _get_fernet()
+    if not fernet:
+        return None
+    raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    return fernet.encrypt(raw).decode("utf-8")
+
+
+def _decrypt_payload(token: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not token:
+        return None
+    fernet = _get_fernet()
+    if not fernet:
+        return None
+    try:
+        raw = fernet.decrypt(str(token).encode("utf-8"))
+        payload = json.loads(raw.decode("utf-8"))
+        return payload if isinstance(payload, dict) else None
+    except (InvalidToken, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def _load_raw_auth_file() -> Dict[str, Any]:
     path = _config_path()
     if not os.path.exists(path):
-        return {"user_agent": _DEFAULT_USER_AGENT, "token": None}
-
+        return {}
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            if not isinstance(data, dict):
-                return {"user_agent": _DEFAULT_USER_AGENT, "token": None}
-            return {
-                "user_agent": _normalize_user_agent(data.get("user_agent")),
-                "token": data.get("token"),
-                "updated_at": data.get("updated_at"),
-            }
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _load_auth_data() -> Dict[str, Any]:
+    data = _load_raw_auth_file()
+    if not data:
+        return {"user_agent": _DEFAULT_USER_AGENT, "token": None}
+
+    try:
+        token = data.get("token")
+        if token is None and data.get("token_encrypted"):
+            token = _decrypt_payload(data.get("token_encrypted"))
+        credentials = _decrypt_payload(data.get("credentials_encrypted")) or {}
+        return {
+            "user_agent": _normalize_user_agent(data.get("user_agent")),
+            "token": token,
+            "updated_at": data.get("updated_at"),
+            "username": str(credentials.get("username") or "").strip(),
+            "password": str(credentials.get("password") or ""),
+            "credentials_saved": bool(credentials.get("username") and credentials.get("password")),
+        }
     except Exception:
         return {"user_agent": _DEFAULT_USER_AGENT, "token": None}
 
 
-def _save_auth_data(user_agent: str, token: Optional[Dict[str, Any]]) -> None:
+def _save_auth_data(
+    user_agent: str,
+    token: Optional[Dict[str, Any]],
+    username: Optional[str] = None,
+    password: Optional[str] = None,
+    remember_credentials: Optional[bool] = None,
+) -> None:
+    existing = _load_auth_data()
+    keep_credentials = existing.get("credentials_saved", False) if remember_credentials is None else bool(remember_credentials)
+    stored_username = str(existing.get("username") or "").strip()
+    stored_password = str(existing.get("password") or "")
+    if username is not None:
+        stored_username = str(username or "").strip()
+    if password is not None:
+        stored_password = str(password or "")
+
     payload = {
         "user_agent": _normalize_user_agent(user_agent),
-        "token": token,
         "updated_at": int(time.time()),
     }
+    encrypted_token = _encrypt_payload(token) if token else None
+    if encrypted_token:
+        payload["token_encrypted"] = encrypted_token
+    else:
+        payload["token"] = token
+    if keep_credentials and stored_username and stored_password:
+        encrypted_credentials = _encrypt_payload({
+            "username": stored_username,
+            "password": stored_password,
+        })
+        if encrypted_credentials:
+            payload["credentials_encrypted"] = encrypted_credentials
 
     with open(_config_path(), "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
@@ -235,6 +338,8 @@ def get_ring_status() -> Dict[str, Any]:
         "configured": bool(token),
         "user_agent": _normalize_user_agent(auth_data.get("user_agent", _DEFAULT_USER_AGENT)),
         "webrtc_available": _RING_WEBRTC_SUPPORTED,
+        "saved_credentials": bool(auth_data.get("credentials_saved")),
+        "saved_username": str(auth_data.get("username") or "").strip(),
     }
 
 
@@ -257,7 +362,7 @@ async def _async_authenticate(
     finally:
         await auth.async_close()
         await _close_http_session(http_session)
-    _save_auth_data(user_agent, token)
+    _save_auth_data(user_agent, token, username=username, password=password, remember_credentials=True)
     return {"success": True}
 
 
@@ -270,7 +375,13 @@ def authenticate_ring(
     if not RING_AVAILABLE:
         return {"success": False, "error": "ring_doorbell nicht installiert"}
 
-    ua = _normalize_user_agent(user_agent or _load_auth_data().get("user_agent"))
+    auth_data = _load_auth_data()
+    username = str(username or auth_data.get("username") or "").strip()
+    password = str(password or auth_data.get("password") or "")
+    if not username or not password:
+        return {"success": False, "error": "Keine gespeicherten Ring-Zugangsdaten vorhanden. Bitte Benutzer und Passwort eingeben."}
+
+    ua = _normalize_user_agent(user_agent or auth_data.get("user_agent"))
     otp = _normalize_otp(otp)
 
     with _LOCK:
@@ -467,6 +578,16 @@ def get_ring_latest_ding(device_id: str) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+def _history_timeout_seconds(limit: int, kind: Optional[str]) -> int:
+    bounded_limit = max(1, min(int(limit), 100))
+    base = 12 + min(bounded_limit, 25)
+    if kind == "motion":
+        base += 8
+    elif kind == "on_demand":
+        base += 4
+    return max(12, min(base, 60))
+
+
 def _serialize_ring_event(event: Dict[str, Any]) -> Dict[str, Any]:
     created_at = event.get("created_at")
     ding_ts = None
@@ -489,6 +610,17 @@ def _serialize_ring_event(event: Dict[str, Any]) -> Dict[str, Any]:
         "ding_ts": ding_ts,
         "created_at": created_at_iso,
         "created_at_local": created_at_local,
+        "subtype": event.get("subtype"),
+        "event_type": event.get("event_type"),
+        "event_subtype": event.get("event_subtype"),
+        "detection_type": event.get("detection_type"),
+        "object_type": event.get("object_type"),
+        "cv_detection_type": event.get("cv_detection_type"),
+        "label": event.get("label"),
+        "category": event.get("category"),
+        "properties": event.get("properties") if isinstance(event.get("properties"), dict) else None,
+        "attributes": event.get("attributes") if isinstance(event.get("attributes"), dict) else None,
+        "cv_properties": event.get("cv_properties") if isinstance(event.get("cv_properties"), dict) else None,
     }
 
 
@@ -527,10 +659,57 @@ def get_ring_history(device_id: str, limit: int = 20, kind: Optional[str] = None
         return {"success": False, "error": "ring_doorbell nicht installiert"}
 
     try:
-        timeout = max(12, min(45, int(limit) + 10))
+        timeout = _history_timeout_seconds(limit, kind)
         return _RUNTIME.run(_async_get_history(device_id, limit=limit, kind=kind), timeout=timeout)
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        kind_label = kind or "all"
+        return {
+            "success": False,
+            "error": f"{e}",
+            "context": {
+                "device_id": str(device_id),
+                "kind": kind_label,
+                "limit": max(1, min(int(limit), 100)),
+                "timeout_seconds": _history_timeout_seconds(limit, kind),
+            },
+        }
+
+
+def get_ring_history_diagnostics(device_id: str, limit: int = 10) -> Dict[str, Any]:
+    """Diagnose der Ring-History fuer alle relevanten Eventtypen."""
+    if not RING_AVAILABLE:
+        return {"success": False, "error": "ring_doorbell nicht installiert", "checks": []}
+
+    checks: List[Dict[str, Any]] = []
+    kinds: List[Optional[str]] = [None, "ding", "motion", "on_demand"]
+    overall_success = False
+
+    for kind in kinds:
+        started = time.time()
+        result = get_ring_history(device_id, limit=limit, kind=kind)
+        duration_ms = int((time.time() - started) * 1000)
+        events = result.get("events") or []
+        if result.get("success"):
+            overall_success = True
+        checks.append(
+            {
+                "kind": kind or "all",
+                "success": bool(result.get("success")),
+                "duration_ms": duration_ms,
+                "count": len(events),
+                "error": result.get("error"),
+                "context": result.get("context") if isinstance(result.get("context"), dict) else None,
+                "sample": events[:3],
+            }
+        )
+
+    return {
+        "success": overall_success,
+        "device_id": str(device_id),
+        "limit": max(1, min(int(limit), 100)),
+        "checked_at": datetime.utcnow().isoformat() + "Z",
+        "checks": checks,
+    }
 
 
 async def _async_start_webrtc(device_id: str, sdp_offer: str, keep_alive_timeout: int = 30) -> Dict[str, Any]:

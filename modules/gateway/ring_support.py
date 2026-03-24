@@ -10,6 +10,201 @@ from typing import Any, Callable, Dict, List
 
 logger = logging.getLogger(__name__)
 
+RING_LOGIN_URL = "https://account.ring.com/account/login"
+RING_HELP_URL = "https://support.help.ring.com/"
+
+
+def _find_keyword_in_payload(payload: Any, keywords: set[str]) -> str:
+    stack = [payload]
+    visited = set()
+    while stack:
+        current = stack.pop()
+        obj_id = id(current)
+        if obj_id in visited:
+            continue
+        visited.add(obj_id)
+
+        if isinstance(current, dict):
+            for value in current.values():
+                stack.append(value)
+            continue
+        if isinstance(current, (list, tuple, set)):
+            for value in current:
+                stack.append(value)
+            continue
+
+        text = str(current or '').strip().lower()
+        if not text:
+            continue
+        for keyword in keywords:
+            if keyword in text:
+                return keyword
+    return ''
+
+
+def _derive_ring_trigger(event: Dict[str, Any]) -> str:
+    kind = str(event.get('kind') or 'unknown').strip().lower() or 'unknown'
+    if kind == 'ding':
+        return 'ding'
+
+    package_hint = _find_keyword_in_payload(
+        {
+            'subtype': event.get('subtype'),
+            'event_type': event.get('event_type'),
+            'event_subtype': event.get('event_subtype'),
+            'detection_type': event.get('detection_type'),
+            'object_type': event.get('object_type'),
+            'cv_detection_type': event.get('cv_detection_type'),
+            'label': event.get('label'),
+            'category': event.get('category'),
+            'properties': event.get('properties'),
+            'attributes': event.get('attributes'),
+            'cv_properties': event.get('cv_properties'),
+        },
+        {'package', 'parcel', 'delivery'}
+    )
+    if package_hint:
+        return 'package'
+
+    if kind == 'motion':
+        return 'motion'
+    if kind == 'on_demand':
+        return 'on_demand'
+    return kind
+
+
+def _normalize_ring_event_entry(
+    cam_id: str,
+    cam_name: str,
+    device_id: str,
+    event: Dict[str, Any],
+    source: str = "ring_api",
+) -> Dict[str, Any]:
+    kind = str(event.get('kind') or 'unknown').strip() or 'unknown'
+    return {
+        'id': str(event.get('id') or '').strip(),
+        'cam_id': str(cam_id or '').strip(),
+        'camera_name': str(cam_name or cam_id or 'Ring Kamera').strip(),
+        'device_id': str(device_id or '').strip(),
+        'kind': kind,
+        'trigger': str(event.get('trigger') or _derive_ring_trigger(event) or kind).strip() or kind,
+        'created_at': event.get('created_at'),
+        'created_at_local': event.get('created_at_local'),
+        'ding_ts': event.get('ding_ts'),
+        'answered': event.get('answered'),
+        'state': event.get('state'),
+        'source': str(source or event.get('source') or 'ring_api').strip() or 'ring_api',
+        'subtype': event.get('subtype'),
+        'event_type': event.get('event_type'),
+        'event_subtype': event.get('event_subtype'),
+        'detection_type': event.get('detection_type'),
+        'object_type': event.get('object_type'),
+        'cv_detection_type': event.get('cv_detection_type'),
+        'label': event.get('label'),
+        'category': event.get('category'),
+        'properties': event.get('properties') if isinstance(event.get('properties'), dict) else None,
+        'attributes': event.get('attributes') if isinstance(event.get('attributes'), dict) else None,
+        'cv_properties': event.get('cv_properties') if isinstance(event.get('cv_properties'), dict) else None,
+    }
+
+
+def _build_ring_issue_hints(error_text: Any) -> List[Dict[str, str]]:
+    message = str(error_text or "").strip()
+    if not message:
+        return []
+
+    normalized = message.lower()
+    hints: List[Dict[str, str]] = []
+
+    if "406" in normalized and "session" in normalized:
+        hints.extend([
+            {
+                "level": "warning",
+                "title": "Ring-Session wird abgelehnt",
+                "message": "Ring verweigert aktuell die Session-Erstellung. Meist hilft eine frische Anmeldung oder eine Bestätigung im Ring-Konto.",
+            },
+            {
+                "level": "info",
+                "title": "Neu authentifizieren",
+                "message": "Auf der Kameraseite Ring Benutzer, Passwort und bei Bedarf den 2FA-Code eintragen und danach 'Ring verbinden' erneut ausführen.",
+            },
+            {
+                "level": "info",
+                "title": "Ring-Konto prüfen",
+                "message": "Falls Ring eine Gerätefreigabe, Sicherheitsabfrage oder Konto-Bestätigung verlangt, diese zuerst im Ring-Login oder Help-Center abschließen.",
+            },
+        ])
+    elif "2fa" in normalized or "otp" in normalized or "verification" in normalized:
+        hints.append({
+            "level": "warning",
+            "title": "2FA / Verifizierung erforderlich",
+            "message": "Bitte den aktuellen Ring-Verifizierungscode eingeben und die Anmeldung erneut starten.",
+        })
+    elif "401" in normalized or "unauthorized" in normalized or "auth" in normalized:
+        hints.append({
+            "level": "warning",
+            "title": "Ring-Authentifizierung prüfen",
+            "message": "Die gespeicherte Ring-Anmeldung scheint ungültig zu sein. Bitte Ring neu verbinden.",
+        })
+    elif "timeout" in normalized:
+        hints.append({
+            "level": "warning",
+            "title": "Ring antwortet zu langsam",
+            "message": "Die History-Anfrage lief in ein Timeout. Später erneut versuchen oder die Anmeldung erneuern.",
+        })
+
+    return hints
+
+
+def _extract_ring_error_code(error_text: Any) -> str:
+    message = str(error_text or "").lower()
+    if "406" in message:
+        return "406"
+    if "401" in message:
+        return "401"
+    if "timeout" in message:
+        return "timeout"
+    if "2fa" in message or "otp" in message or "verification" in message:
+        return "2fa"
+    return ""
+
+
+def _record_ring_health_snapshot(
+    manager: Any,
+    *,
+    success: bool,
+    error_text: str = "",
+    reauth_recommended: bool = False,
+) -> Dict[str, Any]:
+    now = time.time()
+    previous = manager._get_ring_event_health() or {}
+    snapshot = {
+        'last_pull_attempt_at': now,
+        'last_successful_pull_at': previous.get('last_successful_pull_at'),
+        'last_error_at': previous.get('last_error_at'),
+        'last_error_message': previous.get('last_error_message') or '',
+        'last_error_code': previous.get('last_error_code') or '',
+        'estimated_reauth_by': previous.get('estimated_reauth_by'),
+        'reauth_recommended': bool(previous.get('reauth_recommended')),
+    }
+    if success:
+        snapshot.update({
+            'last_successful_pull_at': now,
+            'last_error_at': None,
+            'last_error_message': '',
+            'last_error_code': '',
+            'estimated_reauth_by': now + (30 * 24 * 60 * 60),
+            'reauth_recommended': False,
+        })
+    else:
+        snapshot.update({
+            'last_error_at': now,
+            'last_error_message': str(error_text or '').strip(),
+            'last_error_code': _extract_ring_error_code(error_text),
+            'reauth_recommended': bool(reauth_recommended),
+        })
+    return manager._record_ring_event_health(snapshot)
+
 
 def register_ring_routes(
     manager: Any,
@@ -33,6 +228,10 @@ def register_ring_routes(
                 cam_id for cam_id, until in manager._ring_live_until.items()
                 if until and time.time() < float(until)
             ]
+            status['help_links'] = {
+                'login_url': RING_LOGIN_URL,
+                'help_url': RING_HELP_URL,
+            }
             return jsonify(status)
         except Exception as e:
             logger.error("Fehler bei GET /api/ring/status: %s", e, exc_info=True)
@@ -61,13 +260,10 @@ def register_ring_routes(
             otp = ''.join(ch for ch in otp_raw if ch.isdigit()) or None
             user_agent = (data.get('user_agent') or '').strip() or None
 
-            if not username or not password:
-                return jsonify({'success': False, 'error': 'username und password erforderlich'}), 400
-
             from modules.integrations.ring_module import authenticate_ring
 
             result = authenticate_ring(username, password, otp=otp, user_agent=user_agent)
-            status = 200 if result.get('success') else 401
+            status = 200 if result.get('success') else (400 if 'Keine gespeicherten Ring-Zugangsdaten' in str(result.get('error') or '') else 401)
             return jsonify(result), status
         except Exception as e:
             logger.error("Fehler bei POST /api/ring/auth: %s", e, exc_info=True)
@@ -97,6 +293,75 @@ def register_ring_routes(
         except Exception as e:
             logger.error("Fehler bei GET /api/ring/events: %s", e, exc_info=True)
             return jsonify({'success': False, 'error': str(e), 'events': []}), 500
+
+    @app.route('/api/ring/diagnostics', methods=['GET'])
+    def ring_diagnostics():
+        try:
+            limit = max(1, min(int(request.args.get('limit', 10)), 25))
+            from modules.integrations.ring_module import get_ring_history_diagnostics
+
+            diagnostics = []
+            for cam in get_ring_camera_configs(manager):
+                result = get_ring_history_diagnostics(cam['device_id'], limit=limit)
+                checks = result.get('checks') if isinstance(result, dict) else {}
+                if isinstance(checks, dict):
+                    for check in checks.values():
+                        if isinstance(check, dict):
+                            check['hints'] = _build_ring_issue_hints(check.get('error'))
+                diagnostics.append({
+                    'cam_id': cam['cam_id'],
+                    'camera_name': cam['name'],
+                    'device_id': cam['device_id'],
+                    **result,
+                })
+
+            success = any(item.get('success') for item in diagnostics) if diagnostics else True
+            aggregated_hints: List[Dict[str, str]] = []
+            seen_hint_keys = set()
+            first_error = ''
+            reauth_recommended = False
+            for item in diagnostics:
+                checks = item.get('checks') if isinstance(item, dict) else {}
+                if not isinstance(checks, dict):
+                    continue
+                for check in checks.values():
+                    if not isinstance(check, dict):
+                        continue
+                    if not first_error and check.get('error'):
+                        first_error = str(check.get('error') or '').strip()
+                    for hint in check.get('hints') or []:
+                        if not isinstance(hint, dict):
+                            continue
+                        key = (hint.get('title'), hint.get('message'))
+                        if key in seen_hint_keys:
+                            continue
+                        seen_hint_keys.add(key)
+                        aggregated_hints.append(hint)
+                        if str(hint.get('title') or '').lower().startswith('ring-session') or 'auth' in str(hint.get('title') or '').lower():
+                            reauth_recommended = True
+            health = _record_ring_health_snapshot(
+                manager,
+                success=success,
+                error_text=first_error,
+                reauth_recommended=reauth_recommended,
+            )
+            return jsonify({
+                'success': success,
+                'diagnostics': diagnostics,
+                'storage': manager._get_ring_event_storage_status(),
+                'health': health,
+                'help_links': {
+                    'login_url': RING_LOGIN_URL,
+                    'help_url': RING_HELP_URL,
+                },
+                'guidance': {
+                    'reauth_recommended': bool(aggregated_hints),
+                    'hints': aggregated_hints,
+                },
+            })
+        except Exception as e:
+            logger.error("Fehler bei GET /api/ring/diagnostics: %s", e, exc_info=True)
+            return jsonify({'success': False, 'error': str(e), 'diagnostics': []}), 500
 
     @app.route('/api/ring/cameras/import', methods=['POST'])
     def ring_import_camera():
@@ -276,104 +541,72 @@ def set_ring_doorbell_state(manager: Any, cam_id: str, cam_name: str, event_id: 
 
 
 def record_ring_event(manager: Any, cam_id: str, cam_name: str, device_id: str, event: Dict[str, Any]) -> None:
-    event_id = str(event.get('id') or '').strip()
+    entry = _normalize_ring_event_entry(cam_id, cam_name, device_id, event, source=event.get('source') or 'ring_api')
+    event_id = str(entry.get('id') or '').strip()
     if not event_id:
         return
-
-    entry = {
-        'id': event_id,
-        'cam_id': str(cam_id or '').strip(),
-        'camera_name': str(cam_name or cam_id or 'Ring Kamera').strip(),
-        'device_id': str(device_id or '').strip(),
-        'kind': str(event.get('kind') or 'unknown').strip() or 'unknown',
-        'trigger': str(event.get('kind') or 'unknown').strip() or 'unknown',
-        'created_at': event.get('created_at'),
-        'created_at_local': event.get('created_at_local'),
-        'ding_ts': event.get('ding_ts'),
-        'answered': event.get('answered'),
-        'state': event.get('state'),
-        'source': 'ring_api',
-    }
-
-    with manager._ring_event_history_lock:
-        if any(str(item.get('id') or '') == event_id for item in manager._ring_event_history):
-            return
-        manager._ring_event_history.appendleft(entry)
+    manager._store_ring_event(entry)
 
 
 def list_ring_events(manager: Any, limit: int = 25, kinds: str = '') -> Dict[str, Any]:
     ring_cams = manager._get_ring_camera_configs()
-    if not ring_cams:
-        return {'success': True, 'events': []}
 
     requested_limit = max(1, min(int(limit), 100))
-    per_camera_limit = max(1, min(requested_limit, 50))
+    per_camera_limit = max(5, min(requested_limit, 50))
     kind_filter = {part.strip().lower() for part in str(kinds or '').split(',') if part.strip()}
-    collected = []
+    api_success = False
+    first_error = ''
 
-    try:
-        from modules.integrations.ring_module import get_ring_history
+    if ring_cams:
+        try:
+            from modules.integrations.ring_module import get_ring_history
 
-        for cam in ring_cams:
-            result = get_ring_history(cam['device_id'], limit=per_camera_limit)
-            if not result.get('success'):
-                continue
+            for cam in ring_cams:
+                for history_kind in (None, 'ding', 'motion', 'on_demand'):
+                    result = get_ring_history(cam['device_id'], limit=per_camera_limit, kind=history_kind)
+                    if not result.get('success'):
+                        if not first_error:
+                            first_error = str(result.get('error') or '').strip()
+                        continue
+                    api_success = True
+                    for event in result.get('events') or []:
+                        normalized = _normalize_ring_event_entry(
+                            cam['cam_id'],
+                            cam['name'],
+                            cam['device_id'],
+                            event,
+                            source='ring_api',
+                        )
+                        if not normalized['id']:
+                            continue
+                        if kind_filter and normalized['kind'].lower() not in kind_filter and normalized['trigger'].lower() not in kind_filter:
+                            continue
+                        manager._store_ring_event(normalized)
+        except Exception as e:
+            logger.warning("Ring-Ereignisse konnten nicht von der API geladen werden: %s", e)
+            if not first_error:
+                first_error = str(e)
 
-            for event in result.get('events') or []:
-                normalized = {
-                    'id': str(event.get('id') or '').strip(),
-                    'cam_id': cam['cam_id'],
-                    'camera_name': cam['name'],
-                    'device_id': cam['device_id'],
-                    'kind': str(event.get('kind') or 'unknown').strip() or 'unknown',
-                    'trigger': str(event.get('kind') or 'unknown').strip() or 'unknown',
-                    'created_at': event.get('created_at'),
-                    'created_at_local': event.get('created_at_local'),
-                    'ding_ts': event.get('ding_ts'),
-                    'answered': event.get('answered'),
-                    'state': event.get('state'),
-                    'source': 'ring_api',
-                }
-                if not normalized['id']:
-                    continue
-                if kind_filter and normalized['kind'].lower() not in kind_filter:
-                    continue
-                collected.append(normalized)
-                manager._record_ring_event(cam['cam_id'], cam['name'], cam['device_id'], event)
-    except Exception as e:
-        logger.warning("Ring-Ereignisse konnten nicht von der API geladen werden: %s", e)
+    merged = manager._read_ring_events(limit=requested_limit, kinds=sorted(kind_filter))
+    if kind_filter:
+        merged = [
+            event for event in merged
+            if str(event.get('kind') or '').lower() in kind_filter
+            or str(event.get('trigger') or '').lower() in kind_filter
+        ][:requested_limit]
+    health = _record_ring_health_snapshot(
+        manager,
+        success=bool(api_success or merged),
+        error_text=first_error,
+        reauth_recommended=bool(_build_ring_issue_hints(first_error)),
+    )
 
-    seen_ids = set()
-    merged = []
-    for event in sorted(
-        collected,
-        key=lambda item: (
-            float(item.get('ding_ts') or 0),
-            str(item.get('created_at') or ''),
-            str(item.get('id') or ''),
-        ),
-        reverse=True,
-    ):
-        event_id = str(event.get('id') or '')
-        if event_id in seen_ids:
-            continue
-        seen_ids.add(event_id)
-        merged.append(event)
-
-    if len(merged) < requested_limit:
-        with manager._ring_event_history_lock:
-            for event in list(manager._ring_event_history):
-                event_id = str(event.get('id') or '')
-                if not event_id or event_id in seen_ids:
-                    continue
-                if kind_filter and str(event.get('kind') or '').lower() not in kind_filter:
-                    continue
-                merged.append(dict(event))
-                seen_ids.add(event_id)
-                if len(merged) >= requested_limit:
-                    break
-
-    return {'success': True, 'events': merged[:requested_limit]}
+    return {
+        'success': True,
+        'events': merged[:requested_limit],
+        'storage': manager._get_ring_event_storage_status(),
+        'health': health,
+    }
 
 
 def ring_event_loop(manager: Any) -> None:
@@ -399,31 +632,36 @@ def ring_event_loop(manager: Any) -> None:
                     manager._ring_live_until.pop(cam_id, None)
 
                 try:
-                    from modules.integrations.ring_module import get_ring_latest_ding
+                    from modules.integrations.ring_module import get_ring_history
 
-                    result = get_ring_latest_ding(device_id)
+                    result = get_ring_history(device_id, limit=6)
                 except Exception:
                     continue
 
                 if not result.get('success'):
                     continue
-                event = result.get('event')
-                if not event:
+                events = result.get('events') or []
+                if not events:
                     continue
 
-                event_id = str(event.get('id') or '')
-                if not event_id:
-                    continue
+                newest_ding = None
+                for event in events:
+                    normalized = _normalize_ring_event_entry(cam_id, cam_name, device_id, event, source='ring_api')
+                    event_id = str(normalized.get('id') or '')
+                    if not event_id:
+                        continue
+                    manager._store_ring_event(normalized)
+                    if str(normalized.get('kind') or '').lower() == 'ding' and newest_ding is None:
+                        newest_ding = normalized
 
-                if manager._ring_last_event_ids.get(cam_id) != event_id:
-                    manager._ring_last_event_ids[cam_id] = event_id
-                    manager._record_ring_event(cam_id, cam_name, device_id, event)
-                    ding_ts = event.get('ding_ts')
+                if newest_ding and manager._ring_last_event_ids.get(cam_id) != newest_ding['id']:
+                    manager._ring_last_event_ids[cam_id] = newest_ding['id']
+                    ding_ts = newest_ding.get('ding_ts')
                     manager._ring_doorbell_until[cam_id] = time.time() + manager._ring_doorbell_pulse_seconds
                     if manager._load_gateway_settings().get('ring_live', {}).get('on_ding_enabled', True):
                         ding_window = max(5, min(int(manager._load_gateway_settings().get('ring_live', {}).get('on_ding_seconds', 30)), 300))
                         manager._ring_live_until[cam_id] = time.time() + ding_window
-                    manager._set_ring_doorbell_state(cam_id, cam_name, event_id, ding_ts, True)
+                    manager._set_ring_doorbell_state(cam_id, cam_name, newest_ding['id'], ding_ts, True)
 
             time.sleep(2.0)
         except Exception as e:

@@ -1,4 +1,4 @@
-# TODO (ab v4.6.2)
+# TODO (ab v4.7.0)
 
 ## P1
 - Plugin-Manager: echte Installationsflüsse statt Platzhalter-Alert in `web/static/js/plugin-manager-v5.js`.

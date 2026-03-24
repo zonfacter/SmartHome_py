@@ -1,6 +1,6 @@
 # Dokumentation (aktiv)
 
-Diese Dokumentation ist die **verbindliche aktive Doku ab v4.6.2**.
+Diese Dokumentation ist die **verbindliche aktive Doku ab v4.8.0**.
 
 ## Einstieg
 

@@ -1,6 +1,6 @@
 # Legacy-Dokumentation
 
-Ab `v4.6.2` ist die aktive Doku reduziert und neu strukturiert.
+Ab `v4.8.0` ist die aktive Doku reduziert und neu strukturiert.
 Alle früheren Texte liegen im Archivordner:
 
 - `docs/legacy/`

@@ -72,8 +72,46 @@ class SmartHomeApp {
         this.customPages = {};
         this.uiSettings = {
             default_page: 'dashboard',
-            kiosk_default: false
+            kiosk_default: false,
+            theme_config: {
+                preset: 'slate',
+                accent_color: '#3b82f6',
+                surface_style: 'soft',
+                chrome_tint: true
+            },
+            widget_style: {
+                hover_effects: true,
+                rounded: 'xl',
+                shadow: 'soft',
+                compact: false
+            },
+            ring_event_storage: {
+                backend: 'sqlite',
+                max_entries: 2000,
+                sqlite: {
+                    mode: 'internal',
+                    path: 'config/ring_events.db'
+                },
+                mysql: {
+                    host: '127.0.0.1',
+                    port: 3306,
+                    database: 'smarthome',
+                    user: '',
+                    password: '',
+                    table: 'ring_events',
+                    ssl: false
+                },
+                influxdb: {
+                    url: 'http://127.0.0.1:8086',
+                    org: 'smarthome',
+                    bucket: 'ring_events',
+                    token: '',
+                    measurement: 'ring_events'
+                }
+            }
         };
+        this.ringEventStorageStatus = null;
+        this.ringEventStorageBackends = [];
 
         // Initialisierung
         this.init();
@@ -228,6 +266,17 @@ class SmartHomeApp {
             actions.push({ label: 'Zu Setup', onClick: () => this.showPage(fallbackPage) });
         }
         this.showToast(message, { level: 'error', duration: 10000, actions });
+    }
+
+    async parseJsonResponse(response, fallbackMessage = 'Unerwartete Server-Antwort.') {
+        const rawText = await response.text();
+        try {
+            return rawText ? JSON.parse(rawText) : {};
+        } catch (error) {
+            const compact = String(rawText || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+            const statusInfo = response?.status ? `HTTP ${response.status}` : 'Antwort';
+            throw new Error(`${fallbackMessage} ${statusInfo}${compact ? `: ${compact}` : ''}`);
+        }
     }
 
     setupApiAuthHeaderInjection() {
@@ -422,11 +471,408 @@ class SmartHomeApp {
             const data = await response.json();
             this.uiSettings = {
                 default_page: data.default_page || 'dashboard',
-                kiosk_default: !!data.kiosk_default
+                kiosk_default: !!data.kiosk_default,
+                theme_config: this.normalizeThemeConfigSettings(data.theme_config),
+                widget_style: this.normalizeWidgetStyleSettings(data.widget_style),
+                ring_event_storage: this.normalizeRingEventStorageSettings(data.ring_event_storage)
             };
+            this.ringEventStorageStatus = this.normalizeRingEventStorageStatus(data.ring_event_storage_status);
+            this.ringEventStorageBackends = Array.isArray(data.ring_event_storage_backends) ? data.ring_event_storage_backends : [];
+            this.applyThemeConfig();
         } catch (error) {
             console.warn('⚠️ UI-Settings konnten nicht geladen werden:', error.message);
         }
+    }
+
+    getDefaultThemeConfigSettings() {
+        return {
+            preset: 'slate',
+            accent_color: '#3b82f6',
+            surface_style: 'soft',
+            chrome_tint: true
+        };
+    }
+
+    normalizeThemeConfigSettings(config) {
+        const defaults = this.getDefaultThemeConfigSettings();
+        const source = config && typeof config === 'object' ? config : {};
+        const preset = ['slate', 'ocean', 'forest', 'ember', 'mono', 'aurora', 'sand', 'graphite', 'berry'].includes(source.preset) ? source.preset : defaults.preset;
+        const surfaceStyle = ['soft', 'glass', 'contrast'].includes(source.surface_style) ? source.surface_style : defaults.surface_style;
+        const accentColor = /^#[0-9a-fA-F]{6}$/.test(String(source.accent_color || '').trim())
+            ? String(source.accent_color).trim().toLowerCase()
+            : defaults.accent_color;
+        return {
+            preset,
+            accent_color: accentColor,
+            surface_style: surfaceStyle,
+            chrome_tint: source.chrome_tint !== undefined ? !!source.chrome_tint : defaults.chrome_tint
+        };
+    }
+
+    getThemeConfigSettings() {
+        return this.normalizeThemeConfigSettings(this.uiSettings?.theme_config);
+    }
+
+    getPendingThemeConfigSettings() {
+        return this.normalizeThemeConfigSettings({
+            preset: document.getElementById('theme-preset')?.value,
+            accent_color: document.getElementById('theme-accent-color')?.value,
+            surface_style: document.getElementById('theme-surface-style')?.value,
+            chrome_tint: !!document.getElementById('theme-chrome-tint')?.checked
+        });
+    }
+
+    hexToRgb(hexColor) {
+        const normalized = String(hexColor || '').trim().replace('#', '');
+        if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return null;
+        return {
+            r: parseInt(normalized.slice(0, 2), 16),
+            g: parseInt(normalized.slice(2, 4), 16),
+            b: parseInt(normalized.slice(4, 6), 16)
+        };
+    }
+
+    rgbaFromHex(hexColor, alpha) {
+        const rgb = this.hexToRgb(hexColor);
+        if (!rgb) return `rgba(59, 130, 246, ${alpha})`;
+        return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+    }
+
+    getThemePresetPalette(preset, isDark) {
+        const palettes = {
+            slate: isDark
+                ? { appBg: '#09111f', panelBg: 'rgba(15, 23, 42, 0.84)', panelElevated: 'rgba(17, 24, 39, 0.92)', border: 'rgba(148, 163, 184, 0.16)', textPrimary: '#e5eefc', textSecondary: '#94a3b8' }
+                : { appBg: '#f3f6fb', panelBg: 'rgba(255, 255, 255, 0.92)', panelElevated: 'rgba(255, 255, 255, 0.97)', border: 'rgba(148, 163, 184, 0.22)', textPrimary: '#0f172a', textSecondary: '#64748b' },
+            ocean: isDark
+                ? { appBg: '#071521', panelBg: 'rgba(9, 28, 44, 0.84)', panelElevated: 'rgba(12, 36, 56, 0.92)', border: 'rgba(103, 232, 249, 0.16)', textPrimary: '#dff8ff', textSecondary: '#8ab8c8' }
+                : { appBg: '#eef8fb', panelBg: 'rgba(255, 255, 255, 0.9)', panelElevated: 'rgba(248, 253, 255, 0.97)', border: 'rgba(34, 211, 238, 0.2)', textPrimary: '#0f2940', textSecondary: '#527286' },
+            forest: isDark
+                ? { appBg: '#08150f', panelBg: 'rgba(13, 31, 22, 0.86)', panelElevated: 'rgba(17, 38, 28, 0.92)', border: 'rgba(74, 222, 128, 0.16)', textPrimary: '#e2fbe9', textSecondary: '#97b6a1' }
+                : { appBg: '#f2f9f3', panelBg: 'rgba(255, 255, 255, 0.92)', panelElevated: 'rgba(249, 255, 250, 0.97)', border: 'rgba(34, 197, 94, 0.18)', textPrimary: '#11271b', textSecondary: '#5d7965' },
+            ember: isDark
+                ? { appBg: '#1a0f0a', panelBg: 'rgba(37, 20, 14, 0.86)', panelElevated: 'rgba(47, 24, 16, 0.94)', border: 'rgba(251, 146, 60, 0.16)', textPrimary: '#fff1e8', textSecondary: '#d0a791' }
+                : { appBg: '#fff6ef', panelBg: 'rgba(255, 252, 248, 0.92)', panelElevated: 'rgba(255, 255, 255, 0.97)', border: 'rgba(249, 115, 22, 0.2)', textPrimary: '#3a1f12', textSecondary: '#8b5a43' },
+            mono: isDark
+                ? { appBg: '#0d0f13', panelBg: 'rgba(20, 24, 31, 0.88)', panelElevated: 'rgba(22, 27, 34, 0.94)', border: 'rgba(148, 163, 184, 0.14)', textPrimary: '#f3f4f6', textSecondary: '#a1a1aa' }
+                : { appBg: '#f5f5f5', panelBg: 'rgba(255, 255, 255, 0.94)', panelElevated: 'rgba(255, 255, 255, 0.98)', border: 'rgba(115, 115, 115, 0.16)', textPrimary: '#171717', textSecondary: '#525252' },
+            aurora: isDark
+                ? { appBg: '#07131a', panelBg: 'rgba(10, 24, 30, 0.86)', panelElevated: 'rgba(12, 31, 36, 0.92)', border: 'rgba(45, 212, 191, 0.18)', textPrimary: '#e2fffb', textSecondary: '#93cfc8' }
+                : { appBg: '#eefbf9', panelBg: 'rgba(255, 255, 255, 0.92)', panelElevated: 'rgba(247, 255, 253, 0.97)', border: 'rgba(20, 184, 166, 0.18)', textPrimary: '#10312f', textSecondary: '#517775' },
+            sand: isDark
+                ? { appBg: '#18120d', panelBg: 'rgba(35, 26, 19, 0.88)', panelElevated: 'rgba(44, 33, 24, 0.94)', border: 'rgba(245, 158, 11, 0.14)', textPrimary: '#fff5e7', textSecondary: '#d3b89a' }
+                : { appBg: '#fbf6ee', panelBg: 'rgba(255, 252, 246, 0.94)', panelElevated: 'rgba(255, 255, 252, 0.98)', border: 'rgba(180, 132, 74, 0.18)', textPrimary: '#3b2b1a', textSecondary: '#8a6a4b' },
+            graphite: isDark
+                ? { appBg: '#08090b', panelBg: 'rgba(18, 21, 26, 0.9)', panelElevated: 'rgba(24, 28, 34, 0.95)', border: 'rgba(148, 163, 184, 0.13)', textPrimary: '#f8fafc', textSecondary: '#94a3b8' }
+                : { appBg: '#eff2f5', panelBg: 'rgba(255, 255, 255, 0.95)', panelElevated: 'rgba(255, 255, 255, 0.99)', border: 'rgba(100, 116, 139, 0.18)', textPrimary: '#111827', textSecondary: '#475569' },
+            berry: isDark
+                ? { appBg: '#180b14', panelBg: 'rgba(39, 16, 31, 0.88)', panelElevated: 'rgba(49, 20, 39, 0.94)', border: 'rgba(244, 114, 182, 0.16)', textPrimary: '#ffe8f5', textSecondary: '#d4a1bf' }
+                : { appBg: '#fff1f7', panelBg: 'rgba(255, 252, 254, 0.94)', panelElevated: 'rgba(255, 255, 255, 0.98)', border: 'rgba(236, 72, 153, 0.18)', textPrimary: '#3e1730', textSecondary: '#8c5575' }
+        };
+        return palettes[preset] || palettes.slate;
+    }
+
+    getDefaultWidgetStyleSettings() {
+        return {
+            hover_effects: true,
+            rounded: 'xl',
+            shadow: 'soft',
+            compact: false
+        };
+    }
+
+    getDefaultRingEventStorageSettings() {
+        return {
+            backend: 'sqlite',
+            max_entries: 2000,
+            sqlite: {
+                mode: 'internal',
+                path: 'config/ring_events.db'
+            },
+            mysql: {
+                host: '127.0.0.1',
+                port: 3306,
+                database: 'smarthome',
+                user: '',
+                password: '',
+                table: 'ring_events',
+                ssl: false
+            },
+            influxdb: {
+                url: 'http://127.0.0.1:8086',
+                org: 'smarthome',
+                bucket: 'ring_events',
+                token: '',
+                measurement: 'ring_events'
+            }
+        };
+    }
+
+    normalizeRingEventStorageSettings(settings) {
+        const defaults = this.getDefaultRingEventStorageSettings();
+        const source = settings && typeof settings === 'object' ? settings : {};
+        const sqlite = source.sqlite && typeof source.sqlite === 'object' ? source.sqlite : {};
+        const mysql = source.mysql && typeof source.mysql === 'object' ? source.mysql : {};
+        const influxdb = source.influxdb && typeof source.influxdb === 'object' ? source.influxdb : {};
+        const backend = ['memory', 'sqlite', 'mysql', 'influxdb'].includes(source.backend) ? source.backend : defaults.backend;
+        const sqliteMode = ['internal', 'external'].includes(sqlite.mode) ? sqlite.mode : defaults.sqlite.mode;
+        const maxEntries = Math.max(100, Math.min(parseInt(source.max_entries, 10) || defaults.max_entries, 50000));
+        return {
+            backend,
+            max_entries: maxEntries,
+            sqlite: {
+                mode: sqliteMode,
+                path: String(sqlite.path || defaults.sqlite.path).trim() || defaults.sqlite.path
+            },
+            mysql: {
+                host: String(mysql.host || defaults.mysql.host).trim() || defaults.mysql.host,
+                port: Math.max(1, Math.min(parseInt(mysql.port, 10) || defaults.mysql.port, 65535)),
+                database: String(mysql.database || defaults.mysql.database).trim() || defaults.mysql.database,
+                user: String(mysql.user || defaults.mysql.user).trim(),
+                password: String(mysql.password || defaults.mysql.password),
+                table: String(mysql.table || defaults.mysql.table).trim() || defaults.mysql.table,
+                ssl: mysql.ssl !== undefined ? !!mysql.ssl : defaults.mysql.ssl
+            },
+            influxdb: {
+                url: String(influxdb.url || defaults.influxdb.url).trim() || defaults.influxdb.url,
+                org: String(influxdb.org || defaults.influxdb.org).trim() || defaults.influxdb.org,
+                bucket: String(influxdb.bucket || defaults.influxdb.bucket).trim() || defaults.influxdb.bucket,
+                token: String(influxdb.token || defaults.influxdb.token),
+                measurement: String(influxdb.measurement || defaults.influxdb.measurement).trim() || defaults.influxdb.measurement
+            }
+        };
+    }
+
+    getRingEventStorageSettings() {
+        return this.normalizeRingEventStorageSettings(this.uiSettings?.ring_event_storage);
+    }
+
+    getPendingRingEventStorageSettings() {
+        return this.normalizeRingEventStorageSettings({
+            backend: document.getElementById('ring-event-storage-backend')?.value,
+            max_entries: document.getElementById('ring-event-storage-max-entries')?.value,
+            sqlite: {
+                mode: document.getElementById('ring-event-sqlite-mode')?.value,
+                path: document.getElementById('ring-event-sqlite-path')?.value
+            },
+            mysql: {
+                host: document.getElementById('ring-event-mysql-host')?.value,
+                port: document.getElementById('ring-event-mysql-port')?.value,
+                database: document.getElementById('ring-event-mysql-database')?.value,
+                user: document.getElementById('ring-event-mysql-user')?.value,
+                password: document.getElementById('ring-event-mysql-password')?.value
+            },
+            influxdb: {
+                url: document.getElementById('ring-event-influx-url')?.value,
+                org: document.getElementById('ring-event-influx-org')?.value,
+                bucket: document.getElementById('ring-event-influx-bucket')?.value,
+                token: document.getElementById('ring-event-influx-token')?.value,
+                measurement: document.getElementById('ring-event-influx-measurement')?.value
+            }
+        });
+    }
+
+    normalizeRingEventStorageStatus(status) {
+        if (!status || typeof status !== 'object') return null;
+        return {
+            requested_backend: String(status.requested_backend || ''),
+            active_backend: String(status.active_backend || ''),
+            runtime_supported: !!status.runtime_supported,
+            persistent: !!status.persistent,
+            max_entries: parseInt(status.max_entries, 10) || 0,
+            location_label: String(status.location_label || ''),
+            note: String(status.note || ''),
+            sqlite: status.sqlite && typeof status.sqlite === 'object' ? status.sqlite : {}
+        };
+    }
+
+    normalizeWidgetStyleSettings(style) {
+        const defaults = this.getDefaultWidgetStyleSettings();
+        const source = style && typeof style === 'object' ? style : {};
+        const rounded = ['lg', 'xl', '2xl'].includes(source.rounded) ? source.rounded : defaults.rounded;
+        const shadow = ['soft', 'medium', 'strong'].includes(source.shadow) ? source.shadow : defaults.shadow;
+        return {
+            hover_effects: source.hover_effects !== undefined ? !!source.hover_effects : defaults.hover_effects,
+            rounded,
+            shadow,
+            compact: source.compact !== undefined ? !!source.compact : defaults.compact
+        };
+    }
+
+    getWidgetStyleSettings() {
+        return this.normalizeWidgetStyleSettings(this.uiSettings?.widget_style);
+    }
+
+    getPendingWidgetStyleSettings() {
+        return this.normalizeWidgetStyleSettings({
+            rounded: document.getElementById('widget-style-rounded')?.value,
+            shadow: document.getElementById('widget-style-shadow')?.value,
+            hover_effects: !!document.getElementById('widget-style-hover')?.checked,
+            compact: !!document.getElementById('widget-style-compact')?.checked
+        });
+    }
+
+    getWidgetCardClassNamesForStyle(style, extra = '') {
+        const normalizedStyle = this.normalizeWidgetStyleSettings(style);
+        const roundedMap = {
+            lg: 'rounded-lg',
+            xl: 'rounded-xl',
+            '2xl': 'rounded-2xl'
+        };
+        const shadowMap = {
+            soft: 'shadow-sm',
+            medium: 'shadow',
+            strong: 'shadow-lg'
+        };
+        const compactPadding = normalizedStyle.compact ? 'p-3' : 'p-4';
+        const hoverClasses = normalizedStyle.hover_effects ? 'transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg' : '';
+        return [
+            'widget',
+            'bg-white/95',
+            'dark:bg-gray-800/95',
+            'border',
+            'border-gray-200/80',
+            'dark:border-gray-700',
+            roundedMap[normalizedStyle.rounded],
+            shadowMap[normalizedStyle.shadow],
+            compactPadding,
+            hoverClasses,
+            extra
+        ].filter(Boolean).join(' ');
+    }
+
+    getWidgetCardClassNames(extra = '') {
+        return this.getWidgetCardClassNamesForStyle(this.getWidgetStyleSettings(), extra);
+    }
+
+    getWidgetGridClassNamesForStyle(style) {
+        const normalizedStyle = this.normalizeWidgetStyleSettings(style);
+        return `grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 ${normalizedStyle.compact ? 'gap-3' : 'gap-4'} mb-6`;
+    }
+
+    getWidgetGridClassNames() {
+        return this.getWidgetGridClassNamesForStyle(this.getWidgetStyleSettings());
+    }
+
+    renderWidgetHeader(widget, { icon, title, locked }) {
+        return `
+            <div class="widget-header flex justify-between items-center mb-3">
+                <div class="flex items-center gap-2 min-w-0">
+                    <div class="widget-accent-icon w-8 h-8 rounded-lg flex items-center justify-center">
+                        <i data-lucide="${this.escapeHtml(icon)}" class="w-4 h-4"></i>
+                    </div>
+                    <h3 class="text-sm font-semibold text-gray-900 dark:text-white truncate">${title}</h3>
+                    ${locked ? '<i data-lucide="lock" class="w-3.5 h-3.5 text-amber-500"></i>' : ''}
+                </div>
+                <button class="text-xs text-red-500 hover:text-red-700" onclick="app.deleteWidgetConfig('${widget.id}')">✕</button>
+            </div>
+        `;
+    }
+
+    getWidgetSwitchButtonClassNames(isActive) {
+        return [
+            'widget-toggle',
+            'relative',
+            'inline-flex',
+            'h-12',
+            'w-24',
+            'items-center',
+            'rounded-full',
+            'border',
+            'transition-all',
+            'duration-200',
+            'focus:outline-none',
+            'focus:ring-2',
+            'focus:ring-blue-400/60',
+            isActive
+                ? 'border-emerald-500 bg-emerald-500 shadow-md shadow-emerald-500/30'
+                : 'border-slate-300 bg-slate-200 dark:border-slate-600 dark:bg-slate-700'
+        ].join(' ');
+    }
+
+    getWidgetSwitchKnobClassNames(isActive) {
+        return [
+            'widget-toggle-knob',
+            'inline-block',
+            'h-10',
+            'w-10',
+            'transform',
+            'rounded-full',
+            'bg-white',
+            'shadow',
+            'transition-all',
+            'duration-200',
+            isActive ? 'translate-x-12' : 'translate-x-1'
+        ].join(' ');
+    }
+
+    getWidgetSwitchBadgeClassNames(isActive) {
+        return [
+            'widget-state-badge',
+            'inline-flex',
+            'items-center',
+            'rounded-full',
+            'px-2.5',
+            'py-1',
+            'text-[11px]',
+            'font-semibold',
+            'tracking-wide',
+            isActive
+                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300'
+        ].join(' ');
+    }
+
+    applyWidgetSwitchState(toggleBtn, isActive) {
+        if (!toggleBtn) return;
+        toggleBtn.className = this.getWidgetSwitchButtonClassNames(isActive);
+        toggleBtn.setAttribute('data-value', isActive ? 'true' : 'false');
+
+        const knob = toggleBtn.querySelector('.widget-toggle-knob');
+        if (knob) {
+            knob.className = this.getWidgetSwitchKnobClassNames(isActive);
+        }
+
+        const labelOn = toggleBtn.querySelector('.widget-toggle-label-on');
+        const labelOff = toggleBtn.querySelector('.widget-toggle-label-off');
+        if (labelOn) {
+            labelOn.classList.toggle('opacity-100', isActive);
+            labelOn.classList.toggle('opacity-0', !isActive);
+        }
+        if (labelOff) {
+            labelOff.classList.toggle('opacity-100', !isActive);
+            labelOff.classList.toggle('opacity-0', isActive);
+        }
+
+        const stateBadge = toggleBtn.closest('[data-widget-id]')?.querySelector('.widget-state-badge');
+        if (stateBadge) {
+            stateBadge.className = this.getWidgetSwitchBadgeClassNames(isActive);
+            stateBadge.textContent = isActive ? 'Aktiv' : 'Aus';
+        }
+    }
+
+    getAvailableWidgetIcons() {
+        return [
+            'lightbulb', 'power', 'toggle-left', 'thermometer', 'droplets',
+            'wind', 'zap', 'battery', 'gauge', 'activity',
+            'camera', 'shield', 'home', 'settings', 'box',
+            'bell', 'fan', 'sun', 'moon-star', 'flame',
+            'plug', 'monitor', 'speaker', 'lock', 'sparkles'
+        ];
+    }
+
+    syncWidgetIconQuickpickSelection(iconName) {
+        const currentIcon = String(iconName || 'box').trim() || 'box';
+        document.querySelectorAll('.widget-icon-pick-btn').forEach(btn => {
+            const isSelected = (btn.dataset.icon || '') === currentIcon;
+            btn.classList.toggle('border-blue-500', isSelected);
+            btn.classList.toggle('bg-blue-50', isSelected);
+            btn.classList.toggle('text-blue-700', isSelected);
+            btn.classList.toggle('dark:bg-blue-900/30', isSelected);
+            btn.classList.toggle('dark:text-blue-300', isSelected);
+            btn.classList.toggle('dark:border-blue-500/70', isSelected);
+            btn.classList.toggle('ring-2', isSelected);
+            btn.classList.toggle('ring-blue-300/60', isSelected);
+        });
     }
 
     renderCustomPageNavigation() {
@@ -656,12 +1102,19 @@ class SmartHomeApp {
 
     applyTheme(theme) {
         const html = document.documentElement;
+        const body = document.body;
 
         if (theme === 'light') {
             html.classList.remove('dark');
         } else {
             html.classList.add('dark');
         }
+
+        if (body) {
+            body.classList.toggle('dark', theme !== 'light');
+        }
+
+        this.applyThemeConfig();
 
         console.log(`🎨 Theme gewechselt zu: ${theme}`);
 
@@ -678,6 +1131,57 @@ class SmartHomeApp {
                 }
             }
         });
+    }
+
+    applyThemeConfig(config = null, { previewTarget = null } = {}) {
+        const themeConfig = this.normalizeThemeConfigSettings(config || this.uiSettings?.theme_config);
+        const target = previewTarget || document.documentElement;
+        const isDark = this.theme !== 'light';
+        const palette = this.getThemePresetPalette(themeConfig.preset, isDark);
+        const accentColor = themeConfig.accent_color;
+
+        let panelBg = palette.panelBg;
+        let panelElevated = palette.panelElevated;
+        let border = palette.border;
+        let shadow = isDark ? '0 18px 48px rgba(2, 6, 23, 0.38)' : '0 18px 42px rgba(15, 23, 42, 0.08)';
+        let shellShadow = isDark ? '0 22px 56px rgba(2, 6, 23, 0.45)' : '0 18px 50px rgba(15, 23, 42, 0.12)';
+
+        if (themeConfig.surface_style === 'glass') {
+            panelBg = isDark ? 'rgba(15, 23, 42, 0.7)' : 'rgba(255, 255, 255, 0.72)';
+            panelElevated = isDark ? 'rgba(17, 24, 39, 0.8)' : 'rgba(255, 255, 255, 0.8)';
+            shadow = isDark ? '0 24px 64px rgba(2, 6, 23, 0.5)' : '0 20px 48px rgba(15, 23, 42, 0.10)';
+        } else if (themeConfig.surface_style === 'contrast') {
+            panelBg = isDark ? 'rgba(15, 23, 42, 0.96)' : '#ffffff';
+            panelElevated = isDark ? 'rgba(15, 23, 42, 0.98)' : '#ffffff';
+            border = isDark ? 'rgba(226, 232, 240, 0.18)' : 'rgba(71, 85, 105, 0.18)';
+            shadow = isDark ? '0 20px 54px rgba(2, 6, 23, 0.52)' : '0 20px 44px rgba(15, 23, 42, 0.12)';
+            shellShadow = isDark ? '0 24px 60px rgba(2, 6, 23, 0.56)' : '0 20px 48px rgba(15, 23, 42, 0.14)';
+        }
+
+        const accentSoft = this.rgbaFromHex(accentColor, isDark ? 0.20 : 0.14);
+        const accentStrong = this.rgbaFromHex(accentColor, isDark ? 0.34 : 0.22);
+        const navActiveText = isDark ? '#f8fbff' : accentColor;
+        const styleTarget = target && target.style ? target.style : null;
+        if (!styleTarget) return;
+
+        styleTarget.setProperty('--theme-accent', accentColor);
+        styleTarget.setProperty('--theme-accent-soft', accentSoft);
+        styleTarget.setProperty('--theme-accent-strong', accentStrong);
+        styleTarget.setProperty('--theme-accent-contrast', isDark ? '#eff6ff' : '#eff6ff');
+        styleTarget.setProperty('--theme-app-bg', palette.appBg);
+        styleTarget.setProperty('--theme-panel-bg', panelBg);
+        styleTarget.setProperty('--theme-panel-elevated', panelElevated);
+        styleTarget.setProperty('--theme-border-strong', border);
+        styleTarget.setProperty('--theme-text-primary', palette.textPrimary);
+        styleTarget.setProperty('--theme-text-secondary', palette.textSecondary);
+        styleTarget.setProperty('--theme-shadow', shadow);
+        styleTarget.setProperty('--theme-shell-shadow', shellShadow);
+        styleTarget.setProperty('--theme-nav-active-bg', accentSoft);
+        styleTarget.setProperty('--theme-nav-active-text', navActiveText);
+
+        if (!previewTarget && document.body) {
+            document.body.classList.toggle('theme-tinted-chrome', !!themeConfig.chrome_tint);
+        }
     }
 
     // ========================================================================
@@ -1128,7 +1632,7 @@ class SmartHomeApp {
 
     createLightCard(light) {
         const div = document.createElement('div');
-        div.className = 'bg-white dark:bg-gray-800 rounded-lg shadow p-6 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors relative group';
+        div.className = 'theme-panel rounded-2xl p-6 transition-colors relative group';
         div.setAttribute('data-light-id', light.id);
 
         const state = this.widgets[`PLC.${light.symbol}`] || light.state;
@@ -1142,7 +1646,7 @@ class SmartHomeApp {
 
             <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center space-x-3">
-                    <i data-lucide="lightbulb" class="w-10 h-10 ${state ? 'text-yellow-500' : 'text-gray-400 dark:text-gray-500'}"></i>
+                    <i data-lucide="lightbulb" class="w-10 h-10 ${state ? 'widget-accent-text' : 'text-gray-400 dark:text-gray-500'}"></i>
                 </div>
                 <div class="w-12 h-6 ${stateClass} rounded-full relative cursor-pointer toggle-switch" data-symbol="${light.symbol}">
                     <div class="absolute w-4 h-4 bg-white rounded-full top-1 transition-all ${state ? 'right-1' : 'left-1'}"></div>
@@ -1217,17 +1721,17 @@ class SmartHomeApp {
             const temp = this.widgets[`PLC.${sensor.symbol}`] || sensor.temp;
 
             const card = document.createElement('div');
-            card.className = 'bg-white dark:bg-gray-800 rounded-lg shadow p-6';
+            card.className = 'theme-panel rounded-2xl p-6';
             card.innerHTML = `
                 <div class="flex items-center justify-between mb-3">
-                    <i data-lucide="thermometer" class="w-10 h-10 text-blue-500"></i>
+                    <i data-lucide="thermometer" class="widget-accent-text w-10 h-10"></i>
                     <div class="text-right">
                         <div class="text-xs text-gray-500 dark:text-gray-400">Luftfeuchtigkeit</div>
                         <div class="text-sm font-semibold text-gray-900 dark:text-white">${sensor.humidity}%</div>
                     </div>
                 </div>
                 <div class="text-lg font-semibold text-gray-900 dark:text-white mb-2">${sensor.name}</div>
-                <div class="text-4xl font-bold text-gray-900 dark:text-white">${temp}°C</div>
+                <div class="widget-accent-text text-4xl font-bold">${temp}°C</div>
             `;
             container.appendChild(card);
         });
@@ -1409,21 +1913,37 @@ class SmartHomeApp {
     _syncRingWidgetModeButton(camId) {
         const btn = document.querySelector(`.ring-widget-mode-btn[data-cam-id="${camId}"]`);
         const label = document.getElementById(`ring-mode-label-${camId}`);
+        const note = document.getElementById(`ring-live-note-${camId}`);
         const mode = this._getRingWidgetMode(camId);
         if (!btn || !label) return;
 
         if (!this._ringLiveEnabled) {
+            const hint = this._lastRingHealth?.last_error_message
+                ? `Live aktuell deaktiviert: ${this._lastRingHealth.last_error_message}`
+                : 'Live aktuell deaktiviert: Ring WebRTC ist derzeit nicht verfügbar.';
             btn.setAttribute('data-mode', 'snapshot');
             btn.disabled = true;
             btn.classList.remove('bg-green-600', 'hover:bg-green-500');
             btn.classList.remove('bg-orange-600', 'hover:bg-orange-500');
             btn.classList.add('bg-gray-500');
+            btn.setAttribute('title', hint);
+            btn.setAttribute('aria-label', btn.getAttribute('title') || 'Live nicht verfügbar');
             label.textContent = 'Snapshot';
+            if (note) {
+                note.textContent = hint;
+                note.classList.remove('hidden');
+            }
             return;
         }
 
         btn.disabled = false;
         btn.classList.remove('bg-gray-500');
+        btn.setAttribute('title', mode === 'live' ? 'Live aktiv' : 'Zu Live umschalten');
+        btn.setAttribute('aria-label', btn.getAttribute('title') || 'Ring Live');
+        if (note) {
+            note.textContent = '';
+            note.classList.add('hidden');
+        }
 
         if (mode === 'live') {
             btn.setAttribute('data-mode', 'live');
@@ -1609,6 +2129,7 @@ class SmartHomeApp {
                 loadingEl.innerHTML = '<p class="text-sm text-yellow-300 px-3 text-center">Ring nicht verbunden.</p>';
                 loadingEl.style.display = '';
             }
+            this._syncRingWidgetModeButton(camId);
             return;
         }
 
@@ -1634,18 +2155,34 @@ class SmartHomeApp {
         await this._stopRingWidgetLive(camId);
         videoEl.style.display = 'none';
         imageEl.style.display = '';
-        if (loadingEl) loadingEl.style.display = 'none';
+        if (loadingEl) {
+            loadingEl.innerHTML = '<div class="text-center"><i data-lucide="loader" class="w-8 h-8 mx-auto mb-2 animate-spin"></i><p class="text-sm">Ring Snapshot wird geladen...</p></div>';
+            loadingEl.style.display = '';
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
 
-        await this._loadRingSnapshot(camId, imgElementId, 9000, 1, 1, 8);
+        const snapshotOk = await this._loadRingSnapshot(camId, imgElementId, 9000, 1, 1, 8);
+        if (snapshotOk) {
+            if (loadingEl) loadingEl.style.display = 'none';
+        } else if (loadingEl) {
+            const lastError = String(this._lastRingHealth?.last_error_message || '').trim();
+            loadingEl.innerHTML = `
+                <div class="px-4 text-center">
+                    <p class="text-sm text-yellow-300 mb-1">Kein Ring-Snapshot verfügbar.</p>
+                    <p class="text-[11px] text-gray-200">${this.escapeHtml(lastError || 'Die Ring-API hat kein aktuelles Bild geliefert.')}</p>
+                </div>
+            `;
+            loadingEl.style.display = '';
+        }
         this._startRingSnapshotRefresh(camId, imgElementId, 15000);
     }
 
     async _loadRingSnapshot(camId, imgElementId, timeoutMs = 9000, retries = 1, delay = 1, timeoutSec = 8) {
         const key = `${camId}:${imgElementId}`;
-        if (this._ringSnapshotInFlight[key]) return;
+        if (this._ringSnapshotInFlight[key]) return false;
 
         const img = document.getElementById(imgElementId);
-        if (!img) return;
+        if (!img) return false;
 
         this._ringSnapshotInFlight[key] = true;
         const controller = new AbortController();
@@ -1656,10 +2193,10 @@ class SmartHomeApp {
                 signal: controller.signal,
                 cache: 'no-store'
             });
-            if (!resp.ok) return;
+            if (!resp.ok) return false;
 
             const blob = await resp.blob();
-            if (!blob || !blob.size) return;
+            if (!blob || !blob.size) return false;
 
             const newUrl = URL.createObjectURL(blob);
             img.src = newUrl;
@@ -1669,8 +2206,10 @@ class SmartHomeApp {
             }
             this._ringSnapshotObjectUrls[key] = newUrl;
             this._setRingSnapshotTimestamp(camId, imgElementId, Date.now());
+            return true;
         } catch (e) {
             // Snapshot-Ausfall ist tolerierbar; WebRTC oder nächster Zyklus übernimmt.
+            return false;
         } finally {
             clearTimeout(timeoutHandle);
             this._ringSnapshotInFlight[key] = false;
@@ -2393,10 +2932,11 @@ class SmartHomeApp {
         document.querySelectorAll('.grid-layout-btn').forEach(btn => {
             const btnCols = btn.getAttribute('data-grid-cols');
             if (btnCols === cols) {
-                btn.classList.add('bg-blue-500', 'text-white', 'border-blue-500');
-                btn.classList.remove('text-gray-700', 'dark:text-gray-300');
+                btn.classList.add('theme-accent-button');
+                btn.classList.remove('theme-outline-button');
             } else {
-                btn.classList.remove('bg-blue-500', 'text-white', 'border-blue-500');
+                btn.classList.remove('theme-accent-button');
+                btn.classList.add('theme-outline-button');
             }
         });
     }
@@ -2487,9 +3027,11 @@ class SmartHomeApp {
 
                 // Buttons aktualisieren
                 document.querySelectorAll('.wall-layout-btn').forEach(b => {
-                    b.classList.remove('bg-blue-500', 'text-white', 'border-blue-500');
+                    b.classList.remove('theme-accent-button');
+                    b.classList.add('theme-outline-button');
                 });
-                btn.classList.add('bg-blue-500', 'text-white', 'border-blue-500');
+                btn.classList.remove('theme-outline-button');
+                btn.classList.add('theme-accent-button');
             }, { scope: 'page:camera-wall', key: `camera-wall:layout:${layout}` });
         });
     }
@@ -4770,18 +5312,14 @@ class SmartHomeApp {
             const isActive = plc_id === active_plc_id;
 
             const card = document.createElement('div');
-            card.className = `p-4 rounded-lg border ${
-                isActive
-                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900'
-            }`;
+            card.className = `theme-panel p-4 rounded-xl ${isActive ? 'ring-2 ring-[var(--theme-accent)]/40' : ''}`;
 
             card.innerHTML = `
                 <div class="flex items-start justify-between">
                     <div class="flex-1">
                         <div class="flex items-center space-x-3 mb-2">
                             <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${plc.name}</h3>
-                            ${isActive ? '<span class="px-2 py-1 text-xs bg-blue-500 text-white rounded">Aktiv</span>' : ''}
+                            ${isActive ? '<span class="widget-accent-badge px-2 py-1 text-xs rounded font-semibold">Aktiv</span>' : ''}
                             ${plc.tpy_file ? '<i data-lucide="file-check" class="w-4 h-4 text-green-500"></i>' : ''}
                         </div>
                         <div class="text-sm space-y-1 text-gray-700 dark:text-gray-300">
@@ -4792,13 +5330,13 @@ class SmartHomeApp {
                         </div>
                     </div>
                     <div class="flex items-center space-x-2">
-                        ${!isActive ? `<button onclick="app.setActivePLC('${plc_id}')" class="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded" title="Als aktiv setzen">
+                        ${!isActive ? `<button onclick="app.setActivePLC('${plc_id}')" class="theme-outline-button p-2 rounded widget-accent-text" title="Als aktiv setzen">
                             <i data-lucide="check-circle" class="w-4 h-4"></i>
                         </button>` : ''}
-                        <button onclick="app.uploadTPYForPLC('${plc_id}')" class="p-2 text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 rounded" title="TPY hochladen">
+                        <button onclick="app.uploadTPYForPLC('${plc_id}')" class="theme-outline-button p-2 rounded text-green-600 dark:text-green-400" title="TPY hochladen">
                             <i data-lucide="upload" class="w-4 h-4"></i>
                         </button>
-                        <button onclick="app.deletePLC('${plc_id}')" class="p-2 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 rounded" title="Löschen">
+                        <button onclick="app.deletePLC('${plc_id}')" class="theme-outline-button p-2 rounded text-red-600 dark:text-red-400" title="Löschen">
                             <i data-lucide="trash-2" class="w-4 h-4"></i>
                         </button>
                     </div>
@@ -4952,6 +5490,9 @@ class SmartHomeApp {
         const browseBtn = document.getElementById('browse-symbols-btn');
         const addRoomBtn = document.getElementById('add-room-btn');
         const savePanelBtn = document.getElementById('save-panel-settings-btn');
+        const saveThemeConfigBtn = document.getElementById('save-theme-config-btn');
+        const saveWidgetStyleBtn = document.getElementById('save-widget-style-btn');
+        const saveRingEventStorageBtn = document.getElementById('save-ring-event-storage-btn');
 
         if (addBtn) {
             this._bindScopedListener(addBtn, 'click', () => this.openWidgetEditor(), { scope, key: 'widgets:add-open-editor' });
@@ -4985,6 +5526,64 @@ class SmartHomeApp {
         if (savePanelBtn) {
             this._bindScopedListener(savePanelBtn, 'click', () => this.savePanelSettings(), { scope, key: 'widgets:save-panel-settings' });
         }
+        if (saveThemeConfigBtn) {
+            this._bindScopedListener(saveThemeConfigBtn, 'click', () => this.saveThemeConfigSettings(), { scope, key: 'widgets:save-theme-config' });
+        }
+        if (saveWidgetStyleBtn) {
+            this._bindScopedListener(saveWidgetStyleBtn, 'click', () => this.saveWidgetStyleSettings(), { scope, key: 'widgets:save-widget-style' });
+        }
+        if (saveRingEventStorageBtn) {
+            this._bindScopedListener(saveRingEventStorageBtn, 'click', () => this.saveRingEventStorageSettings(), { scope, key: 'widgets:save-ring-event-storage' });
+        }
+
+        [
+            document.getElementById('theme-preset'),
+            document.getElementById('theme-accent-color'),
+            document.getElementById('theme-surface-style'),
+            document.getElementById('theme-chrome-tint')
+        ].filter(Boolean).forEach((control, index) => {
+            this._bindScopedListener(control, 'input', () => {
+                this.refreshThemeConfigUI({ syncForm: false, previewConfig: this.getPendingThemeConfigSettings() });
+            }, { scope, key: `widgets:theme-preview-input:${index}` });
+            this._bindScopedListener(control, 'change', () => {
+                this.refreshThemeConfigUI({ syncForm: false, previewConfig: this.getPendingThemeConfigSettings() });
+            }, { scope, key: `widgets:theme-preview-change:${index}` });
+        });
+
+        [
+            document.getElementById('widget-style-rounded'),
+            document.getElementById('widget-style-shadow'),
+            document.getElementById('widget-style-hover'),
+            document.getElementById('widget-style-compact')
+        ].filter(Boolean).forEach((control, index) => {
+            this._bindScopedListener(control, 'change', () => {
+                this.refreshWidgetStyleSettingsUI({ syncForm: false, previewStyle: this.getPendingWidgetStyleSettings() });
+            }, { scope, key: `widgets:widget-style-preview:${index}` });
+        });
+
+        [
+            document.getElementById('ring-event-storage-backend'),
+            document.getElementById('ring-event-storage-max-entries'),
+            document.getElementById('ring-event-sqlite-mode'),
+            document.getElementById('ring-event-sqlite-path'),
+            document.getElementById('ring-event-mysql-host'),
+            document.getElementById('ring-event-mysql-port'),
+            document.getElementById('ring-event-mysql-database'),
+            document.getElementById('ring-event-mysql-user'),
+            document.getElementById('ring-event-mysql-password'),
+            document.getElementById('ring-event-influx-url'),
+            document.getElementById('ring-event-influx-org'),
+            document.getElementById('ring-event-influx-bucket'),
+            document.getElementById('ring-event-influx-measurement'),
+            document.getElementById('ring-event-influx-token')
+        ].filter(Boolean).forEach((control, index) => {
+            this._bindScopedListener(control, 'input', () => {
+                this.refreshRingEventStorageUI({ syncForm: false, previewConfig: this.getPendingRingEventStorageSettings() });
+            }, { scope, key: `widgets:ring-event-storage-input:${index}` });
+            this._bindScopedListener(control, 'change', () => {
+                this.refreshRingEventStorageUI({ syncForm: false, previewConfig: this.getPendingRingEventStorageSettings() });
+            }, { scope, key: `widgets:ring-event-storage-change:${index}` });
+        });
 
         const iconInput = document.getElementById('widget-icon');
         if (iconInput) {
@@ -5016,6 +5615,9 @@ class SmartHomeApp {
         }
 
         this.refreshPanelSettingsUI();
+        this.refreshThemeConfigUI();
+        this.refreshWidgetStyleSettingsUI();
+        this.refreshRingEventStorageUI();
         this.renderWidgetIconQuickpick();
     }
 
@@ -5060,6 +5662,210 @@ class SmartHomeApp {
         }
     }
 
+    refreshThemeConfigUI({ syncForm = true, previewConfig = null } = {}) {
+        const themeConfig = this.getThemeConfigSettings();
+        const preset = document.getElementById('theme-preset');
+        const accentColor = document.getElementById('theme-accent-color');
+        const surfaceStyle = document.getElementById('theme-surface-style');
+        const chromeTint = document.getElementById('theme-chrome-tint');
+
+        if (syncForm) {
+            if (preset) preset.value = themeConfig.preset;
+            if (accentColor) accentColor.value = themeConfig.accent_color;
+            if (surfaceStyle) surfaceStyle.value = themeConfig.surface_style;
+            if (chromeTint) chromeTint.checked = !!themeConfig.chrome_tint;
+        }
+
+        const preview = document.getElementById('theme-config-preview');
+        if (preview) {
+            const activeConfig = this.normalizeThemeConfigSettings(previewConfig || themeConfig);
+            preview.innerHTML = `
+                <div id="theme-config-preview-shell" class="theme-preview-shell space-y-4">
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+                        <div class="theme-preview-sidebar">
+                            <div class="flex items-center gap-3 mb-4">
+                                <div class="theme-preview-accent w-10 h-10 rounded-xl flex items-center justify-center">
+                                    <i data-lucide="home" class="w-5 h-5"></i>
+                                </div>
+                                <div>
+                                    <div class="text-sm font-semibold">SmartHome</div>
+                                    <div class="text-xs opacity-70">Navigation</div>
+                                </div>
+                            </div>
+                            <div class="space-y-2 text-sm">
+                                <div class="theme-preview-accent rounded-xl px-3 py-2 font-medium">Dashboard</div>
+                                <div class="rounded-xl px-3 py-2 opacity-80">Beleuchtung</div>
+                                <div class="rounded-xl px-3 py-2 opacity-80">Klima</div>
+                            </div>
+                        </div>
+                        <div class="space-y-4 lg:col-span-2">
+                            <div class="theme-preview-topbar flex items-center justify-between">
+                                <div>
+                                    <div class="text-sm font-semibold">Thema Vorschau</div>
+                                    <div class="text-xs opacity-70">Preset, Akzent und Flaechenstil</div>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <span class="theme-preview-dot w-3 h-3 rounded-full"></span>
+                                    <span class="text-xs opacity-70">${this.escapeHtml(activeConfig.preset)}</span>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="theme-preview-card">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <div>
+                                            <div class="text-sm font-semibold">Widget Karte</div>
+                                            <div class="text-xs opacity-70 mt-1">Standard fuer Seiten-Widgets</div>
+                                        </div>
+                                        <span class="theme-preview-accent rounded-full px-3 py-1 text-[11px] font-semibold">Aktiv</span>
+                                    </div>
+                                </div>
+                                <div class="theme-preview-card">
+                                    <div class="text-sm font-semibold">Shell</div>
+                                    <div class="text-xs opacity-70 mt-1">Sidebar, Header und Panels folgen diesem Stil.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            const shell = document.getElementById('theme-config-preview-shell');
+            if (shell) {
+                this.applyThemeConfig(activeConfig, { previewTarget: shell });
+                shell.classList.toggle('theme-tinted-chrome', !!activeConfig.chrome_tint);
+            }
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+    }
+
+    refreshWidgetStyleSettingsUI({ syncForm = true, previewStyle = null } = {}) {
+        const style = this.getWidgetStyleSettings();
+        const rounded = document.getElementById('widget-style-rounded');
+        const shadow = document.getElementById('widget-style-shadow');
+        const hover = document.getElementById('widget-style-hover');
+        const compact = document.getElementById('widget-style-compact');
+        if (syncForm) {
+            if (rounded) rounded.value = style.rounded;
+            if (shadow) shadow.value = style.shadow;
+            if (hover) hover.checked = !!style.hover_effects;
+            if (compact) compact.checked = !!style.compact;
+        }
+
+        const preview = document.getElementById('widget-style-preview');
+        if (preview) {
+            const activePreviewStyle = this.normalizeWidgetStyleSettings(previewStyle || style);
+            const previewOn = true;
+            preview.innerHTML = `
+                <div class="${this.getWidgetCardClassNamesForStyle(activePreviewStyle)}">
+                    ${this.renderWidgetHeader({ id: 'preview-widget' }, {
+                        icon: 'lightbulb',
+                        title: 'Beispiel Widget',
+                        locked: false
+                    })}
+                    <div class="widget-body space-y-4">
+                        <div class="flex items-center justify-between gap-4">
+                            <div class="min-w-0 flex-1">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <span class="${this.getWidgetSwitchBadgeClassNames(previewOn)}">Aktiv</span>
+                                    <span class="widget-accent-badge inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium">Toggle</span>
+                                </div>
+                                <div class="text-sm font-medium text-gray-900 dark:text-white">Wohnzimmer Licht</div>
+                                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Steuerung: Light.RM_Light_EG_06</div>
+                                <div class="text-xs text-gray-400 dark:text-gray-500 mt-1">So erscheinen Standard-Schalter auf den Seiten</div>
+                            </div>
+                            <button type="button" class="${this.getWidgetSwitchButtonClassNames(previewOn)}">
+                                <span class="${this.getWidgetSwitchKnobClassNames(previewOn)}"></span>
+                                <span class="widget-toggle-label-off absolute left-3 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 opacity-0 transition-opacity">Aus</span>
+                                <span class="widget-toggle-label-on absolute right-3 text-[11px] font-semibold uppercase tracking-wide text-white opacity-100 transition-opacity">An</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+    }
+
+    refreshRingEventStorageUI({ syncForm = true, previewConfig = null } = {}) {
+        const settings = this.getRingEventStorageSettings();
+        const activeConfig = this.normalizeRingEventStorageSettings(previewConfig || settings);
+
+        const backend = document.getElementById('ring-event-storage-backend');
+        const maxEntries = document.getElementById('ring-event-storage-max-entries');
+        const sqliteMode = document.getElementById('ring-event-sqlite-mode');
+        const sqlitePath = document.getElementById('ring-event-sqlite-path');
+        const mysqlHost = document.getElementById('ring-event-mysql-host');
+        const mysqlPort = document.getElementById('ring-event-mysql-port');
+        const mysqlDatabase = document.getElementById('ring-event-mysql-database');
+        const mysqlUser = document.getElementById('ring-event-mysql-user');
+        const mysqlPassword = document.getElementById('ring-event-mysql-password');
+        const influxUrl = document.getElementById('ring-event-influx-url');
+        const influxOrg = document.getElementById('ring-event-influx-org');
+        const influxBucket = document.getElementById('ring-event-influx-bucket');
+        const influxMeasurement = document.getElementById('ring-event-influx-measurement');
+        const influxToken = document.getElementById('ring-event-influx-token');
+
+        if (syncForm) {
+            if (backend) backend.value = settings.backend;
+            if (maxEntries) maxEntries.value = String(settings.max_entries);
+            if (sqliteMode) sqliteMode.value = settings.sqlite.mode;
+            if (sqlitePath) sqlitePath.value = settings.sqlite.path;
+            if (mysqlHost) mysqlHost.value = settings.mysql.host;
+            if (mysqlPort) mysqlPort.value = String(settings.mysql.port);
+            if (mysqlDatabase) mysqlDatabase.value = settings.mysql.database;
+            if (mysqlUser) mysqlUser.value = settings.mysql.user;
+            if (mysqlPassword) mysqlPassword.value = settings.mysql.password;
+            if (influxUrl) influxUrl.value = settings.influxdb.url;
+            if (influxOrg) influxOrg.value = settings.influxdb.org;
+            if (influxBucket) influxBucket.value = settings.influxdb.bucket;
+            if (influxMeasurement) influxMeasurement.value = settings.influxdb.measurement;
+            if (influxToken) influxToken.value = settings.influxdb.token;
+        }
+
+        const sqliteWrap = document.getElementById('ring-event-sqlite-mode-wrap');
+        const sqlitePathWrap = document.getElementById('ring-event-sqlite-path-wrap');
+        const mysqlFields = document.getElementById('ring-event-mysql-fields');
+        const influxFields = document.getElementById('ring-event-influx-fields');
+
+        const showSqlite = activeConfig.backend === 'sqlite';
+        const showMysql = activeConfig.backend === 'mysql';
+        const showInflux = activeConfig.backend === 'influxdb';
+
+        if (sqliteWrap) sqliteWrap.classList.toggle('hidden', !showSqlite);
+        if (sqlitePathWrap) {
+            const hideSqlitePath = !showSqlite || activeConfig.sqlite.mode !== 'external';
+            sqlitePathWrap.classList.toggle('hidden', hideSqlitePath);
+        }
+        if (mysqlFields) mysqlFields.classList.toggle('hidden', !showMysql);
+        if (influxFields) influxFields.classList.toggle('hidden', !showInflux);
+
+        const statusEl = document.getElementById('ring-event-storage-status');
+        if (statusEl) {
+            const status = this.ringEventStorageStatus;
+            const activeBackend = status?.active_backend || activeConfig.backend;
+            const requestedBackend = status?.requested_backend || activeConfig.backend;
+            const persistent = status?.persistent ? 'persistent' : 'nur laufzeitbezogen';
+            const runtimeBadge = status?.runtime_supported === false
+                ? '<span class="widget-accent-badge inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium">Fallback aktiv</span>'
+                : '<span class="widget-accent-badge inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium">Direkt aktiv</span>';
+            const note = status?.note
+                ? `<div class="text-xs text-amber-600 dark:text-amber-300 mt-2">${this.escapeHtml(status.note)}</div>`
+                : '';
+            const locationLabel = status?.location_label
+                ? this.escapeHtml(status.location_label)
+                : (activeConfig.backend === 'memory' ? 'Nur im laufenden Prozessspeicher' : this.escapeHtml(activeConfig.sqlite.path));
+            statusEl.innerHTML = `
+                <div class="flex flex-wrap items-center gap-2">
+                    ${runtimeBadge}
+                    <span class="font-medium text-gray-900 dark:text-white">Angefordert: ${this.escapeHtml(requestedBackend)}</span>
+                    <span class="text-gray-500 dark:text-gray-400">Aktiv: ${this.escapeHtml(activeBackend)} (${persistent})</span>
+                </div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mt-2">Ort: ${locationLabel}</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Aufbewahrung: ${this.escapeHtml(String(status?.max_entries || activeConfig.max_entries))} Einträge</div>
+                ${note}
+            `;
+        }
+    }
+
     renderRoomList() {
         const container = document.getElementById('room-list');
         if (!container) return;
@@ -5074,22 +5880,22 @@ class SmartHomeApp {
             return;
         }
         container.innerHTML = pages.map(page => `
-            <div class="room-list-item p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-between"
+            <div class="room-list-item theme-panel p-3 rounded-xl flex items-center justify-between"
                  data-page-id="${this.escapeHtml(page.id)}" draggable="true">
                 <div class="flex items-center gap-2">
-                    <button class="room-drag-handle p-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 cursor-grab" title="Ziehen">
+                    <button class="room-drag-handle theme-subpanel p-1 rounded text-gray-500 cursor-grab" title="Ziehen">
                         <i data-lucide="grip-vertical" class="w-4 h-4"></i>
                     </button>
-                    <i data-lucide="${this.escapeHtml(page.icon || 'layout-grid')}" class="w-4 h-4 text-blue-500"></i>
+                    <i data-lucide="${this.escapeHtml(page.icon || 'layout-grid')}" class="widget-accent-text w-4 h-4"></i>
                     <span class="text-sm font-medium text-gray-800 dark:text-gray-200">${this.escapeHtml(page.name)}</span>
                     <span class="text-xs text-gray-500">(${this.escapeHtml(page.id)})</span>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button class="room-move-up-btn px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-600" data-page-id="${this.escapeHtml(page.id)}">↑</button>
-                    <button class="room-move-down-btn px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-600" data-page-id="${this.escapeHtml(page.id)}">↓</button>
-                    <button class="room-edit-btn px-3 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700" data-page-id="${this.escapeHtml(page.id)}">Bearbeiten</button>
-                    <button class="room-open-btn px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700" data-page-id="${this.escapeHtml(page.id)}">Öffnen</button>
-                    <button class="room-delete-btn px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700" data-page-id="${this.escapeHtml(page.id)}">Löschen</button>
+                    <button class="room-move-up-btn theme-outline-button px-2 py-1 text-xs rounded" data-page-id="${this.escapeHtml(page.id)}">↑</button>
+                    <button class="room-move-down-btn theme-outline-button px-2 py-1 text-xs rounded" data-page-id="${this.escapeHtml(page.id)}">↓</button>
+                    <button class="room-edit-btn theme-outline-button px-3 py-1 text-xs rounded text-amber-600" data-page-id="${this.escapeHtml(page.id)}">Bearbeiten</button>
+                    <button class="room-open-btn theme-accent-button px-3 py-1 text-xs rounded" data-page-id="${this.escapeHtml(page.id)}">Öffnen</button>
+                    <button class="room-delete-btn theme-outline-button px-3 py-1 text-xs rounded text-red-600 dark:text-red-400" data-page-id="${this.escapeHtml(page.id)}">Löschen</button>
                 </div>
             </div>
         `).join('');
@@ -5317,41 +6123,41 @@ class SmartHomeApp {
                     const locked = !!widget.config?.locked;
                     const icon = widget.config?.icon || 'box';
                     return `
-                        <div class="widget-list-item p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900"
+                        <div class="widget-list-item theme-panel p-3 rounded-xl"
                              data-widget-id="${this.escapeHtml(widget.id)}"
                              data-page="${this.escapeHtml(page)}"
                              draggable="${locked ? 'false' : 'true'}">
                             <div class="flex items-start justify-between gap-3">
                                 <div class="flex items-start gap-3 min-w-0 flex-1">
-                                    <button class="widget-drag-handle p-2 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 ${locked ? 'opacity-40 cursor-not-allowed' : 'cursor-grab'}" title="${locked ? 'Fixiert' : 'Ziehen zum Sortieren'}">
+                                    <button class="widget-drag-handle theme-subpanel p-2 rounded text-gray-500 ${locked ? 'opacity-40 cursor-not-allowed' : 'cursor-grab'}" title="${locked ? 'Fixiert' : 'Ziehen zum Sortieren'}">
                                         <i data-lucide="grip-vertical" class="w-4 h-4"></i>
                                     </button>
-                                    <div class="w-9 h-9 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 flex items-center justify-center">
+                                    <div class="widget-accent-icon w-9 h-9 rounded flex items-center justify-center">
                                         <i data-lucide="${this.escapeHtml(icon)}" class="w-4 h-4"></i>
                                     </div>
                                     <div class="min-w-0 flex-1">
                                         <div class="flex items-center flex-wrap gap-2 mb-1">
                                             <h3 class="text-sm font-semibold text-gray-900 dark:text-white truncate">${this.escapeHtml(widget.title || widget.id)}</h3>
-                                            <span class="px-2 py-0.5 text-xs rounded bg-gray-200 dark:bg-gray-700">${this.escapeHtml(widget.type || '-')}</span>
+                                            <span class="theme-subpanel px-2 py-0.5 text-xs rounded">${this.escapeHtml(widget.type || '-')}</span>
                                             ${locked ? '<span class="px-2 py-0.5 text-xs rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Fixiert</span>' : ''}
                                         </div>
                                         ${bindingsHtml || '<div class="text-xs text-gray-400">Keine Variablen verknüpft</div>'}
                                     </div>
                                 </div>
                                 <div class="flex items-center gap-1">
-                                    <button class="widget-move-up-btn p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" data-widget-id="${this.escapeHtml(widget.id)}" title="Nach oben" ${locked ? 'disabled' : ''}>
+                                    <button class="widget-move-up-btn theme-outline-button p-2 rounded" data-widget-id="${this.escapeHtml(widget.id)}" title="Nach oben" ${locked ? 'disabled' : ''}>
                                         <i data-lucide="arrow-up" class="w-4 h-4"></i>
                                     </button>
-                                    <button class="widget-move-down-btn p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" data-widget-id="${this.escapeHtml(widget.id)}" title="Nach unten" ${locked ? 'disabled' : ''}>
+                                    <button class="widget-move-down-btn theme-outline-button p-2 rounded" data-widget-id="${this.escapeHtml(widget.id)}" title="Nach unten" ${locked ? 'disabled' : ''}>
                                         <i data-lucide="arrow-down" class="w-4 h-4"></i>
                                     </button>
-                                    <button class="widget-toggle-lock-btn p-2 text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/30 rounded" data-widget-id="${this.escapeHtml(widget.id)}" title="${locked ? 'Fixierung lösen' : 'Fixieren'}">
+                                    <button class="widget-toggle-lock-btn theme-outline-button p-2 rounded text-amber-600" data-widget-id="${this.escapeHtml(widget.id)}" title="${locked ? 'Fixierung lösen' : 'Fixieren'}">
                                         <i data-lucide="${locked ? 'lock' : 'unlock'}" class="w-4 h-4"></i>
                                     </button>
-                                    <button class="widget-edit-btn p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded" data-widget-id="${this.escapeHtml(widget.id)}" title="Bearbeiten">
+                                    <button class="widget-edit-btn theme-outline-button p-2 rounded widget-accent-text" data-widget-id="${this.escapeHtml(widget.id)}" title="Bearbeiten">
                                         <i data-lucide="edit" class="w-4 h-4"></i>
                                     </button>
-                                    <button class="widget-delete-config-btn p-2 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 rounded" data-widget-id="${this.escapeHtml(widget.id)}" title="Löschen">
+                                    <button class="widget-delete-config-btn theme-outline-button p-2 rounded text-red-600 dark:text-red-400" data-widget-id="${this.escapeHtml(widget.id)}" title="Löschen">
                                         <i data-lucide="trash-2" class="w-4 h-4"></i>
                                     </button>
                                 </div>
@@ -5684,12 +6490,141 @@ class SmartHomeApp {
             }
             this.uiSettings = {
                 default_page: data.default_page || defaultPage,
-                kiosk_default: !!data.kiosk_default
+                kiosk_default: !!data.kiosk_default,
+                theme_config: this.normalizeThemeConfigSettings(data.theme_config),
+                widget_style: this.normalizeWidgetStyleSettings(data.widget_style),
+                ring_event_storage: this.normalizeRingEventStorageSettings(data.ring_event_storage)
             };
+            this.ringEventStorageStatus = this.normalizeRingEventStorageStatus(data.ring_event_storage_status);
+            this.applyThemeConfig();
             this.applyKioskMode(this.uiSettings.kiosk_default);
             this.showToast('Panel-Einstellungen gespeichert.', { level: 'success' });
         } catch (error) {
             this.showToast(`Panel-Einstellungen konnten nicht gespeichert werden: ${error.message}`, { level: 'error' });
+        }
+    }
+
+    async saveThemeConfigSettings() {
+        const themeConfig = this.getPendingThemeConfigSettings();
+
+        try {
+            const response = await fetch('/api/ui-settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    default_page: this.uiSettings?.default_page || 'dashboard',
+                    kiosk_default: !!this.uiSettings?.kiosk_default,
+                    widget_style: this.getWidgetStyleSettings(),
+                    theme_config: themeConfig,
+                    ring_event_storage: this.getRingEventStorageSettings()
+                })
+            });
+            const data = await this.parseJsonResponse(response, 'Theme konnte nicht gespeichert werden.');
+            if (!response.ok) {
+                this.showToast(data.error || 'Theme konnte nicht gespeichert werden.', { level: 'error' });
+                return;
+            }
+            this.uiSettings = {
+                default_page: data.default_page || this.uiSettings?.default_page || 'dashboard',
+                kiosk_default: !!data.kiosk_default,
+                theme_config: this.normalizeThemeConfigSettings(data.theme_config),
+                widget_style: this.normalizeWidgetStyleSettings(data.widget_style),
+                ring_event_storage: this.normalizeRingEventStorageSettings(data.ring_event_storage)
+            };
+            this.ringEventStorageStatus = this.normalizeRingEventStorageStatus(data.ring_event_storage_status);
+            this.applyThemeConfig();
+            this.refreshThemeConfigUI();
+            this.refreshRingEventStorageUI();
+            await this.loadAndRenderWidgets(this.currentPage);
+            this.showToast('Theme gespeichert.', { level: 'success' });
+        } catch (error) {
+            this.showToast(`Theme konnte nicht gespeichert werden: ${error.message}`, { level: 'error' });
+        }
+    }
+
+    async saveWidgetStyleSettings() {
+        const rounded = document.getElementById('widget-style-rounded')?.value || 'xl';
+        const shadow = document.getElementById('widget-style-shadow')?.value || 'soft';
+        const hoverEffects = !!document.getElementById('widget-style-hover')?.checked;
+        const compact = !!document.getElementById('widget-style-compact')?.checked;
+        const widgetStyle = this.normalizeWidgetStyleSettings({
+            rounded,
+            shadow,
+            hover_effects: hoverEffects,
+            compact
+        });
+
+        try {
+            const response = await fetch('/api/ui-settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    default_page: this.uiSettings?.default_page || 'dashboard',
+                    kiosk_default: !!this.uiSettings?.kiosk_default,
+                    widget_style: widgetStyle,
+                    theme_config: this.getThemeConfigSettings(),
+                    ring_event_storage: this.getRingEventStorageSettings()
+                })
+            });
+            const data = await this.parseJsonResponse(response, 'Widget-Stil konnte nicht gespeichert werden.');
+            if (!response.ok) {
+                this.showToast(data.error || 'Widget-Stil konnte nicht gespeichert werden.', { level: 'error' });
+                return;
+            }
+            this.uiSettings = {
+                default_page: data.default_page || this.uiSettings?.default_page || 'dashboard',
+                kiosk_default: !!data.kiosk_default,
+                theme_config: this.normalizeThemeConfigSettings(data.theme_config),
+                widget_style: this.normalizeWidgetStyleSettings(data.widget_style),
+                ring_event_storage: this.normalizeRingEventStorageSettings(data.ring_event_storage)
+            };
+            this.ringEventStorageStatus = this.normalizeRingEventStorageStatus(data.ring_event_storage_status);
+            this.applyThemeConfig();
+            this.refreshWidgetStyleSettingsUI();
+            this.refreshRingEventStorageUI();
+            await this.loadAndRenderWidgets(this.currentPage);
+            this.showToast('Widget-Stil gespeichert.', { level: 'success' });
+        } catch (error) {
+            this.showToast(`Widget-Stil konnte nicht gespeichert werden: ${error.message}`, { level: 'error' });
+        }
+    }
+
+    async saveRingEventStorageSettings() {
+        const ringEventStorage = this.getPendingRingEventStorageSettings();
+
+        try {
+            const response = await fetch('/api/ui-settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    default_page: this.uiSettings?.default_page || 'dashboard',
+                    kiosk_default: !!this.uiSettings?.kiosk_default,
+                    widget_style: this.getWidgetStyleSettings(),
+                    theme_config: this.getThemeConfigSettings(),
+                    ring_event_storage: ringEventStorage
+                })
+            });
+            const data = await this.parseJsonResponse(response, 'Ring Ereignis-Speicher konnte nicht gespeichert werden.');
+            if (!response.ok) {
+                this.showToast(data.error || 'Ring Ereignis-Speicher konnte nicht gespeichert werden.', { level: 'error' });
+                return;
+            }
+            this.uiSettings = {
+                default_page: data.default_page || this.uiSettings?.default_page || 'dashboard',
+                kiosk_default: !!data.kiosk_default,
+                theme_config: this.normalizeThemeConfigSettings(data.theme_config),
+                widget_style: this.normalizeWidgetStyleSettings(data.widget_style),
+                ring_event_storage: this.normalizeRingEventStorageSettings(data.ring_event_storage)
+            };
+            this.ringEventStorageStatus = this.normalizeRingEventStorageStatus(data.ring_event_storage_status);
+            this.applyThemeConfig();
+            this.refreshRingEventStorageUI();
+            if (this.currentPage === 'cameras' && typeof this.loadRingEvents === 'function') {
+                await this.loadRingEvents();
+            }
+            this.showToast('Ring Ereignis-Speicher gespeichert.', { level: 'success' });
+        } catch (error) {
+            this.showToast(`Ring Ereignis-Speicher konnte nicht gespeichert werden: ${error.message}`, { level: 'error' });
         }
     }
 
@@ -5720,13 +6655,9 @@ class SmartHomeApp {
     renderWidgetIconQuickpick() {
         const container = document.getElementById('widget-icon-quickpick');
         if (!container) return;
-        const icons = [
-            'lightbulb', 'power', 'toggle-left', 'thermometer', 'droplets',
-            'wind', 'zap', 'battery', 'gauge', 'activity',
-            'camera', 'shield', 'home', 'settings', 'box'
-        ];
+        const icons = this.getAvailableWidgetIcons();
         container.innerHTML = icons.map(icon => `
-            <button type="button" class="widget-icon-pick-btn px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700" data-icon="${icon}">
+            <button type="button" class="widget-icon-pick-btn px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" data-icon="${icon}">
                 <i data-lucide="${icon}" class="w-4 h-4 inline mr-1"></i>${icon}
             </button>
         `).join('');
@@ -5738,14 +6669,18 @@ class SmartHomeApp {
                 this.updateWidgetIconPreview(icon);
             });
         });
+        const currentIcon = document.getElementById('widget-icon')?.value || 'box';
+        this.syncWidgetIconQuickpickSelection(currentIcon);
         if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
     updateWidgetIconPreview(iconName) {
         const preview = document.getElementById('widget-icon-preview');
         if (!preview) return;
-        const safeIcon = this.escapeHtml(iconName || 'box');
+        const normalizedIcon = String(iconName || 'box').trim() || 'box';
+        const safeIcon = this.escapeHtml(normalizedIcon);
         preview.innerHTML = `<i data-lucide="${safeIcon}" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>`;
+        this.syncWidgetIconQuickpickSelection(normalizedIcon);
         if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
@@ -6194,12 +7129,15 @@ class SmartHomeApp {
 
     getDynamicWidgetContainer(pageName) {
         let container = document.getElementById(`${pageName}-widgets-dynamic`);
-        if (container) return container;
+        if (container) {
+            container.className = this.getWidgetGridClassNames();
+            return container;
+        }
         const page = document.getElementById(`${pageName}-page`);
         if (!page) return null;
         container = document.createElement('div');
         container.id = `${pageName}-widgets-dynamic`;
-        container.className = 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6';
+        container.className = this.getWidgetGridClassNames();
         page.insertBefore(container, page.firstChild.nextSibling);
         return container;
     }
@@ -6220,7 +7158,7 @@ class SmartHomeApp {
         const icon = widget.config?.icon || 'box';
         const locked = !!widget.config?.locked;
         const widgetEl = document.createElement('div');
-        widgetEl.className = 'widget bg-white dark:bg-gray-800 p-4 rounded-lg shadow border border-gray-200 dark:border-gray-700';
+        widgetEl.className = this.getWidgetCardClassNames();
         widgetEl.setAttribute('data-widget-id', widget.id);
         widgetEl.setAttribute('data-widget-type', widget.type || '');
 
@@ -6251,33 +7189,30 @@ class SmartHomeApp {
                 const switchValue = widget.value || false;
                 const switchMode = widget.config?.mode || 'toggle';
                 const pulseDuration = widget.config?.pulse_duration || 500;
+                const switchModeLabel = switchMode === 'pulse' ? `Impuls ${pulseDuration} ms` : 'Toggle';
 
                 widgetEl.innerHTML = `
-                    <div class="widget-header flex justify-between items-center mb-2">
-                        <div class="flex items-center gap-2 min-w-0">
-                            <i data-lucide="${this.escapeHtml(icon)}" class="w-4 h-4 text-blue-500"></i>
-                            <h3 class="text-sm font-bold text-gray-900 dark:text-white truncate">${safeTitle}</h3>
-                            ${locked ? '<i data-lucide="lock" class="w-3.5 h-3.5 text-amber-500"></i>' : ''}
-                        </div>
-                        <button class="text-xs text-red-500 hover:text-red-700" onclick="app.deleteWidgetConfig('${widget.id}')">✕</button>
-                    </div>
-                    <div class="widget-body">
-                        <div class="flex items-center space-x-3">
+                    ${this.renderWidgetHeader(widget, { icon, title: safeTitle, locked })}
+                    <div class="widget-body space-y-4">
+                        <div class="flex items-center justify-between gap-4">
+                            <div class="min-w-0 flex-1">
+                                <div class="flex flex-wrap items-center gap-2 mb-2">
+                                    <span class="${this.getWidgetSwitchBadgeClassNames(switchValue)}">${switchValue ? 'Aktiv' : 'Aus'}</span>
+                                    <span class="widget-accent-badge inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium">${this.escapeHtml(switchModeLabel)}</span>
+                                </div>
+                                <div class="text-sm font-medium text-gray-900 dark:text-white truncate">${safeTitle}</div>
+                                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate">Steuerung: ${safeVar}</div>
+                                ${safeFeedback ? `<div class="text-xs text-gray-400 dark:text-gray-500 mt-1 truncate">Feedback: ${safeFeedback}</div>` : ''}
+                            </div>
                             <button
-                                class="widget-toggle w-16 h-16 rounded-lg ${switchValue ? 'bg-green-500' : 'bg-gray-400 dark:bg-gray-600'} flex flex-col items-center justify-center transition-all duration-200 hover:opacity-80 shadow-lg"
+                                class="${this.getWidgetSwitchButtonClassNames(switchValue)}"
                                 onclick="app.toggleSwitch('${widget.id}', '${switchMode}', ${pulseDuration})"
                                 data-widget-id="${widget.id}"
                                 data-value="${switchValue}">
-                                <span class="text-white text-2xl">${switchValue ? '●' : '○'}</span>
-                                <span class="text-white text-xs mt-1">${switchValue ? 'ON' : 'OFF'}</span>
+                                <span class="${this.getWidgetSwitchKnobClassNames(switchValue)}"></span>
+                                <span class="widget-toggle-label-off absolute left-3 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${switchValue ? 'opacity-0' : 'opacity-100'} transition-opacity">Aus</span>
+                                <span class="widget-toggle-label-on absolute right-3 text-[11px] font-semibold uppercase tracking-wide text-white ${switchValue ? 'opacity-100' : 'opacity-0'} transition-opacity">An</span>
                             </button>
-                            <div class="flex-1">
-                                <div class="text-xs text-gray-600 dark:text-gray-400">
-                                    <div class="font-medium">Steuerung: ${safeVar}</div>
-                                    ${safeFeedback ? `<div class="text-xs text-gray-500 mt-1">Feedback: ${safeFeedback}</div>` : ''}
-                                    ${switchMode === 'pulse' ? `<div class="text-xs text-blue-500 mt-1">⚡ Impulse (${pulseDuration}ms)</div>` : ''}
-                                </div>
-                            </div>
                         </div>
                     </div>
                 `;
@@ -6285,16 +7220,9 @@ class SmartHomeApp {
 
             case 'number':
                 widgetEl.innerHTML = `
-                    <div class="widget-header flex justify-between items-center mb-2">
-                        <div class="flex items-center gap-2 min-w-0">
-                            <i data-lucide="${this.escapeHtml(icon)}" class="w-4 h-4 text-blue-500"></i>
-                            <h3 class="text-sm font-bold text-gray-900 dark:text-white truncate">${safeTitle}</h3>
-                            ${locked ? '<i data-lucide="lock" class="w-3.5 h-3.5 text-amber-500"></i>' : ''}
-                        </div>
-                        <button class="text-xs text-red-500 hover:text-red-700" onclick="app.deleteWidgetConfig('${widget.id}')">✕</button>
-                    </div>
+                    ${this.renderWidgetHeader(widget, { icon, title: safeTitle, locked })}
                     <div class="widget-body">
-                        <div class="text-3xl font-bold text-blue-600 dark:text-blue-400">
+                        <div class="widget-accent-text text-3xl font-bold">
                             ${widget.value || 0}
                         </div>
                         <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
@@ -6306,19 +7234,12 @@ class SmartHomeApp {
 
             case 'gauge':
                 widgetEl.innerHTML = `
-                    <div class="widget-header flex justify-between items-center mb-2">
-                        <div class="flex items-center gap-2 min-w-0">
-                            <i data-lucide="${this.escapeHtml(icon)}" class="w-4 h-4 text-blue-500"></i>
-                            <h3 class="text-sm font-bold text-gray-900 dark:text-white truncate">${safeTitle}</h3>
-                            ${locked ? '<i data-lucide="lock" class="w-3.5 h-3.5 text-amber-500"></i>' : ''}
-                        </div>
-                        <button class="text-xs text-red-500 hover:text-red-700" onclick="app.deleteWidgetConfig('${widget.id}')">✕</button>
-                    </div>
+                    ${this.renderWidgetHeader(widget, { icon, title: safeTitle, locked })}
                     <div class="widget-body">
                         <div class="w-24 h-24 mx-auto">
                             <svg viewBox="0 0 100 100" class="transform -rotate-90">
-                                <circle cx="50" cy="50" r="40" fill="none" stroke="#e5e7eb" stroke-width="8"/>
-                                <circle cx="50" cy="50" r="40" fill="none" stroke="#3b82f6" stroke-width="8"
+                                <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(148, 163, 184, 0.25)" stroke-width="8"/>
+                                <circle cx="50" cy="50" r="40" fill="none" stroke="var(--theme-accent)" stroke-width="8"
                                     stroke-dasharray="${(widget.value || 0) * 2.51} 251.2"
                                     stroke-linecap="round"/>
                             </svg>
@@ -6332,14 +7253,7 @@ class SmartHomeApp {
 
             default:
                 widgetEl.innerHTML = `
-                    <div class="widget-header flex justify-between items-center mb-2">
-                        <div class="flex items-center gap-2 min-w-0">
-                            <i data-lucide="${this.escapeHtml(icon)}" class="w-4 h-4 text-blue-500"></i>
-                            <h3 class="text-sm font-bold text-gray-900 dark:text-white truncate">${safeTitle}</h3>
-                            ${locked ? '<i data-lucide="lock" class="w-3.5 h-3.5 text-amber-500"></i>' : ''}
-                        </div>
-                        <button class="text-xs text-red-500 hover:text-red-700" onclick="app.deleteWidgetConfig('${widget.id}')">✕</button>
-                    </div>
+                    ${this.renderWidgetHeader(widget, { icon, title: safeTitle, locked })}
                     <div class="widget-body">
                         <div class="text-xs text-gray-500">
                             Typ: ${this.escapeHtml(widget.type || '-')}<br>
@@ -6402,23 +7316,7 @@ class SmartHomeApp {
         if (toggleBtn) {
             // Update Boolean Widget
             const boolValue = Boolean(value);
-            toggleBtn.setAttribute('data-value', boolValue);
-
-            // Update CSS Classes
-            if (boolValue) {
-                toggleBtn.classList.remove('bg-gray-300', 'bg-gray-400', 'dark:bg-gray-600');
-                toggleBtn.classList.add('bg-green-500');
-            } else {
-                toggleBtn.classList.remove('bg-green-500');
-                toggleBtn.classList.add('bg-gray-400', 'dark:bg-gray-600');
-            }
-
-            // Update Label
-            const spans = toggleBtn.querySelectorAll('span');
-            if (spans[0]) spans[0].textContent = boolValue ? '●' : '○';
-            if (spans[1]) {
-                spans[1].textContent = boolValue ? 'ON' : 'OFF';
-            }
+            this.applyWidgetSwitchState(toggleBtn, boolValue);
 
             console.log(`🔄 Widget ${widgetId} updated: ${value}`);
             return;
