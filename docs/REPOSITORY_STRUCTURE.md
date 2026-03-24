@@ -62,7 +62,7 @@ Ziel ist **keine** sofortige Umstrukturierung, sondern eine belastbare Grundlage
 - `docs/01_quickstart.md` bis `docs/16_frontend_performance.md`: gepflegte Kern-Dokumente
 - `docs/WEB_SETUP_ROUTING_ADS_GUIDE.md`: aktive Spezialanleitung für Web-Setup und ADS-Routing
 - `docs/ADR/`: Architekturentscheidungen
-- `docs/openapi.json`: generierter/verifizierter API-Vertrag innerhalb der aktiven Doku
+- `docs/openapi.json`: generierter, aber aktiv versionierter API-Vertrag innerhalb der aktiven Doku
 
 ## 3. Legacy- und Altlasten-Pfade
 
