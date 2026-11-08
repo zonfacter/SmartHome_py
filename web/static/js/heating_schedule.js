@@ -43,6 +43,10 @@
   class View {
     constructor(container, dialog, storage) {
       this.container=container; this.dialog=dialog; this.storage=storage;
+      this.transferDialog=document.getElementById('schedule-transfer');
+      this.previewGeneration=0;
+      this.transferDialog.querySelector('[data-cancel-transfer]').addEventListener('click',()=>{this.previewGeneration++;this.transferToken=null;this.transferDialog.close();});
+      this.transferDialog.querySelector('[data-confirm-transfer]').addEventListener('click',()=>this.confirmTransfer());
       this.mode='grid'; this.drafts={}; this.showDraft={}; this.discarded={}; this.key=''; this.view='overview';
       for (const area of ['eg','og']) {
         try {
@@ -57,6 +61,7 @@
         const button=event.target.closest('button[data-schedule-action]');
         if (!button) return;
         const area=button.dataset.area;
+        if (button.dataset.scheduleAction==='transfer') this.previewTransfer(area);
         if (button.dataset.scheduleAction==='edit') this.edit(area,Number(button.dataset.day || 0));
         if (button.dataset.scheduleAction==='compare') { this.showDraft[area]=!this.showDraft[area]; this.key=''; this.render(this.snapshot,this.view); }
         if (button.dataset.scheduleAction==='discard') {
@@ -86,7 +91,7 @@
     render(snapshot, view) {
       if (!snapshot?.schedules) return;
       this.snapshot=snapshot; this.view=view;
-      const key=JSON.stringify([snapshot.schedules,view,this.mode,this.showDraft,this.drafts]);
+      const key=JSON.stringify([snapshot.schedules,snapshot.schedule_control,view,this.mode,this.showDraft,this.drafts]);
       if (key===this.key) return;
       this.key=key;
       const focus=document.activeElement?.closest('[data-schedule-action]');
@@ -109,7 +114,60 @@
         const label=`${DAYS[i]} planen · ${text}`;
         return `<div class="week-row ${d.day===today?'today':''}"><span class="week-day">${DAYS[i].slice(0,2)}${d.day===today?'<small>Heute</small>':''}</span><button type="button" class="week-track ${good?'':'unavailable'}" data-schedule-action="edit" data-area="${area}" data-day="${i}" aria-label="${esc(label)}" title="${esc(label)}" ${!ready?'disabled':''}>${good ? periods.map(p=>`<i class="week-period" style="left:${p.start_minute/14.4}%;width:${(p.end_minute-p.start_minute)/14.4}%"></i>`).join('') : '<span>—</span>'}</button><span class="week-times">${esc(text)}</span></div>`;
       }).join('');
-      return `<article class="week-board ${area} ${planned?'is-draft':''} ${this.mode==='list'?'list-view':''}"><div class="week-heading"><div><h3>${area.toUpperCase()} <span>· ${area==='eg'?'Fußbodenheizung':'Heizkörper'}</span></h3><p>${esc(this.snapshot.floors[area].controller)} · ${planned?'Lokaler Entwurf · nicht übertragen':'Gelesener Reglerstand'}</p></div><div class="week-actions">${draft?`<button type="button" class="schedule-button quiet" data-schedule-action="compare" data-area="${area}" data-day="">${planned?'Reglerstand anzeigen':'Entwurf anzeigen'}</button><button type="button" class="schedule-button quiet" data-schedule-action="discard" data-area="${area}" data-day="">Entwurf verwerfen</button>`:this.discarded[area]?`<button type="button" class="schedule-button quiet" data-schedule-action="undo" data-area="${area}" data-day="">Verwerfen rückgängig</button>`:''}<button type="button" class="schedule-button" data-schedule-action="edit" data-area="${area}" data-day="0" ${!ready?'disabled':''}>${draft?'Entwurf bearbeiten':'Zeiten entwerfen'}</button></div></div>${oldBase?'<p class="draft-warning">Der Reglerstand hat sich seit dem Entwurf geändert. Bitte die Zeiten vor einer späteren Übernahme vergleichen.</p>':''}<div class="week-scroll" tabindex="0" aria-label="${area.toUpperCase()} Wochenprogramm, bei Bedarf horizontal scrollen"><div class="week-grid"><div class="week-axis"><span>Tag</span><div>${Array.from({length:9},(_,i)=>`<span style="left:${i*12.5}%">${String(i*3).padStart(2,'0')}</span>`).join('')}</div><span>Zeitfenster</span></div>${rows}</div></div><div class="week-legend"><span><i class="comfort-key"></i>Komfortphase</span><span><i class="reduced-key"></i>Absenkphase in Automatik</span>${planned?'<strong>Entwurf · nur in diesem Browser gespeichert</strong>':'<span class="week-hint">Tag anklicken, um einen Entwurf zu planen.</span>'}</div></article>`;
+      return `<article class="week-board ${area} ${planned?'is-draft':''} ${this.mode==='list'?'list-view':''}"><div class="week-heading"><div><h3>${area.toUpperCase()} <span>· ${area==='eg'?'Fußbodenheizung':'Heizkörper'}</span></h3><p>${esc(this.snapshot.floors[area].controller)} · ${planned?'Lokaler Entwurf · nicht übertragen':'Gelesener Reglerstand'}</p></div><div class="week-actions">${draft?`<button type="button" class="schedule-button quiet" data-schedule-action="compare" data-area="${area}" data-day="">${planned?'Reglerstand anzeigen':'Entwurf anzeigen'}</button><button type="button" class="schedule-button quiet" data-schedule-action="discard" data-area="${area}" data-day="">Entwurf verwerfen</button>`:this.discarded[area]?`<button type="button" class="schedule-button quiet" data-schedule-action="undo" data-area="${area}" data-day="">Verwerfen rückgängig</button>`:''}<button type="button" class="schedule-button" data-schedule-action="edit" data-area="${area}" data-day="0" ${!ready?'disabled':''}>${draft?'Entwurf bearbeiten':'Zeiten entwerfen'}</button>${draft && this.snapshot.schedule_control?.enabled?`<button type="button" class="schedule-button primary" data-schedule-action="transfer" data-area="${area}" data-day="" ${!ready||oldBase||this.snapshot.schedule_control.recovery_required?'disabled':''}>Übertragung prüfen</button>`:''}</div></div>${oldBase?'<p class="draft-warning">Der Reglerstand hat sich seit dem Entwurf geändert. Bitte die Zeiten vor einer späteren Übernahme vergleichen.</p>':''}<div class="week-scroll" tabindex="0" aria-label="${area.toUpperCase()} Wochenprogramm, bei Bedarf horizontal scrollen"><div class="week-grid"><div class="week-axis"><span>Tag</span><div>${Array.from({length:9},(_,i)=>`<span style="left:${i*12.5}%">${String(i*3).padStart(2,'0')}</span>`).join('')}</div><span>Zeitfenster</span></div>${rows}</div></div><div class="week-legend"><span><i class="comfort-key"></i>Komfortphase</span><span><i class="reduced-key"></i>Absenkphase in Automatik</span>${planned?'<strong>Entwurf · nur in diesem Browser gespeichert</strong>':'<span class="week-hint">Tag anklicken, um einen Entwurf zu planen.</span>'}</div></article>`;
+    }
+    async api(path, body) {
+      const headers={'Content-Type':'application/json','X-Heating-Schedule':'1'};
+      const key=this.storage.getItem('smarthome_admin_api_key') || this.storage.getItem('admin_api_key');
+      if(key) headers['X-API-Key']=key;
+      const response=await fetch('/api/heating/schedule/'+path,{method:'POST',headers,body:JSON.stringify(body)});
+      const data=await response.json();
+      if(!response.ok) throw Error(data.message || 'Der Steuerzugriff ist nicht autorisiert oder die VM ist nicht erreichbar.');
+      return data;
+    }
+    async previewTransfer(area) {
+      const draft=this.drafts[area]; if(!draft)return;
+      this.transferArea=area; this.transferToken=null;
+      const generation=++this.previewGeneration;
+      const dialog=this.transferDialog, content=dialog.querySelector('[data-transfer-content]');
+      dialog.querySelector('[data-transfer-title]').textContent='Heizzeiten übertragen · '+area.toUpperCase();
+      dialog.querySelector('[data-confirm-transfer]').disabled=true;
+      dialog.querySelector('[data-transfer-error]').textContent='';
+      content.textContent='Die aktuellen Zeiten werden direkt am Regler geprüft …';
+      dialog.showModal();
+      try {
+        const data=await this.api('preview',{area,base:JSON.parse(draft.base),days:draft.days.map(d=>validate(d,true))});
+        if(!dialog.open || generation!==this.previewGeneration)return;
+        this.transferToken=data.token;
+        content.innerHTML=data.changes.length ? data.changes.map(change=>`<div class="transfer-change"><strong>${esc(change.label)}</strong><span>Bisher: ${esc(times(change.before))}</span><span>Neu: <b>${esc(times(change.after))}</b></span></div>`).join('') : '<p>Der Entwurf entspricht bereits den Zeiten im Regler. Es ist keine Übertragung nötig.</p>';
+        dialog.querySelector('[data-confirm-transfer]').disabled=!data.changes.length;
+      } catch(e) { if(dialog.open && generation===this.previewGeneration)dialog.querySelector('[data-transfer-error]').textContent=e.message; }
+    }
+    async confirmTransfer() {
+      if(!this.transferToken)return;
+      const dialog=this.transferDialog, confirm=dialog.querySelector('[data-confirm-transfer]'),cancel=dialog.querySelector('[data-cancel-transfer]');
+      const token=this.transferToken; this.transferToken=null;
+      confirm.disabled=true;cancel.disabled=true;
+      const preventClose=event=>event.preventDefault();dialog.addEventListener('cancel',preventClose);
+      dialog.querySelector('[data-transfer-error]').textContent='Übertragung und Rücklesen laufen. Bitte kurz warten …';
+      try {
+        const result=await this.api('apply',{token});
+        const area=result.area;
+        // A successful response contains independently verified controller data.
+        this.snapshot.schedules[area].forEach((d,i)=>{d.periods=result.verified_days[i];d.quality='valid';});
+        try { this.storage.removeItem(this.storageKey(area)); delete this.drafts[area]; }
+        catch {
+          this.drafts[area].base=signature(this.snapshot.schedules[area]);
+          document.getElementById('schedule-message').textContent='Heizzeiten sind übernommen. Der Browser konnte den lokalen Entwurf nicht entfernen.';
+        }
+        this.showDraft[area]=false;this.key='';this.render(this.snapshot,this.view);
+        dialog.close();
+        document.getElementById('schedule-message').textContent=`${area.toUpperCase()}: ${result.changed_days.length} Tag(e) übertragen und direkt am Regler bestätigt.`;
+        document.dispatchEvent(new CustomEvent('heating-schedules-updated'));
+      } catch(e) {
+        dialog.querySelector('[data-transfer-error]').textContent=e.message+' Vor einem weiteren Versuch den Reglerstand erneut prüfen.';
+        document.dispatchEvent(new CustomEvent('heating-schedules-updated'));
+      } finally { cancel.disabled=false;dialog.removeEventListener('cancel',preventClose); }
     }
     edit(area, day) {
       if (!['eg','og'].includes(area) || !this.snapshot.schedules[area].every(d=>d.quality==='valid')) return;

@@ -15,8 +15,8 @@ Git-ignoriert. Ohne Konfiguration bleibt der Collector deaktiviert.
 
 Die Installation erwartet LPB, K an Adresse 0 (Familie 22, Variante 254) und M an
 Adresse 1 (Familie 23, Variante 254). Andere Geräte werden nicht stillschweigend
-mit diesen Definitionen ausgelesen. Das Modul nutzt ausschließlich die bestehende
-Rohlese-API `/JY06,...`; daher funktionieren die Messwerte auch vor Installation
+mit diesen Definitionen ausgelesen. Die Messwerte nutzen die bestehende
+Rohlese-API `/JY06,...`; daher funktionieren sie auch vor Installation
 des neuen BSB-LAN-Parameterprofils. Es wird keine ESP32-Firmware verändert.
 
 Die Antworten werden auf Prüfsumme, Absender, Ziel, Objekt und TYPE_ANS geprüft.
@@ -65,7 +65,7 @@ veraltete Werte werden als `null`, Qualität `0x40`, übertragen. Existierende
 Objekte fremder Integrationen werden nicht übernommen. Neue Objekte tragen
 `native.managed_by=smarthome-heating`.
 
-Es gibt keine Stellbefehle, Tado-Schreibzugriffe oder Raumfühlereinspeisung.
+Die ioBroker-Anbindung sendet keine Stellbefehle, Tado-Schreibzugriffe oder Raumfühlereinspeisung.
 Der aktuelle Brennerstartzähler ist keine Energiemessung. Daten- und Status-API:
 `GET /api/heating/state`, `GET /api/heating/history?hours=1|6|24`.
 
@@ -103,8 +103,8 @@ ioBroker erhält pro Tag einen nur lesenden Textwert unter
 `0_userdata.0.heizung.eg.schedule_monday` bis `schedule_sunday`, ebenso für OG.
 Die Ansicht folgt der gewählten Etage und markiert den aktuellen Wochentag in
 Europe/Berlin. Die Komfortzeiten gelten in Automatik und sind keine direkte
-Dauerfreigabe für Pumpen oder Brenner. Die Schreibdarstellung dieser Tagesarrays
-ist noch nicht praktisch bestätigt; es gibt daher keine Speichern-Befehle.
+Dauerfreigabe für Pumpen oder Brenner. Das native Schreiben dieser Tagesarrays wurde inzwischen durch einen gezielten
+Mittwochs-Test mit ACK, Rücklesen und Wiederherstellung bestätigt (siehe unten).
 
 Quellen: K `D0016682.apw`, OV200.4 (SHA oben), Montag DP2082/Adresstail2698;
 M `D0017684.apw`, OV200.6, SHA
@@ -123,12 +123,12 @@ Ein Tag oder „Zeiten entwerfen“ öffnet einen Editor für maximal drei Zeitf
 Zehn-Minuten-Schritte, 24:00 als Tagesende und Kopieren auf Werktage, Wochenende oder
 alle sieben Tage. Ungültige Zeiten und Überschneidungen werden zurückgewiesen.
 Entwürfe verwenden getrennte Browser-Schlüssel `heating-schedule-draft-v1-eg` und
-`heating-schedule-draft-v1-og`. Sie bleiben über Neuladen erhalten, werden weder
-an die VM noch an ioBroker oder die Heizung gesendet. „Reglerstand anzeigen“
+`heating-schedule-draft-v1-og`. Sie bleiben über Neuladen erhalten. Erst die gesonderte Vorschau sendet den
+Entwurf zur VM; an ioBroker werden keine Schreibaufträge geschickt. „Reglerstand anzeigen“
 ermöglicht den Vergleich; Verwerfen lässt sich während der Sitzung rückgängig machen.
 Ein geänderter Reglerstand gegenüber der Entwurfsbasis wird kenntlich gemacht.
 
-Es gibt weiterhin keine schreibende Heizungsroute. Die gezielte Liveprüfung am
+Die gezielte Liveprüfung am
 2026-11-08 hat inzwischen das Schreiben des Mittwochsprogramms `05000A8E` für
 beide Regler bestätigt: unverändertes SET mit ACK, kontrollierte Änderung,
 unabhängiges Rücklesen, Wiederherstellung und Vergleich aller 14 Tagesprogramme.
@@ -138,9 +138,57 @@ normalisiert werden. Das sind keine zusätzlichen Komfortphasen.
 Die K rundete Minute 15 auf Minute 10 ab, die M Minute 45 auf Minute 40.
 Der Editor verwendet daher gemeinsame
 Zehn-Minuten-Schritte; ein ACK allein genügt nicht als Übernahmeprüfung.
-Das Übertragen von Browserentwürfen bleibt eine separate, noch nicht implementierte
-Funktion. Die Tests beweisen keine beliebigen SETs für alle RVA-Varianten und
+Die darauf aufbauende Übertragung wird im folgenden Abschnitt beschrieben.
+Die Live-Tests beweisen keine beliebigen SETs für alle RVA-Varianten und
 prüften keine Löschung sämtlicher Phasen oder einen dritten aktiven Zeitblock.
 Validierung: `node --test test_heating_schedule.cjs` ist Teil von `make smoke`
 und `make test`; zusätzlich Browserprüfung von Editor, Kopieren, Vergleich,
 Persistenz, Zeitliste und mobiler Darstellung.
+
+
+## Gezieltes Übertragen von Wochenentwürfen
+
+Standardmäßig ist die Funktion ausgeschaltet. Für die geprüfte Anlage werden
+`schedule_writes_enabled: true` und die tatsächliche `bsb_mac` in der privaten
+`config/heating.json` gesetzt. Vor jeder Vorschau und Übernahme werden Adapter-MAC,
+LPB, Eigenadresse66, Standardziel0, globaler Leseschutz und beide getesteten
+Familien/Varianten/OV-Kennungen geprüft. Der globale ESP32-Schreibschutz bleibt
+aktiv. Ein eigener Handler erlaubt ausschließlich TYPE_SET03 mit zwölf Bytes
+an `05000A8C` bis `05000A92` und ausschließlich das vom Nutzer gewählte K/M-Ziel.
+Andere Heizungsparameter sind über diese Funktion nicht schreibbar.
+
+Ablauf: lokal planen, „Übertragung prüfen“, Tagesänderungen ansehen, dann
+„An Heizung übertragen“. Die VM liest die Woche frisch und vergleicht sie mit
+der Entwurfsbasis. Eine weitere Prüfung direkt vor der Übernahme verhindert,
+dass zwischenzeitliche Regleränderungen unbemerkt überschrieben werden.
+Unveränderte Tage werden ausgelassen. Pro Tag sind null bis drei aufsteigende,
+nicht überlappende Phasen mit Zehn-Minuten-Schritten möglich; 24:00 ist nur als
+Ende zulässig. Jede SET-Antwort wird vollständig auf Prüfsumme, Ziel, Objekt,
+Nutzdaten und ACK geprüft. Anschließend werden die wirklichen Schaltpunkte
+unabhängig ausgelesen und abschließend alle sieben Tage verglichen.
+
+Vorschau und Übernahme nutzen die bestehende Control-Authentifizierung sowie
+Origin-Prüfung, JSON und `X-Heating-Schedule: 1`. Die Vorschau gilt drei Minuten
+und gehört nur zur anfragenden Client-Adresse. Doppelte Bestätigungen eines
+erfolgreichen Vorgangs liefern das frühere Ergebnis ohne weitere SETs.
+Collector und Übernahme teilen eine Bus-Sperre; diese Anwendung wird als ein
+Serviceprozess betrieben.
+
+Vor jedem SET schreibt die VM Sicherung und Absicht mit fsync in
+`config/heating_schedule_transactions/<id>.json` (Git-ignoriert). Bei Fehlern
+werden die versuchten Tage rückwärts wiederhergestellt und ausgelesen. Eine
+währenddessen fremd geänderte Tageskonfiguration wird nicht blind überschrieben.
+Unbestätigte Rücksetzungen werden deutlich gemeldet und sperren neue Übernahmen.
+Nach einem Prozessabbruch werden offene Journale beim nächsten Collectorlauf bzw.
+vor einer neuen Vorschau geprüft und, soweit eindeutig, wiederhergestellt.
+Wiederherstellung ist bei dauerhaft unterbrochener Kommunikation nicht garantiert;
+der Fehlerstatus benennt die betroffenen Tage. Historische Journale bleiben lokal
+als Nachweis erhalten und enthalten private Heizzeiten.
+
+Tests simulieren echte LPB-Frames und prüfen gezielte Ziel-/Tagesauswahl,
+Vorschau ohne SET, Konflikte, abgelaufene/fremde Tokens, Replay, verlorene Antworten,
+ACK ohne passenden Rücklesewert, Rücksetzen mehrerer Tage, fehlgeschlagenes
+Rücksetzen, Wiederanlauf und fremde Bedieneränderungen. Die ursprünglichen
+Liveversuche betrafen ein-/zweiphasige Mittwochsprogramme; Randfälle wie ein
+leerer Tag, dritte Phase und 24:00 werden durch Codec-/Transaktionstests geprüft
+und bei einer echten Übernahme ebenfalls unabhängig ausgelesen.

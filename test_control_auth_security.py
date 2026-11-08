@@ -85,3 +85,23 @@ def test_control_api_accepts_valid_api_key(security_fixture):
     payload = res.get_json()
     assert payload["status"] == "success"
     assert wm.data_gateway.writes == [("plc_001", "Light.Test.bOn", True)]
+
+
+@pytest.mark.parametrize('action', ['preview', 'apply'])
+def test_heating_schedule_routes_use_existing_control_auth(security_fixture, action):
+    _, client = security_fixture
+    result = client.post('/api/heating/schedule/'+action, json={},
+                         headers={'X-Heating-Schedule':'1'},
+                         environ_overrides={'REMOTE_ADDR':'10.0.0.42'})
+    assert result.status_code == 401
+    assert result.json['error'] == 'unauthorized'
+
+
+def test_heating_schedule_route_rejects_cross_origin_and_plain_form(security_fixture):
+    _, client = security_fixture
+    result = client.post('/api/heating/schedule/preview', json={},
+                         headers={'X-API-Key':'super-secret','X-Heating-Schedule':'1','Origin':'http://outside.invalid'})
+    assert result.status_code == 403
+    result = client.post('/api/heating/schedule/apply', json={'token':'fake'},
+                         headers={'X-API-Key':'super-secret'})
+    assert result.status_code == 403

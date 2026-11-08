@@ -114,6 +114,7 @@
   document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>selectView(b.dataset.view)));
   document.querySelectorAll('[data-hours]').forEach(b=>b.addEventListener('click',()=>{hours=Number(b.dataset.hours);document.querySelectorAll('[data-hours]').forEach(c=>c.classList.toggle('selected',c===b));history();}));
   $('refresh').addEventListener('click',load);
+  document.addEventListener('heating-schedules-updated',load);
   $('theme').addEventListener('click',()=>{theme=theme==='dark'?'light':'dark';document.body.dataset.theme=theme;localStorage.setItem('heating-theme',theme);});
   selectView(view); load(); history(); setInterval(()=>{if(!document.hidden)load();},5000); setInterval(()=>{if(!document.hidden)history();},30000);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden){load();history();}});

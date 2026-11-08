@@ -28,3 +28,5 @@ Thumbs.db
 
 # Environment
 .env
+
+/config/heating_schedule_transactions/

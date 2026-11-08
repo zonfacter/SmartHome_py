@@ -457,6 +457,8 @@ class WebManager(BaseModule):
 
         if path.startswith('/api/admin'):
             return True
+        if path.startswith('/api/heating/schedule/') and method not in ('GET', 'HEAD', 'OPTIONS'):
+            return True
 
         protected_exact = {
             '/api/plc/connect',

@@ -1,4 +1,4 @@
-"""Shared LPB cache, local history and ioBroker integration; no heating writes."""
+"""Shared LPB cache, local history, ioBroker and bounded native schedule transfers."""
 from copy import deepcopy
 from contextlib import closing
 import json
@@ -14,6 +14,7 @@ import urllib.request
 
 from flask import jsonify, render_template, request
 from .heating_lpb import POINTS, WEEKDAYS, decode, decode_schedule, read_frame
+from .heating_schedule_write import ScheduleWriter, ScheduleError
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,7 @@ class HeatingService:
         self.interval = max(15, int(self.config.get('poll_seconds', 30)))
         self.fetch = fetch or self._fetch
         self.lock = threading.RLock()
+        self.bus_lock = threading.RLock()
         self.stop_event = threading.Event()
         self.thread = None
         self.metrics = {p.area + '.' + p.key: self._empty(p) for p in POINTS}
@@ -102,6 +104,7 @@ class HeatingService:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with closing(sqlite3.connect(self.db_path)) as db, db:
             db.execute('CREATE TABLE IF NOT EXISTS heating_samples (ts INTEGER PRIMARY KEY, payload TEXT NOT NULL)')
+        self.schedule_writer = ScheduleWriter(self.root, self.config, self.fetch, self._send_schedule, self.bus_lock, self._update_schedule_cache)
 
     @staticmethod
     def _empty(point):
@@ -112,6 +115,18 @@ class HeatingService:
         req = urllib.request.Request(self.url + path, headers={'Accept': 'application/json'})
         with urllib.request.urlopen(req, timeout=6) as response:
             return json.loads(response.read(256*1024))
+
+    def _send_schedule(self, path):
+        # The writer constructs this bounded path; arbitrary user URLs never reach it.
+        with urllib.request.urlopen(self.url + path, timeout=12) as response:
+            return response.read(256*1024).decode('utf-8', 'replace')
+
+    def _update_schedule_cache(self, area, payloads):
+        with self.lock:
+            for day,item in enumerate(self.schedules[area]):
+                item.update(periods=decode_schedule(payloads[day]) if payloads is not None else item['periods'],
+                            quality='valid' if payloads is not None else 'error', updated_at=time.time())
+            self.last_schedule=0
 
     def start(self):
         with self.lock:
@@ -131,6 +146,16 @@ class HeatingService:
             self.stop_event.wait(self.interval)
 
     def poll(self):
+        with self.bus_lock:
+            try:
+                self.schedule_writer.recover()
+            except Exception:
+                logger.warning('Heating schedule recovery is still pending')
+            self._poll_bus()
+        self._sync_iobroker()
+        self._save_history()
+
+    def _poll_bus(self):
         now = time.time()
         try:
             if self.own_address is None:
@@ -182,8 +207,6 @@ class HeatingService:
             with self.lock:
                 self.connection.update(connected=False, message='Heizungsbrücke nicht erreichbar' if not isinstance(error, ValueError) else 'Heizungsdaten konnten nicht bestätigt werden')
             logger.warning('Heating bridge read failed (%s)', type(error).__name__)
-        self._sync_iobroker()
-        self._save_history()
 
     def snapshot(self):
         now = time.time()
@@ -203,7 +226,8 @@ class HeatingService:
                         day['quality']='stale'
             for room in rooms:
                 room['stale'] = not self.io_status.get('tado_connected') or now - room.get('timestamp', 0) > 900
-            return {'enabled': self.enabled, 'read_only': True, 'server_time': now,
+            return {'enabled': self.enabled, 'read_only': not self.schedule_writer.enabled, 'server_time': now,
+                    'schedule_control': {'enabled': self.schedule_writer.enabled, 'recovery_required': bool(self.schedule_writer.pending)},
                     'connection': deepcopy(self.connection), 'iobroker': deepcopy(self.io_status),
                     'floors': {area: {'name': name, 'controller': model,
                                       'metrics': {k.split('.')[1]: v for k, v in metrics.items() if k.startswith(area + '.')}}
@@ -353,5 +377,38 @@ def register_heating_routes(manager, root=None):
         if hours not in (1, 6, 24):
             return jsonify({'error': 'invalid_hours'}), 400
         return jsonify({'hours': hours, 'samples': service.history(hours)})
+
+    def schedule_guard():
+        if request.headers.get('X-Heating-Schedule') != '1' or not request.is_json:
+            raise ScheduleError('Übertragung benötigt eine bestätigte JSON-Anfrage.', 403)
+        origin=request.headers.get('Origin')
+        if origin and origin.rstrip('/') != request.host_url.rstrip('/'):
+            raise ScheduleError('Diese Anfrage stammt nicht von der SmartHome-Oberfläche.', 403)
+
+    def schedule_request(action):
+        try:
+            schedule_guard()
+            body=request.get_json(silent=True)
+            owner=str(request.remote_addr or '')
+            if action == 'preview':
+                result=service.schedule_writer.preview(body,owner)
+            else:
+                if not isinstance(body,dict) or set(body) != {'token'}:
+                    raise ScheduleError('Ungültige Übernahmebestätigung.')
+                result=service.schedule_writer.apply(body['token'],owner)
+            return jsonify(result)
+        except ScheduleError as error:
+            return jsonify({'success':False,'message':str(error),**error.details}),error.status
+        except Exception as error:
+            logger.warning('Heating schedule request failed (%s)',type(error).__name__)
+            return jsonify({'success':False,'message':'Die Heizungsbrücke konnte nicht bestätigt werden. Bitte den Reglerstand erneut prüfen.'}),503
+
+    @app.route('/api/heating/schedule/preview',methods=['POST'])
+    def heating_schedule_preview():
+        return schedule_request('preview')
+
+    @app.route('/api/heating/schedule/apply',methods=['POST'])
+    def heating_schedule_apply():
+        return schedule_request('apply')
 
     return service

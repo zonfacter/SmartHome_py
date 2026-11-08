@@ -32,13 +32,29 @@ Nur hier gelistete Endpunkte gelten als dokumentierter API-Stand.
 ## Heizung / Eurocontrol
 - `GET /api/heating/state`
 - `GET /api/heating/history`
+- `POST /api/heating/schedule/preview`
+- `POST /api/heating/schedule/apply`
 
 `state` liefert den gemeinsamen, nur lesenden LPB-Zwischenspeicher für EG/M,
 OG/K und Anlage sowie ioBroker-/Tado-Status. Kein Browser-Refresh erzwingt
 zusätzliche Busabfragen. `history?hours=1|6|24` liefert höchstens 360 lokal
 gespeicherte Messpunkte. Ungültige Messwerte bleiben `null`; Qualität und
-Messzeitpunkt werden separat ausgegeben. Heizungs-Schreibendpunkte existieren
-in diesem Modul nicht. Details: `docs/16_heating_dashboard.md`.
+Messzeitpunkt werden separat ausgegeben. `schedule_control.enabled` zeigt, ob
+gezielte Zeitprogramm-Übernahmen aktiviert sind; `read_only` ist dann `false`.
+Andere Parameter bleiben ausschließlich lesbar.
+
+`preview` erhält `{area:"eg"|"og", base:[7 Tagesprogramme], days:[7 Tagesprogramme]}`.
+Ein Tagesprogramm ist eine Liste von maximal drei Objekten mit `start`/`end` im
+Format HH:MM. Die Basis wird frisch mit dem Regler verglichen. Die Antwort enthält
+einen an den Client gebundenen, drei Minuten gültigen Token und die Tagesänderungen.
+`apply` erhält ausschließlich `{token:"..."}` und schreibt nach erneuter Prüfung
+nur die geänderten Tage. Erfolg enthält `verified_days`, `changed_days` und eine
+Transaktions-ID. Wiederholte identische Bestätigungen schreiben nicht erneut.
+Beide POSTs verwenden die bestehende Control-Authentifizierung, JSON und den
+Header `X-Heating-Schedule: 1`. `409` bedeutet Konflikt/abgelaufene Vorschau,
+`502` einen Übertragungsfehler mit `restored` als Wiederherstellungsergebnis,
+`503` deaktivierten/unerreichbaren Regler oder ausstehende Wiederherstellung.
+Details: `docs/16_heating_dashboard.md`.
 
 ## PLC / TwinCAT
 - `GET /api/plc/config`

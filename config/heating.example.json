@@ -4,5 +4,7 @@
   "iobroker_url": "ws://iobroker.local:8081/",
   "poll_seconds": 30,
   "room_floors": {},
-  "room_names": {}
+  "room_names": {},
+  "schedule_writes_enabled": false,
+  "bsb_mac": "00:00:00:00:00:00"
 }
