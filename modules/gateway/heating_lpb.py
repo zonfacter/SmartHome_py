@@ -58,6 +58,34 @@ def points():
 
 
 POINTS = points()
+WEEKDAYS = tuple(zip(('monday','tuesday','wednesday','thursday','friday','saturday','sunday'),
+                    ('Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag')))
+
+
+def decode_schedule(payload):
+    """Native daily array: three hour/minute pairs, no scalar validity prefix."""
+    if payload is None:
+        return None
+    if len(payload) != 12:
+        raise ValueError('daily program must contain twelve bytes')
+    periods = []
+    for offset in range(0, 12, 4):
+        sh, sm, eh, em = payload[offset:offset+4]
+        start_hour, end_hour = sh & 0x7F, eh & 0x7F
+        if start_hour > 24 or end_hour > 24 or sm > 59 or em > 59:
+            raise ValueError('invalid switch-point time')
+        if (start_hour == 24 and sm) or (end_hour == 24 and em):
+            raise ValueError('invalid midnight')
+        if sh & 0x80 or eh & 0x80:
+            continue  # observed 80 and 98 markers disable unused pairs
+        start, end = start_hour*60+sm, end_hour*60+em
+        if start == end:
+            continue
+        if start >= 1440 or end < start or (periods and start < periods[-1]['end_minute']):
+            raise ValueError('unordered or overlapping daily intervals')
+        periods.append({'start':f'{start_hour:02}:{sm:02}', 'end':f'{end_hour:02}:{em:02}',
+                        'start_minute':start,'end_minute':end})
+    return periods
 
 
 def checksum_valid(packet):

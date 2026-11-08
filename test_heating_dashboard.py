@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from flask import Flask
 from modules.gateway.heating import HeatingService, IoBroker, register_heating_routes
-from modules.gateway.heating_lpb import POINTS, Point, checksum_valid, decode, read_frame
+from modules.gateway.heating_lpb import POINTS, Point, checksum_valid, decode, decode_schedule, read_frame
 
 
 def packet(destination, source, kind, command, payload=b''):
@@ -65,6 +65,24 @@ class HeatingTests(unittest.TestCase):
         curve = next(p for p in POINTS if p.area=='eg' and p.key=='curve')
         self.assertEqual(decode(curve,b'\0\x1c'),14)
 
+    def test_native_daily_array_has_three_pairs_and_no_validity_prefix(self):
+        periods=decode_schedule(bytes.fromhex('06 00 08 00 10 00 16 00 80 00 00 00'))
+        self.assertEqual([(p['start'],p['end']) for p in periods],[('06:00','08:00'),('16:00','22:00')])
+        self.assertEqual(periods[0]['start_minute'],360)
+
+    def test_daily_array_disabled_markers_and_midnight(self):
+        self.assertEqual(decode_schedule(bytes.fromhex('00 00 18 00 98 00 18 00 98 00 18 00'))[0]['end'],'24:00')
+        self.assertEqual(decode_schedule(bytes.fromhex('80 00 00 00 98 00 18 00 18 00 18 00')),[])
+        self.assertIsNone(decode_schedule(None))
+
+    def test_daily_array_rejects_malformed_times_and_overlaps(self):
+        for payload in ('06 3C 08 00 80 00 00 00 80 00 00 00',
+                        '06 00 05 00 80 00 00 00 80 00 00 00',
+                        '06 00 08 00 07 00 09 00 80 00 00 00',
+                        '06 00 18 01 80 00 00 00 80 00 00 00'):
+            with self.assertRaises(ValueError):decode_schedule(bytes.fromhex(payload))
+        with self.assertRaises(ValueError):decode_schedule(bytes(11))
+
     def test_relay_offsets_are_independent_and_have_no_scalar_prefix(self):
         definitions = {p.key:p for p in POINTS if p.area=='eg'}
         payload = b'\0\0\xff\0\0\0\0\0'
@@ -96,6 +114,8 @@ class HeatingTests(unittest.TestCase):
                 return {'bus':'LPB','busaddr':66,'busdevices':[{'dev_id':0,'dev_fam':22,'dev_var':254},{'dev_id':1,'dev_fam':23,'dev_var':254}]}
             self.assertTrue(path.startswith('/JY06,'))
             coid,target=path.split(',')[1].split('!'); target=int(target)
+            if 0x0A8C<=int(coid[-4:],16)<=0x0A92:
+                return response(target,coid,bytes.fromhex('06 00 08 00 10 00 16 00 80 00 00 00'))
             p=next(p for p in POINTS if p.target==target and p.coid==coid)
             payload = b'\0\5\0' if p.kind=='temperature' else b'\0\0\xff\0\0\0\0\0' if p.kind.startswith('relay') else b'\0\xff' if p.kind=='boolean' else b'\0\1' if p.kind=='mode' else b'\0\x63\x48' if p.kind=='counter' else b'\0\4'
             return response(target,coid,payload)
@@ -105,6 +125,8 @@ class HeatingTests(unittest.TestCase):
         for _ in range(15):self.assertTrue(service.snapshot()['read_only'])
         self.assertEqual(count,len(calls))
         self.assertEqual(calls.count('/JY06,05000488!1'),1)
+        self.assertEqual(calls.count('/JY06,05000A8C!1'),1)
+        self.assertEqual(service.snapshot()['schedules']['eg'][0]['periods'][0]['start'],'06:00')
         self.assertEqual(service.snapshot()['floors']['eg']['metrics']['pump']['value'],True)
         self.assertEqual(len(service.history(1)),1)
 

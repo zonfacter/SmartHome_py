@@ -80,3 +80,33 @@ Vor einer Installation die geänderten Quelldateien sichern und auf dem Ziel mit
 der dortigen virtuellen Umgebung prüfen. Ein Dienstneustart lädt die neuen
 Routen. Zur Deaktivierung `enabled=false` setzen und den Webdienst neu starten;
 die ursprüngliche SmartHome-Seite und andere Integrationen bleiben erhalten.
+
+## Native Wochenprogramme
+
+Die Wochenübersicht liest tatsächliche Reglerprogramme und plant keine eigenen
+Stellbefehle auf der VM. Die passenden Profile besitzen sieben Tagesarrays mit
+`COzwDpVhSwitchPointArray` / `COzwSwitchPointArray`; diese werden vom bisherigen
+allgemeinen `COzwVal*`-Extraktor nicht erfasst. Die früher geprüften Einzeladressen
+`05000A28/29` waren für diese Versionen ungeeignet.
+
+Bestätigt sind Montag `05000A8C` bis Sonntag `05000A92`, jeweils M/EG an Ziel 1
+und K/OG an Ziel 0. Alle 14 Abfragen lieferten TYPE_ANS mit gültiger Prüfsumme.
+Die zwölf Rohbytes bilden drei Paare `Startstunde, Startminute, Endstunde,
+Endminute`, ohne zusätzliches skalares Gültigkeitsbyte. Bit 7 kennzeichnet einen
+deaktivierten Schaltpunkt; beobachtet wurden die ungenutzten Startwerte `80`
+und `98` (hex). `24:00` ist als Ende zulässig. Beschädigte oder überlappende
+Intervalle werden nicht als plausibles Zeitprogramm dargestellt.
+
+Die Programme werden einmal je 15 Minuten gelesen und nach 31 Minuten ohne neue
+Antwort als veraltet markiert. `schedules` im Status-JSON enthält beide Wochen.
+ioBroker erhält pro Tag einen nur lesenden Textwert unter
+`0_userdata.0.heizung.eg.schedule_monday` bis `schedule_sunday`, ebenso für OG.
+Die Ansicht folgt der gewählten Etage und markiert den aktuellen Wochentag in
+Europe/Berlin. Die Komfortzeiten gelten in Automatik und sind keine direkte
+Dauerfreigabe für Pumpen oder Brenner. Die Schreibdarstellung dieser Tagesarrays
+ist noch nicht praktisch bestätigt; es gibt daher keine Speichern-Befehle.
+
+Quellen: K `D0016682.apw`, OV200.4 (SHA oben), Montag DP2082/Adresstail2698;
+M `D0017684.apw`, OV200.6, SHA
+`bffb18693acab2abff2fe5945f85ed05026d3c7fa85ca33a7c35401e6738e1ad`,
+Montag DP1884/Adresstail2496. Die Tageslabels stammen aus Katalogzeilen298–304.

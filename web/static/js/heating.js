@@ -56,6 +56,24 @@
     $('tado-status').textContent = connected ? '● Über ioBroker verbunden' : 'Tado nicht verbunden';
     $('tado-status').classList.toggle('online',!!connected);
   }
+  function renderSchedule() {
+    if(!snapshot?.schedules)return;
+    const areas=['eg','og'].filter(a=>view==='overview'||view===a);
+    const today=new Intl.DateTimeFormat('en-GB',{weekday:'long',timeZone:'Europe/Berlin'}).format(new Date()).toLowerCase();
+    const table=$('schedule-table');table.style.setProperty('--schedule-columns',areas.length);
+    let html='<div class="schedule-row schedule-header"><span>Wochentag</span>'+areas.map(a=>'<span>'+a.toUpperCase()+' · '+escape(snapshot.floors[a].controller)+'</span>').join('')+'</div>';
+    for(let i=0;i<7;i++){
+      const day=snapshot.schedules.eg[i];
+      html+=`<div class="schedule-row ${day.day===today?'today':''}"><div class="schedule-day">${escape(day.label)}${day.day===today?'<small>Heute</small>':''}</div>`;
+      for(const area of areas){
+        const item=snapshot.schedules[area][i],periods=item.periods||[],good=item.quality==='valid';
+        const message=item.quality==='pending'?'Wird gelesen …':item.quality==='stale'?'Stand veraltet':'Nicht verfügbar';
+        html+=`<div class="schedule-cell ${area}">${good ? (periods.length?periods.map(p=>'<span>'+escape(p.start)+'–'+escape(p.end)+'</span>').join(''):'<span class="muted">Keine Komfortphase</span>'):'<span class="muted">'+message+'</span>'}<div class="schedule-track" aria-hidden="true">${good?periods.map(p=>`<i style="left:${(p.start_minute/14.4).toFixed(3)}%;width:${((p.end_minute-p.start_minute)/14.4).toFixed(3)}%"></i>`).join(''):''}</div></div>`;
+      }
+      html+='</div>';
+    }
+    table.innerHTML=html;
+  }
   function render() {
     const p = snapshot.plant, connected = snapshot.connection.connected;
     stat('boiler',p.boiler); stat('dhw',p.dhw); stat('outside',snapshot.floors.eg.metrics.outside); stat('burner',p.burner,'');
@@ -70,7 +88,7 @@
     const io = snapshot.iobroker.connected;
     $('io-light').classList.toggle('online',io); $('io-status').textContent = io ? 'ioBroker verbunden · Heizungswerte synchronisiert' : 'ioBroker nicht verbunden';
     $('updated').textContent = snapshot.connection.last_success ? 'Letzte Heizungsabfrage ' + formatTime(snapshot.connection.last_success) : 'Warte auf Heizungsdaten';
-    renderFloors(); renderRooms();
+    renderFloors(); renderRooms(); renderSchedule();
   }
   async function load() {
     if (inFlight) return;
@@ -106,7 +124,7 @@
     $('page-title').innerHTML=(view==='eg'?'Erdgeschoss':view==='og'?'Obergeschoss':'Heizungsübersicht')+'<span>.</span>';
     $('page-subtitle').textContent=view==='eg'?'Fußbodenheizung · Eurocontrol M':view==='og'?'Heizkörper · Eurocontrol K':'Fußbodenheizung im EG. Heizkörper im OG. Alles an einem Ort.';
     const url=new URL(location); view==='overview'?url.searchParams.delete('etage'):url.searchParams.set('etage',view); window.history.replaceState(null,'',url);
-    renderFloors();renderRooms();
+    renderFloors();renderRooms();renderSchedule();
     window.scrollTo(0,0);
   }
   document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>selectView(b.dataset.view)));

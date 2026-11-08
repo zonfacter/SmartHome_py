@@ -13,7 +13,7 @@ import time
 import urllib.request
 
 from flask import jsonify, render_template, request
-from .heating_lpb import POINTS, decode, read_frame
+from .heating_lpb import POINTS, WEEKDAYS, decode, decode_schedule, read_frame
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,9 @@ class HeatingService:
         self.io_status = {'connected': False, 'tado_connected': False}
         self.connection = {'connected': False, 'message': 'Verbindung wird aufgebaut' if self.enabled else 'Noch nicht eingerichtet'}
         self.last_slow = 0
+        self.last_schedule = 0
+        self.schedules = {area:[{'day':day,'label':label,'periods':None,'quality':'pending','updated_at':None}
+                                for day,label in WEEKDAYS] for area in ('eg','og')}
         self.last_rooms = 0
         self.own_address = None
         self.objects_created = set()
@@ -158,6 +161,21 @@ class HeatingService:
                 successful += payload is not None
             if slow:
                 self.last_slow = now
+            if now - self.last_schedule > 900:
+                for area,target in (('eg',1),('og',0)):
+                    for day in range(7):
+                        if self.stop_event.is_set():
+                            return
+                        coid=f'05000A{0x8C+day:02X}'
+                        payload=read_frame(self.fetch(f'/JY06,{coid}!{target}'),target,coid,self.own_address)
+                        try:
+                            periods=decode_schedule(payload)
+                            quality='valid' if periods is not None else 'unavailable'
+                        except ValueError:
+                            periods,quality=None,'error'
+                        with self.lock:
+                            self.schedules[area][day].update(periods=periods,quality=quality,updated_at=time.time())
+                self.last_schedule=now
             with self.lock:
                 self.connection = {'connected': True, 'message': 'LPB verbunden', 'last_success': time.time(), 'objects': successful}
         except Exception as error:
@@ -178,6 +196,11 @@ class HeatingService:
                 if item['quality'] == 'valid' and age is not None and age > (900 if point.slow else max(90, self.interval*3)):
                     item['quality'] = 'stale'
             rooms = deepcopy(self.rooms)
+            schedules=deepcopy(self.schedules)
+            for days in schedules.values():
+                for day in days:
+                    if day['quality']=='valid' and now-day['updated_at']>1860:
+                        day['quality']='stale'
             for room in rooms:
                 room['stale'] = not self.io_status.get('tado_connected') or now - room.get('timestamp', 0) > 900
             return {'enabled': self.enabled, 'read_only': True, 'server_time': now,
@@ -185,7 +208,8 @@ class HeatingService:
                     'floors': {area: {'name': name, 'controller': model,
                                       'metrics': {k.split('.')[1]: v for k, v in metrics.items() if k.startswith(area + '.')}}
                                for area, name, model in [('eg', 'Erdgeschoss', 'Eurocontrol M'), ('og', 'Obergeschoss', 'Eurocontrol K')]},
-                    'plant': {k.split('.')[1]: v for k, v in metrics.items() if k.startswith('anlage.')}, 'rooms': rooms}
+                    'plant': {k.split('.')[1]: v for k, v in metrics.items() if k.startswith('anlage.')},
+                    'rooms': rooms, 'schedules': schedules}
 
     def _sync_iobroker(self):
         url = self.config.get('iobroker_url')
@@ -245,6 +269,20 @@ class HeatingService:
                     self.objects_created.add(key)
                 valid = item['quality'] == 'valid'
                 bridge.call('setState', key, {'val': item['value'] if valid else None, 'ack': True, 'q': 0 if valid else 0x40})
+            for area,days in snapshot['schedules'].items():
+                for day in days:
+                    key=f'{IoBroker.PREFIX}.{area}.schedule_{day["day"]}'
+                    if key not in self.objects_created:
+                        existing=bridge.call('getObject',key)
+                        if existing and existing.get('native',{}).get('managed_by')!='smarthome-heating':
+                            raise ValueError('existing schedule state belongs to another integration')
+                        if not existing:
+                            bridge.call('setObject',key,{'type':'state','common':{'name':f'{day["label"]} · Komfortzeiten · {area.upper()}',
+                                        'type':'string','role':'text','read':True,'write':False},'native':{'managed_by':'smarthome-heating'}})
+                        self.objects_created.add(key)
+                    valid=day['quality']=='valid'
+                    text=' · '.join(p['start']+'–'+p['end'] for p in (day['periods'] or [])) or 'Keine Komfortphase'
+                    bridge.call('setState',key,{'val':text if valid else None,'ack':True,'q':0 if valid else 0x40})
         except Exception as error:
             with self.lock:
                 self.io_status.update(connected=False, message='ioBroker-Verbindung unterbrochen')
