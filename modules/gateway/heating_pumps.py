@@ -92,7 +92,8 @@ def diagnose(area, metrics, plant, days, now):
     if type(target) in (int, float) and math.isfinite(target):
         facts.append(f'Aktueller Raumsollwert: {target:g} °C.')
     factor = valid(metrics, 'quick_setback')
-    if type(factor) in (int, float) and factor > 0 and pump is False and phase and phase['phase'] == 'reduced':
+    no_room_sensor = metrics.get('room_actual', {}).get('quality') == 'unavailable'
+    if no_room_sensor and type(factor) in (int, float) and factor > 0 and pump is False and phase and phase['phase'] == 'reduced':
         hints.append(f'Schnellabsenkung ist möglich (KON-Einstellung {factor:g}). Nach einer Sollwertsenkung kann sie die Pumpe auch ohne Raumfühler anhalten. Ein aktiver Schnellabsenkungsstatus ist damit nicht bestätigt.')
     if valid(metrics, 'remote_switch') is True:
         facts.append('Der externe Telefon-/Fernschaltkontakt wird als Ein gemeldet; seine konkrete Wirkung ist nicht zugeordnet.')
@@ -121,7 +122,7 @@ def diagnose(area, metrics, plant, days, now):
 
 
 def event_payload(metrics, plant):
-    keys = ('pump', 'mode', 'room_setpoint', 'flow_setpoint', 'remote_switch', 'quick_setback', 'clock') + tuple(s[0] for s in SIGNALS)
+    keys = ('pump', 'mode', 'room_setpoint', 'flow_setpoint', 'remote_switch', 'quick_setback', 'room_actual', 'clock') + tuple(s[0] for s in SIGNALS)
     # Raw/quality changes are recorded; the ticking clock does not create events.
     return {**{key: {'value': metrics[key].get('value'), 'quality': metrics[key].get('quality'),
                      'updated_at': metrics[key].get('updated_at')} for key in keys if key in metrics},

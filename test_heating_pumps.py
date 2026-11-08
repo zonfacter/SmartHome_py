@@ -63,7 +63,7 @@ class PumpTests(unittest.TestCase):
 
     def test_reduced_and_kon_are_hints_not_proven_stop_reason(self):
         metrics={'pump':item(False),'mode':item('Automatik'),'clock':item('Sonntag 22:00'),
-                 'room_setpoint':item(14),'quick_setback':item(2)}
+                 'room_setpoint':item(14),'quick_setback':item(2),'room_actual':item(None,'unavailable')}
         result=diagnose('og',metrics,{'dhw_pump':item(False)},days(),time.time())
         self.assertEqual(result['phase']['phase'],'reduced')
         self.assertTrue(any('Schnellabsenkung' in hint for hint in result['hints']))
@@ -73,6 +73,13 @@ class PumpTests(unittest.TestCase):
         result=diagnose('og',metrics,{},days(),time.time())
         self.assertIsNone(result['phase'])
         self.assertFalse(any('Schnellabsenkung' in hint for hint in result['hints']))
+
+    def test_kon_hint_requires_confirmed_absent_room_sensor(self):
+        metrics={'pump':item(False),'mode':item('Automatik'),'clock':item('Sonntag 22:00'),'quick_setback':item(10)}
+        for sensor in (item(20),item(None,'pending'),item(20,'stale')):
+            metrics['room_actual']=sensor
+            result=diagnose('eg',metrics,{},days(),time.time())
+            self.assertFalse(any('KON-Einstellung' in hint for hint in result['hints']))
 
     def test_running_dhw_and_zero_locks_do_not_prove_causation(self):
         metrics={'pump':item(False),'mode':item('Automatik')}

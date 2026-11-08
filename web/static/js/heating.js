@@ -9,6 +9,7 @@
   const text = metric => !valid(metric) ? '—' : typeof metric.value === 'boolean' ? (metric.value ? 'Ein' : 'Aus') : numeric(metric.value) ? number(metric.value, ['curve','gain','minutes','counter'].includes(metric.kind) && metric.kind !== 'curve' ? 0 : 1) : metric.value;
   const formatTime = ts => new Intl.DateTimeFormat('de-DE', {hour:'2-digit', minute:'2-digit', timeZone:'Europe/Berlin'}).format(new Date(ts * 1000));
   let snapshot = null, view = 'overview', hours = 6, historySequence = 0, inFlight = false, expanded = new Set();
+  let initialAnchorPending = true;
   let theme = localStorage.getItem('heating-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   document.body.dataset.theme = theme;
   const initialView = new URLSearchParams(location.search).get('etage');
@@ -79,7 +80,9 @@
   async function load() {
     if (inFlight) return;
     inFlight=true; $('refresh').disabled=true;
-    try { const response=await fetch('/api/heating/state',{cache:'no-store'}); if(!response.ok) throw Error(); snapshot=await response.json(); render(); }
+      try { const response=await fetch('/api/heating/state',{cache:'no-store'}); if(!response.ok) throw Error(); snapshot=await response.json(); render();
+        if(initialAnchorPending){initialAnchorPending=false;const id=location.hash.slice(1);if(['pumpendiagnose','brennerstatistik','reglerdiagnose','schedule-table'].includes(id))requestAnimationFrame(()=>$(id)?.scrollIntoView({block:'start'}));}
+      }
     catch { $('connection-note').hidden=false; $('connection-note').textContent='Die SmartHome-VM ist gerade nicht erreichbar. Anzeige wird automatisch erneut geladen.'; $('live-tag').classList.remove('online'); $('live-tag').querySelector('span').textContent='Anzeige offline'; }
     finally { inFlight=false; $('refresh').disabled=false; }
   }
