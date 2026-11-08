@@ -29,6 +29,14 @@ test('disabled room influence keeps stored factor separate from active correctio
   assert.ok(h.notes.some(n=>n.includes('gespeicherter Wert')));
 });
 
+test('disabled adaptation is described as disabled in the setup guide',()=>{
+  const checks=guideChecks(snapshot({adaptation:item(false)}),'eg');
+  const adaptation=checks.find(c=>c.title==='Heizkurvenadaption');
+  assert.equal(adaptation.value,'Aus');
+  assert.ok(adaptation.note.includes('Aus gemeldet'));
+  assert.ok(!adaptation.note.includes('aktivierte'));
+});
+
 test('live values preserve units and unavailable values are never displayed as zero',()=>{
   assert.equal(format(item(8,'valid','°C')),'8 °C');
   assert.equal(format(item(null,'unavailable','°C')),'Kein gültiger Wert geliefert');

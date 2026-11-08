@@ -93,7 +93,8 @@
     const values=[{title:'Raumfühler am Regler',value:format(sensor),note:'Die Tado-Anzeige speist derzeit keinen Raumfühlerwert ein.'}];
     if(influence===true&&sensor?.quality==='unavailable')values.push({title:'Raumeinfluss prüfen',value:'Ein · Raumwert nicht verfügbar',note:'Aktivierung und fehlender Raumwert getrennt prüfen. Daraus folgt keine automatische Änderungsempfehlung.'});
     else values.push({title:'Raumeinfluss',value:format(m.room_influence),note:sensor?.quality==='valid'?'Ein gültiger Raumwert liegt vor; die Funktionsvoraussetzungen bleiben zusätzlich zu beachten.':'Ohne gültigen Raumwert ist eine wirksame Rückmeldung nicht bestätigt.'});
-    values.push({title:'Heizkurvenadaption',value:format(m.adaptation),note:'Die aktivierte Einstellung beweist noch keine wirksame Anpassung.'});
+    const adaptation=read(m,'adaptation');
+    values.push({title:'Heizkurvenadaption',value:format(m.adaptation),note:adaptation===true?'Die aktivierte Einstellung beweist noch keine wirksame Anpassung.':adaptation===false?'Die Adaption wird als Aus gemeldet.':'Der Adaptionsstatus ist nicht verlässlich bestätigt.'});
     return values;
   }
   class View{
