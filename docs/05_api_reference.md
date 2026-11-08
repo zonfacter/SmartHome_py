@@ -29,6 +29,17 @@ Nur hier gelistete Endpunkte gelten als dokumentierter API-Stand.
 - `GET /api/system/feature-flags`
 - `GET /api/telemetry`
 
+## Heizung / Eurocontrol
+- `GET /api/heating/state`
+- `GET /api/heating/history`
+
+`state` liefert den gemeinsamen, nur lesenden LPB-Zwischenspeicher für EG/M,
+OG/K und Anlage sowie ioBroker-/Tado-Status. Kein Browser-Refresh erzwingt
+zusätzliche Busabfragen. `history?hours=1|6|24` liefert höchstens 360 lokal
+gespeicherte Messpunkte. Ungültige Messwerte bleiben `null`; Qualität und
+Messzeitpunkt werden separat ausgegeben. Heizungs-Schreibendpunkte existieren
+in diesem Modul nicht. Details: `docs/16_heating_dashboard.md`.
+
 ## PLC / TwinCAT
 - `GET /api/plc/config`
 - `POST /api/plc/config`

@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "bsb_url": "http://bsb-lan.local",
+  "iobroker_url": "ws://iobroker.local:8081/",
+  "poll_seconds": 30,
+  "room_floors": {},
+  "room_names": {}
+}

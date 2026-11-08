@@ -1,0 +1,82 @@
+# Heizungsdashboard: Eurocontrol K und M
+
+Das Modul erweitert die bestehende SmartHome-Flask-Anwendung unter `/heizung`.
+Der Menüpunkt ist auf Desktop und Mobilgerät erreichbar. Es gibt eine gemeinsame
+Übersicht und getrennte EG-/OG-Ansichten; `?etage=eg` bzw. `?etage=og` öffnet die
+entsprechende Ansicht direkt. CSS, JavaScript, Symbole und Diagramme werden lokal
+ausgeliefert; für diese Ansicht werden keine CDN-Ressourcen benötigt.
+
+## Einrichtung
+
+`config/heating.example.json` nach `config/heating.json` kopieren und die lokalen
+BSB-LAN-/ioBroker-Adressen eintragen. Diese Datei und die Verlaufsdatenbank sind
+Git-ignoriert. Ohne Konfiguration bleibt der Collector deaktiviert.
+`simple-websocket` wird von der bestehenden Flask-SocketIO-Installation verwendet.
+
+Die Installation erwartet LPB, K an Adresse 0 (Familie 22, Variante 254) und M an
+Adresse 1 (Familie 23, Variante 254). Andere Geräte werden nicht stillschweigend
+mit diesen Definitionen ausgelesen. Das Modul nutzt ausschließlich die bestehende
+Rohlese-API `/JY06,...`; daher funktionieren die Messwerte auch vor Installation
+des neuen BSB-LAN-Parameterprofils. Es wird keine ESP32-Firmware verändert.
+
+Die Antworten werden auf Prüfsumme, Absender, Ziel, Objekt und TYPE_ANS geprüft.
+Der ausgehende Frame muss eine TYPE_QUR ohne Nutzdaten sein. Abgelehnte Objekte
+und ungültige Sensorwerte bleiben unverfügbar; `01 00 00` wird nie als gemessene
+0 oder 20 Grad angezeigt. Relaiszustände beschreiben Kontakte, keine gemessene
+Förderleistung oder Ventilposition. Auf/Zu stammen aus dem Siemens-Profil für
+OV200.6; bisher physisch abgeglichen ist der Zustand Pumpe an/Mischer aus.
+
+Die Brenneranzeige verwendet die K-Ausgänge K4/K5 aus `05000488`, Byte 0/1.
+Im passenden OV200.4-Profil `D0016682.apw` referenziert der Relaistest die
+Herstellerliste `Txt_RelaisTest_RVA43223` (MessageSet133): Brennerstufe 1 ist K4,
+Stufe 1+2 ist K4+K5. Angezeigt wird der Relaisstatus, keine Flammenmessung.
+Das zusätzliche Anlagestatus-Objekt `05000926` heißt zwar Brennerkontakt, seine
+genaue Beziehung zu Relaisanforderung und tatsächlicher Flamme ist aber offen;
+es wird deshalb für diese Anzeige nicht verwendet.
+Der gleiche Block liefert Q3 an Byte 3 als Warmwasserpumpenrelais. Der
+Profil-SHA256 für diese K-Zuordnung lautet
+`38d209d81ca2b2acf3fd99e1b9e57aae2d3f8b92f27778a1ba7a7ed43c7f4958`.
+
+## Gemeinsamer Cache und Verlauf
+
+Ein Hintergrundthread liest schnelle Werte alle 30 Sekunden, Einstellungen alle
+fünf Minuten. Geteilte LPB-Objekte werden je Runde nur einmal abgefragt. Browser
+lesen alle fünf Sekunden denselben Cache und erzeugen keine eigenen Busabfragen.
+Ein manueller Refresh aktualisiert ebenfalls nur die Anzeige. Der Collector
+startet erst beim ersten Seiten-/Statusaufruf und endet mit dem WebManager.
+
+Jeder Wert hat `value`, `quality`, `updated_at` und `age_seconds`. Schnelle Werte
+werden nach mindestens 90 Sekunden ohne Aktualisierung als veraltet markiert,
+langsame Einstellungen nach 15 Minuten. Die VM speichert Temperatur- und
+Brennerverläufe für 30 Tage in `config/heating_history.db`. Die API liefert maximal
+360 Punkte pro Abfrage; Datenlücken bleiben im Diagramm unterbrochen.
+
+## ioBroker und Tado
+
+Die native ioBroker-WebSocket-Verbindung liest Tado-Temperaturen, Raumvorgaben und
+Feuchte. Adapterverbindung und Messzeitpunkt werden ausgewertet. Raumzuordnungen
+stehen in `room_floors`, mit der vollständigen Tado-Raum-ID als Schlüssel und
+`eg`, `og` oder `kg` als Wert. Ohne bestätigte Zuordnung bleibt ein Raum separat.
+Raumnamen werden aus ioBroker gelesen oder mit `room_names` überschrieben.
+
+Die Heizungswerte werden ausschließlich unter `0_userdata.0.heizung.*` mit
+`ack=true` veröffentlicht. Die Objekte sind nicht schreibbar; ungültige oder
+veraltete Werte werden als `null`, Qualität `0x40`, übertragen. Existierende
+Objekte fremder Integrationen werden nicht übernommen. Neue Objekte tragen
+`native.managed_by=smarthome-heating`.
+
+Es gibt keine Stellbefehle, Tado-Schreibzugriffe oder Raumfühlereinspeisung.
+Der aktuelle Brennerstartzähler ist keine Energiemessung. Daten- und Status-API:
+`GET /api/heating/state`, `GET /api/heating/history?hours=1|6|24`.
+
+## Prüfung und Wiederherstellung
+
+`python -m unittest test_heating_dashboard.py` prüft ohne Netzwerk die
+Frameintegrität, Dekodierung, ungültige Sensoren, getrennte Relaisbits, den
+gemeinsamen Cache, falsche Geräteidentität, veraltete Werte, ioBroker-Schreibgrenzen
+und die nur lesenden HTTP-Routen. `make smoke` schließt diese Tests ein.
+
+Vor einer Installation die geänderten Quelldateien sichern und auf dem Ziel mit
+der dortigen virtuellen Umgebung prüfen. Ein Dienstneustart lädt die neuen
+Routen. Zur Deaktivierung `enabled=false` setzen und den Webdienst neu starten;
+die ursprüngliche SmartHome-Seite und andere Integrationen bleiben erhalten.

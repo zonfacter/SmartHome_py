@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#163d38">
+  <title>Heizung · SmartHome</title>
+  <link rel="stylesheet" href="/static/css/heating.css?v=1">
+  <script defer src="/static/js/heating.js?v=1"></script>
+</head>
+<body>
+  <svg class="svg-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+    <symbol id="house" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/><path d="M9 21v-8h6v8"/></symbol>
+    <symbol id="heat" viewBox="0 0 24 24"><path d="M8 3c-4 4 4 5 0 9M16 3c-4 4 4 5 0 9M3 16h18M5 16v5M10 16v5M15 16v5M20 16v5"/></symbol>
+    <symbol id="drop" viewBox="0 0 24 24"><path d="M12 3S5 11 5 15a7 7 0 0 0 14 0c0-4-7-12-7-12Z"/><path d="M8 15a4 4 0 0 0 4 4"/></symbol>
+    <symbol id="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></symbol>
+    <symbol id="flame" viewBox="0 0 24 24"><path d="M13 2c1 6-4 6-3 10 1-2 3-2 4-4 6 6 5 13-2 13-9 0-10-8-5-13 0 3 1 4 2 4-2-5 4-6 4-10Z"/></symbol>
+    <symbol id="refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.2 7A7 7 0 0 1 20 12M4 12a7 7 0 0 0 13.8 5"/></symbol>
+    <symbol id="arrow" viewBox="0 0 24 24"><path d="m10 6-6 6 6 6M4 12h16"/></symbol>
+    <symbol id="chart" viewBox="0 0 24 24"><path d="M4 3v17h17M7 14l4-5 4 3 5-7"/></symbol>
+    <symbol id="link" viewBox="0 0 24 24"><path d="m10 13 4-4M8 16l-2 2a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0M16 8l2-2a4 4 0 0 1 6 6l-5 5a4 4 0 0 1-6 0" transform="translate(2 0) scale(.85)"/></symbol>
+  </defs></svg>
+  <aside class="sidebar">
+    <a class="brand" href="/"><span class="brand-icon"><svg><use href="#house"/></svg></span><span>SmartHome<small>DEIN ZUHAUSE. VERBUNDEN.</small></span></a>
+    <div class="nav-label">WOHNEN & ENERGIE</div>
+    <a class="back-link" href="/"><svg><use href="#arrow"/></svg> SmartHome öffnen</a>
+    <button class="nav-item active" data-view="overview"><svg><use href="#heat"/></svg> Heizungsübersicht</button>
+    <div class="nav-label floor-label">DEINE HEIZKREISE</div>
+    <button class="nav-item" data-view="eg"><span class="floor-mark">EG</span> Erdgeschoss</button>
+    <button class="nav-item" data-view="og"><span class="floor-mark">OG</span> Obergeschoss</button>
+    <div class="sidebar-bottom"><span class="connection-light" id="nav-light"></span><div>Heizungszentrale<small id="nav-status">Verbindung wird geprüft</small></div><span class="local-tag">LOKAL</span></div>
+  </aside>
+  <main>
+    <header class="topbar"><span>SmartHome <span class="slash">/</span> Heizung</span><div class="topbar-right"><span class="live-tag" id="live-tag"><i></i><span>Verbinde …</span></span><button class="icon-button" id="theme" aria-label="Farbschema wechseln"><svg><use href="#sun"/></svg></button></div></header>
+    <div class="content">
+      <div class="page-heading"><div><div class="eyebrow">WÄRME & WOHLBEFINDEN</div><h1 id="page-title">Heizungsübersicht<span>.</span></h1><p id="page-subtitle">Fußbodenheizung im EG. Heizkörper im OG. Alles an einem Ort.</p></div><button class="refresh-button" id="refresh" aria-label="Anzeige aktualisieren"><svg><use href="#refresh"/></svg><span>Anzeige aktualisieren</span></button></div>
+      <div id="connection-note" class="notice" role="status" hidden></div>
+      <section class="stats-grid" aria-label="Heizungsanlage">
+        <article class="stat-card"><div class="stat-top"><span>Kesseltemperatur</span><span class="stat-icon amber"><svg><use href="#heat"/></svg></span></div><div class="stat-value" id="boiler">—<small>°C</small></div><div class="stat-foot">Eurocontrol K <span id="boiler-quality"></span></div></article>
+        <article class="stat-card"><div class="stat-top"><span>Warmwasser</span><span class="stat-icon blue"><svg><use href="#drop"/></svg></span></div><div class="stat-value" id="dhw">—<small>°C</small></div><div class="stat-foot" id="dhw-target">Sollwert wird gelesen</div></article>
+        <article class="stat-card"><div class="stat-top"><span>Außentemperatur</span><span class="stat-icon sand"><svg><use href="#sun"/></svg></span></div><div class="stat-value" id="outside">—<small>°C</small></div><div class="stat-foot">Reglerwert · Eurocontrol M</div></article>
+        <article class="stat-card"><div class="stat-top"><span>Brennerrelais</span><span class="stat-icon coral"><svg><use href="#flame"/></svg></span></div><div class="stat-value state-value" id="burner">—</div><div class="stat-foot" id="burner-starts">Starts werden gelesen</div></article>
+      </section>
+      <div class="section-heading"><div><span class="eyebrow">GETRENNT GEREGELT</span><h2>Deine Heizkreise</h2></div><span class="muted small">Messwerte und Einstellungen · nur lesend</span></div>
+      <section class="floor-grid" id="floor-grid" aria-label="Heizkreise"></section>
+      <section class="panel history-panel">
+        <div class="panel-heading"><div><h2>Temperaturverlauf</h2><p>Vorlauf im Erdgeschoss und Kesseltemperatur</p></div><div class="segmented" aria-label="Verlaufszeitraum"><button data-hours="1">1 Std.</button><button data-hours="6" class="selected">6 Std.</button><button data-hours="24">24 Std.</button></div></div>
+        <div class="chart-container" id="history-chart"><div class="empty-chart"><svg><use href="#chart"/></svg><strong>Ein Verlauf entsteht mit der Zeit</strong><span>Neue Messwerte werden auf der SmartHome-VM gespeichert.</span></div></div>
+        <div class="chart-legend"><span><i class="teal-dot"></i>EG · Vorlauf</span><span><i class="amber-dot"></i>Kesseltemperatur</span><span class="history-note">30 Tage lokal gespeichert</span></div>
+      </section>
+      <section class="rooms-section"><div class="section-heading"><div><span class="eyebrow">TADO · VIA IOBROKER</span><h2>Die Temperatur in deinen Räumen</h2></div><span class="source-tag" id="tado-status">Verbindung wird geprüft</span></div><div class="rooms-grid" id="rooms-grid"><div class="panel empty-rooms">Raumtemperaturen werden geladen …</div></div><p class="rooms-note">Tado-Messwerte werden angezeigt und nicht als Raumfühler an die Heizungsregler gesendet.</p></section>
+      <footer><div><span class="connection-light" id="io-light"></span><span id="io-status">ioBroker wird verbunden</span></div><span id="updated">Warte auf den ersten Messwert</span><a href="/">Zur SmartHome-Zentrale ↗</a></footer>
+    </div>
+  </main>
+</body>
+</html>
