@@ -110,3 +110,29 @@ Quellen: K `D0016682.apw`, OV200.4 (SHA oben), Montag DP2082/Adresstail2698;
 M `D0017684.apw`, OV200.6, SHA
 `bffb18693acab2abff2fe5945f85ed05026d3c7fa85ca33a7c35401e6738e1ad`,
 Montag DP1884/Adresstail2496. Die Tageslabels stammen aus Katalogzeilen298–304.
+
+
+### Wochenraster und lokale Entwürfe
+
+Die Ansicht bietet ein Wochenraster mit gemeinsamer 00–24-Uhr-Achse pro Heizkreis
+und eine kompakte Zeitliste. Farbige Bereiche zeigen Komfortphasen, der übrige
+Bereich die Absenkphase in Automatik. Dies sind keine Pumpen-Sperrzeiten.
+Auf schmalen Bildschirmen lässt sich das Raster innerhalb seiner Karte verschieben.
+
+Ein Tag oder „Zeiten entwerfen“ öffnet einen Editor für maximal drei Zeitfenster,
+Viertelstunden, 24:00 als Tagesende und Kopieren auf Werktage, Wochenende oder
+alle sieben Tage. Ungültige Zeiten und Überschneidungen werden zurückgewiesen.
+Entwürfe verwenden getrennte Browser-Schlüssel `heating-schedule-draft-v1-eg` und
+`heating-schedule-draft-v1-og`. Sie bleiben über Neuladen erhalten, werden weder
+an die VM noch an ioBroker oder die Heizung gesendet. „Reglerstand anzeigen“
+ermöglicht den Vergleich; Verwerfen lässt sich während der Sitzung rückgängig machen.
+Ein geänderter Reglerstand gegenüber der Entwurfsbasis wird kenntlich gemacht.
+
+Es gibt weiterhin keine schreibende Heizungsroute. Der vorhandene BSB-LAN-Code
+enthält einen generischen `VT_TIMEPROG`-Encoder mit zwölf Bytes, bezeichnet ihn
+aber selbst als `TODO test it`. Das bestätigt noch keine sicheren Schreibvorgänge
+für diese beiden Eurocontrol-Varianten oder deren deaktivierte Schaltpunkte.
+Daher ist die direkte Übertragung in dieser Version nicht implementiert.
+Validierung: `node --test test_heating_schedule.cjs` ist Teil von `make smoke`
+und `make test`; zusätzlich Browserprüfung von Editor, Kopieren, Vergleich,
+Persistenz, Zeitliste und mobiler Darstellung.

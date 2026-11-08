@@ -47,9 +47,11 @@ test: lint check-api-docs check-openapi
 	$(PYTHON) -m pytest -q test_docker_runtime.py
 	$(PYTHON) -m pytest -q test_secret_hygiene.py
 	$(PYTHON) -m pytest -q test_heating_dashboard.py
+	node --test test_heating_schedule.cjs
 
 smoke: lint check-api-docs check-openapi
 	$(PYTHON) -m pytest -q test_api_contracts.py test_integration_core_flows.py test_heating_dashboard.py
+	node --test test_heating_schedule.cjs
 
 run:
 	$(PYTHON) start_web_hmi.py

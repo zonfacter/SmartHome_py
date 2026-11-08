@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#163d38">
   <title>Heizung · SmartHome</title>
-  <link rel="stylesheet" href="/static/css/heating.css?v=1">
-  <script defer src="/static/js/heating.js?v=1"></script>
+  <link rel="stylesheet" href="/static/css/heating.css?v=3">
+  <script defer src="/static/js/heating_schedule.js?v=3"></script>
+  <script defer src="/static/js/heating.js?v=3"></script>
 </head>
 <body>
   <svg class="svg-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
@@ -43,7 +44,12 @@
       </section>
       <div class="section-heading"><div><span class="eyebrow">GETRENNT GEREGELT</span><h2>Deine Heizkreise</h2></div><span class="muted small">Messwerte und Einstellungen · nur lesend</span></div>
       <section class="floor-grid" id="floor-grid" aria-label="Heizkreise"></section>
-      <section class="panel schedule-panel"><div class="panel-heading"><div><h2>Heizzeiten der Woche</h2><p>Im jeweiligen Regler gespeicherte Komfortphasen</p></div><span class="source-tag">Nur lesend</span></div><div id="schedule-table" class="schedule-table" aria-label="Zeitfenster je Wochentag und Heizkreis"></div><p class="schedule-note">In Automatik gilt außerhalb der Zeitfenster die Absenkphase. Pumpen und Brenner werden zusätzlich vom Regler nach Wärmebedarf gesteuert.</p></section>
+      <section class="panel schedule-panel" aria-labelledby="schedule-heading">
+        <div class="panel-heading"><div><h2 id="schedule-heading">Heizzeiten der Woche</h2><p>Eigene Zeitprogramme für Erdgeschoss und Obergeschoss</p></div><div class="segmented" aria-label="Darstellung der Heizzeiten"><button type="button" data-schedule-mode="grid" class="selected" aria-pressed="true">Wochenraster</button><button type="button" data-schedule-mode="list" aria-pressed="false">Zeitliste</button></div></div>
+        <div id="schedule-table" aria-label="Zeitfenster je Wochentag und Heizkreis"></div>
+        <p class="schedule-note">In Automatik gilt außerhalb der Komfortphasen die Absenkung. Pumpen und Brenner werden zusätzlich nach Wärmebedarf gesteuert. Entwürfe bleiben lokal im Browser; die Übertragung zur Heizung ist noch nicht freigeschaltet.</p>
+        <p id="schedule-message" class="schedule-message" role="status" aria-live="polite"></p>
+      </section>
       <section class="panel history-panel">
         <div class="panel-heading"><div><h2>Temperaturverlauf</h2><p>Vorlauf im Erdgeschoss und Kesseltemperatur</p></div><div class="segmented" aria-label="Verlaufszeitraum"><button data-hours="1">1 Std.</button><button data-hours="6" class="selected">6 Std.</button><button data-hours="24">24 Std.</button></div></div>
         <div class="chart-container" id="history-chart"><div class="empty-chart"><svg><use href="#chart"/></svg><strong>Ein Verlauf entsteht mit der Zeit</strong><span>Neue Messwerte werden auf der SmartHome-VM gespeichert.</span></div></div>
@@ -53,5 +59,20 @@
       <footer><div><span class="connection-light" id="io-light"></span><span id="io-status">ioBroker wird verbunden</span></div><span id="updated">Warte auf den ersten Messwert</span><a href="/">Zur SmartHome-Zentrale ↗</a></footer>
     </div>
   </main>
+  <dialog id="schedule-editor" class="schedule-editor" aria-labelledby="schedule-editor-title" aria-describedby="schedule-editor-note">
+    <form novalidate>
+      <div class="editor-heading"><div><span class="eyebrow">WOCHENPROGRAMM · ENTWURF</span><h2 id="schedule-editor-title">Zeiten planen</h2></div><button type="button" class="schedule-button quiet" data-close-editor aria-label="Editor schließen">Schließen</button></div>
+      <p id="schedule-editor-note">Plane bis zu drei Komfortphasen pro Tag in Viertelstunden. Der Entwurf wird nur in diesem Browser gespeichert und nicht an die Heizung gesendet.</p>
+      <label class="editor-day">Wochentag<select name="day" aria-label="Wochentag"><option value="0">Montag</option><option value="1">Dienstag</option><option value="2">Mittwoch</option><option value="3">Donnerstag</option><option value="4">Freitag</option><option value="5">Samstag</option><option value="6">Sonntag</option></select></label>
+      <div class="editor-times-heading"><span>Komfortphase</span><span>Beginn</span><span>Ende</span></div>
+      <div class="editor-period"><label><input type="checkbox" name="enabled0" data-period-enabled> Zeitfenster 1</label><input type="text" name="start0" inputmode="numeric" maxlength="5" placeholder="06:00" aria-label="Beginn Zeitfenster 1" autocomplete="off"><input type="text" name="end0" inputmode="numeric" maxlength="5" placeholder="20:00" aria-label="Ende Zeitfenster 1" autocomplete="off"></div>
+      <div class="editor-period"><label><input type="checkbox" name="enabled1" data-period-enabled> Zeitfenster 2</label><input type="text" name="start1" inputmode="numeric" maxlength="5" placeholder="06:00" aria-label="Beginn Zeitfenster 2" autocomplete="off"><input type="text" name="end1" inputmode="numeric" maxlength="5" placeholder="20:00" aria-label="Ende Zeitfenster 2" autocomplete="off"></div>
+      <div class="editor-period"><label><input type="checkbox" name="enabled2" data-period-enabled> Zeitfenster 3</label><input type="text" name="start2" inputmode="numeric" maxlength="5" placeholder="06:00" aria-label="Beginn Zeitfenster 3" autocomplete="off"><input type="text" name="end2" inputmode="numeric" maxlength="5" placeholder="20:00" aria-label="Ende Zeitfenster 3" autocomplete="off"></div>
+      <p class="editor-tip">Für das Tagesende 24:00 eingeben. Alle Zeitfenster aus = ganztägig Absenkung im Entwurf.</p>
+      <label class="editor-day">Diese Zeiten übernehmen für<select name="scope" aria-label="Zeiten kopieren auf"><option value="day">Nur den gewählten Tag</option><option value="weekdays">Montag bis Freitag</option><option value="weekend">Samstag und Sonntag</option><option value="week">Die ganze Woche</option></select></label>
+      <p class="editor-error" data-editor-error role="alert"></p>
+      <div class="editor-footer"><span>Keine Änderung am Regler</span><button type="submit" class="schedule-button primary">Im Entwurf speichern</button></div>
+    </form>
+  </dialog>
 </body>
 </html>
