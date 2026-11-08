@@ -5,10 +5,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#163d38">
   <title>Heizung · SmartHome</title>
-  <link rel="stylesheet" href="/static/css/heating.css?v=6">
-  <script defer src="/static/js/heating_schedule.js?v=6"></script>
-  <script defer src="/static/js/heating_diagnostics.js?v=6"></script>
-  <script defer src="/static/js/heating.js?v=6"></script>
+  <link rel="stylesheet" href="/static/css/heating.css?v=7">
+  <script defer src="/static/js/heating_schedule.js?v=7"></script>
+  <script defer src="/static/js/heating_diagnostics.js?v=7"></script>
+  <script defer src="/static/js/heating_pumps.js?v=7"></script>
+  <script defer src="/static/js/heating.js?v=7"></script>
 </head>
 <body>
   <svg class="svg-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
@@ -45,6 +46,7 @@
       </section>
       <div class="section-heading"><div><span class="eyebrow">GETRENNT GEREGELT</span><h2>Deine Heizkreise</h2></div><span class="muted small">Messwerte und Einstellungen · nur lesend</span></div>
       <section class="floor-grid" id="floor-grid" aria-label="Heizkreise"></section>
+      <section class="diagnostics-section" id="pumpendiagnose" aria-labelledby="pump-heading"><div class="section-heading"><div><span class="eyebrow">KONTAKT, ANFORDERUNG & KONTEXT</span><h2 id="pump-heading">Warum läuft die Pumpe?</h2></div><span class="source-tag">Nur lesend · Ursachenprüfung</span></div><div id="pump-diagnostics" class="diagnostic-grid"></div></section>
       <section class="panel cycle-panel" id="brennerstatistik" aria-labelledby="cycle-heading">
         <div class="panel-heading"><div><h2 id="cycle-heading">Brennerstatistik</h2><p>Zähler der K und beobachtete Relaiskontakte</p></div><div class="segmented" aria-label="Statistikzeitraum"><button data-hours="1">1 Std.</button><button data-hours="6" class="selected">6 Std.</button><button data-hours="24">24 Std.</button></div></div>
         <div class="cycle-stats"><article><span>Betriebsstunden gesamt</span><strong id="burner-hours">—</strong><small id="lifetime-starts">Startzähler wird gelesen</small></article><article><span>Beobachtete Starts</span><strong id="observed-starts">—</strong><small>Im gültig beobachteten Abschnitt</small></article><article><span>Starts / beobachtete Stunde</span><strong id="starts-per-hour">—</strong><small>Auf die Datenabdeckung bezogen</small></article><article><span>Relaisminuten / Start</span><strong id="minutes-per-start">—</strong><small>Abgetastete K4-/K5-Kontakte</small></article></div>

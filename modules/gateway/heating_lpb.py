@@ -66,6 +66,8 @@ def points():
         add(area,target,'outside_attenuated','Außentemperatur · gedämpft','050005F0',slow=True)
         add(area,target,'outside_composite','Außentemperatur · gemischt','050005F2',slow=True)
         add(area,target,'changeover_source','Sommer-/Winterumschaltung','05000611','changeover_'+area,'',True)
+        add(area,target,'quick_setback','Schnellabsenkungsfaktor · KON','050005FB','factor','',True)
+        add(area,target,'remote_switch','Telefon-/Fernschaltkontakt','050004B8','boolean','')
         for key,label,command,kind in [
             ('space_request_raw','Heizungsanforderung · Rohdaten','210001F4','raw4'),
             ('producer_lock_raw','Erzeuger-Sperrsignal · Rohdaten','110001F7','raw2'),
@@ -77,10 +79,10 @@ def points():
             ('mixer_request_raw','Mischeranforderung · Rohdaten','190001F4','raw4'),
             ('transfer_lock_raw','Übertragungs-Sperrsignal · Rohdaten','150001F8','raw2'),
         ]:
-            add(area,target,key,label,command,kind,'',True)
-    add('og',0,'dhw_request_raw','Warmwasseranforderung · Rohdaten','250001F4','raw4','',True)
-    add('eg',1,'producer_request_raw','Erzeugeranforderung · Rohdaten','150001F5','raw5','',True)
-    add('eg',1,'status_level_raw','Betriebsniveau · Rohdaten','2D00020B','raw2','',True)
+            add(area,target,key,label,command,kind,'',key in ('producer_status_raw','mixer_status_raw'))
+        add(area,target,'status_level_raw','Betriebsniveau · Rohdaten','2D00020B','raw2','')
+    add('og',0,'dhw_request_raw','Warmwasseranforderung · Rohdaten','250001F4','raw4','')
+    add('eg',1,'producer_request_raw','Erzeugeranforderung · Rohdaten','150001F5','raw5','')
     for key,label,command in [
         ('reduced','Reduziertsollwert','05000590'),('frost','Frostschutzsollwert','05000592'),
         ('flow_min','Vorlauf · Minimum','05000663'),('flow_max','Vorlauf · Maximum','05000662'),
@@ -238,4 +240,8 @@ def decode(point, payload):
         return payload[1] / 2
     if kind in ('counter', 'minutes'):
         return int.from_bytes(payload[1:], 'big')
+    if kind == 'factor':
+        if payload[1] > 20:
+            raise ValueError('invalid quick setback factor')
+        return payload[1]
     raise ValueError('unknown point type')

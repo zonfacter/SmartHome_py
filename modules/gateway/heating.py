@@ -16,6 +16,7 @@ from flask import jsonify, render_template, request
 from .heating_lpb import POINTS, WEEKDAYS, TEXT_KINDS, RELAY_KINDS, decode, decode_schedule, read_frame
 from .heating_schedule_write import ScheduleWriter, ScheduleError
 from .heating_statistics import summarize
+from .heating_pumps import diagnose, event_payload, fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,8 @@ class HeatingService:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with closing(sqlite3.connect(self.db_path)) as db, db:
             db.execute('CREATE TABLE IF NOT EXISTS heating_samples (ts INTEGER PRIMARY KEY, payload TEXT NOT NULL)')
+            db.execute('CREATE TABLE IF NOT EXISTS heating_pump_events (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, area TEXT NOT NULL, payload TEXT NOT NULL)')
+            db.execute('CREATE INDEX IF NOT EXISTS heating_pump_events_area_time ON heating_pump_events(area,ts)')
         self.schedule_writer = ScheduleWriter(self.root, self.config, self.fetch, self._send_schedule, self.bus_lock, self._update_schedule_cache)
 
     @staticmethod
@@ -227,7 +230,7 @@ class HeatingService:
                         day['quality']='stale'
             for room in rooms:
                 room['stale'] = not self.io_status.get('tado_connected') or now - room.get('timestamp', 0) > 900
-            return {'enabled': self.enabled, 'read_only': not self.schedule_writer.enabled, 'server_time': now,
+            result = {'enabled': self.enabled, 'read_only': not self.schedule_writer.enabled, 'server_time': now,
                     'schedule_control': {'enabled': self.schedule_writer.enabled, 'recovery_required': bool(self.schedule_writer.pending)},
                     'connection': deepcopy(self.connection), 'iobroker': deepcopy(self.io_status),
                     'floors': {area: {'name': name, 'controller': model,
@@ -235,6 +238,9 @@ class HeatingService:
                                for area, name, model in [('eg', 'Erdgeschoss', 'Eurocontrol M'), ('og', 'Obergeschoss', 'Eurocontrol K')]},
                     'plant': {k.split('.')[1]: v for k, v in metrics.items() if k.startswith('anlage.')},
                     'rooms': rooms, 'schedules': schedules}
+            for area,floor in result['floors'].items():
+                floor['pump_diagnosis']=diagnose(area,floor['metrics'],result['plant'],schedules[area],now)
+            return result
 
     def _sync_iobroker(self):
         url = self.config.get('iobroker_url')
@@ -294,6 +300,19 @@ class HeatingService:
                     self.objects_created.add(key)
                 valid = item['quality'] == 'valid'
                 bridge.call('setState', key, {'val': item['value'] if valid else None, 'ack': True, 'q': 0 if valid else 0x40})
+            for area,floor in snapshot['floors'].items():
+                key=f'{IoBroker.PREFIX}.{area}.pump_diagnosis'
+                if key not in self.objects_created:
+                    existing=bridge.call('getObject',key)
+                    if existing and existing.get('native',{}).get('managed_by')!='smarthome-heating':
+                        raise ValueError('existing pump diagnosis belongs to another integration')
+                    if not existing:
+                        bridge.call('setObject',key,{'type':'state','common':{'name':'Pumpendiagnose · Schaltgrund offen',
+                            'type':'string','role':'json','read':True,'write':False},'native':{'managed_by':'smarthome-heating'}})
+                    self.objects_created.add(key)
+                diagnosis=floor['pump_diagnosis']
+                bridge.call('setState',key,{'val':json.dumps(diagnosis,ensure_ascii=False),'ack':True,
+                                          'q':0 if diagnosis['pump_contact'] is not None else 0x40})
             stats=self.statistics(24)
             for key,label,unit in [('starts','Beobachtete Brennerstarts · 24 h',''),
                                    ('relay_runtime_minutes','Beobachtete Relaislaufzeit · 24 h','min'),
@@ -346,6 +365,13 @@ class HeatingService:
             now = int(time.time())
             db.execute('INSERT OR REPLACE INTO heating_samples VALUES (?, ?)', (now, json.dumps(data, allow_nan=False)))
             db.execute('DELETE FROM heating_samples WHERE ts < ?', (now - 30*86400,))
+            for area,floor in snapshot['floors'].items():
+                payload=event_payload(floor['metrics'],snapshot['plant'])
+                previous=db.execute('SELECT payload FROM heating_pump_events WHERE area=? ORDER BY id DESC LIMIT 1',(area,)).fetchone()
+                if not previous or fingerprint(payload)!=fingerprint(json.loads(previous[0])):
+                    db.execute('INSERT INTO heating_pump_events(ts,area,payload) VALUES (?,?,?)',
+                               (now,area,json.dumps(payload,ensure_ascii=False)))
+            db.execute('DELETE FROM heating_pump_events WHERE ts<?',(now-7*86400,))
 
     def history(self, hours):
         cutoff = int(time.time()) - hours*3600
@@ -377,6 +403,15 @@ class HeatingService:
             rows=db.execute('SELECT ts,payload FROM heating_samples WHERE ts>=? ORDER BY ts',(int(now-hours*3600),)).fetchall()
         return summarize([{'ts':ts,**json.loads(data)} for ts,data in rows],hours,now,
                          max_gap=max(120,self.interval*3))
+
+    def pump_events(self, hours):
+        result={}
+        with closing(sqlite3.connect(self.db_path,timeout=5)) as db:
+            for area in ('eg','og'):
+                rows=db.execute('SELECT ts,payload FROM heating_pump_events WHERE area=? AND ts>=? ORDER BY id DESC LIMIT 40',
+                                (area,int(time.time())-hours*3600)).fetchall()
+                result[area]=[{'ts':ts,'metrics':json.loads(data)} for ts,data in rows]
+        return result
 
 
 
@@ -415,6 +450,18 @@ def register_heating_routes(manager, root=None):
         if hours not in (1,6,24):
             return jsonify({'error':'invalid_hours'}),400
         return jsonify(service.statistics(hours))
+
+    @app.route('/api/heating/pumps')
+    def heating_pumps():
+        try:
+            hours=int(request.args.get('hours','6'))
+        except ValueError:
+            return jsonify({'error':'invalid_hours'}),400
+        if hours not in (1,6,24):
+            return jsonify({'error':'invalid_hours'}),400
+        snapshot=service.snapshot()
+        return jsonify({'hours':hours,'floors':{area:floor['pump_diagnosis'] for area,floor in snapshot['floors'].items()},
+                        'events':service.pump_events(hours),'event_limit_per_floor':40})
 
     def schedule_guard():
         if request.headers.get('X-Heating-Schedule') != '1' or not request.is_json:

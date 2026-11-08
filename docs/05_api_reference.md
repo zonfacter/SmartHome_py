@@ -33,6 +33,7 @@ Nur hier gelistete Endpunkte gelten als dokumentierter API-Stand.
 - `GET /api/heating/state`
 - `GET /api/heating/history`
 - `GET /api/heating/statistics`
+- `GET /api/heating/pumps`
 - `POST /api/heating/schedule/preview`
 - `POST /api/heating/schedule/apply`
 
@@ -50,6 +51,13 @@ Zeitabschnitte; Lücken ohne gültige gemeinsame Daten bleiben `null`. Zählerü
 an der 16-Bit-Grenze und erkennbare Rücksetzungen werden getrennt behandelt.
 Die Rate bezieht sich auf beobachtete Zeit, nicht ungeprüft auf das ganze Fenster.
 Es ist eine Relais-/Zählerstatistik, keine Flammen- oder Energiemessung.
+
+`pumps?hours=1|6|24` liefert die Pumpendiagnose je Heizkreis sowie maximal 40
+lokale Änderungsereignisse pro Kreis. Die API liest nur den gemeinsamen Cache
+und SQLite. Feldwerte und Attributbits sind getrennt; `effective:null` und
+`cause_status:"unresolved"` verhindern eine ungeprüfte Ursachenzuweisung.
+Die aktuelle Diagnose steht außerdem unter `state.floors.<eg|og>.pump_diagnosis`.
+Der Mitschnitt beginnt mit dieser Erweiterung und wird sieben Tage aufbewahrt.
 
 `preview` erhält `{area:"eg"|"og", base:[7 Tagesprogramme], days:[7 Tagesprogramme]}`.
 Ein Tagesprogramm ist eine Liste von maximal drei Objekten mit `start`/`end` im

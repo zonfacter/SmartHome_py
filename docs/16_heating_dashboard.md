@@ -264,3 +264,45 @@ Kein Browser erzeugt zusätzliche LPB-Abfragen.
 `test_heating_diagnostics.py` prüft Blockgrenzen, Nullwerte, K/M-Trennung,
 Uhrzeit-Platzhalter, Überlauf/Rücksetzung, Datenlücken, zweite Brennerstufe,
 Fenstergrenzen und die Weiterverarbeitung historischer Daten.
+## Pump context and bounded signal research
+
+The pump cards intentionally keep `cause_status:unresolved`. They distinguish
+the actual Q1 contact, the controller's own weekly clock/program phase, current
+setpoints and possible influences. A reduced phase, DHW contact or positive
+percentage alone must never become a confirmed stop/start reason. Sensor gaps,
+stale contacts and undecoded attributes remain unknown.
+
+The exact RVA43/RVA46 APW profiles identify these block fields (zero-based):
+
+| Blocks | Field layout | Remaining limitation |
+| --- | --- | --- |
+| `210001F4`, `250001F4`, `190001F4` | signed I16 temperature at 0, 1/64 °C; U16 attributes at 2 | Attribute bit semantics and effective demand are unresolved |
+| `150001F5` | Same, plus priority byte at 4 | Priority semantics unresolved |
+| `110001F7`, `150001F8`, `190001F9`, `110001FA`, `150001FB` | signed I8 percentage field at 0; U8 attributes at 1 | Neither `00 00` nor a positive field proves validity or active intervention |
+| `2D00020B` | U8 level at 0; U8 attributes at 1 | Level/validity mapping needs contrasting observations |
+
+In these LPB names, EG means an **Erzeugergruppe**, not the ground floor;
+EM/VM denote the producer/consumer mixer context. Identical block shapes do
+not establish that every functional object is active in the actual plant.
+The structured fields retain exact raw bytes, attribute hex and numbered set
+bits, and always report `effective:null`. No guessed bit masks are applied.
+
+Additional payload-free reads: KON `050005FB` (two-byte scalar with a
+validity prefix, factor 0–20) and telephone/remote contact `050004B8`. Relevant
+request/lock/forced blocks now share the fast collector cycle with Q1; the
+diagnosis reports read-time skew. No extra bus reads are triggered by UI/API.
+
+[Siemens CE1P2372E](https://mhgheating.co.uk/wp-content/uploads/2012/04/RVA46-D.pdf),
+sections 5.4.1 and 6.6, documents pump shutdown during quick setback without a
+room sensor and explains that valid demand, overrun and protection functions
+affect pump operation. KON is a setting, not an active-status signal. This
+general behavior supports a possible influence, not automatic causal proof.
+
+Changed Q1/mode/setpoint/signal/quality combinations are retained locally in
+`heating_pump_events` for seven days, including their original observation
+timestamps. Clock ticks alone do not generate events. Samples are sequential,
+not an atomic bus snapshot; no pre-installation history is fabricated. The
+`GET /api/heating/pumps?hours=1|6|24` endpoint returns at most 40 events per
+floor. The UI shows the latest eight and labels inference limits explicitly.
+The same current structured diagnosis is exported as a read-only JSON string
+under `0_userdata.0.heizung.<eg|og>.pump_diagnosis`. No heating SET was added.

@@ -59,6 +59,7 @@
   const scheduleView = new HeatingSchedules.View($('schedule-table'), $('schedule-editor'), localStorage);
   function renderSchedule() { scheduleView.render(snapshot, view); }
   const diagnostics=new HeatingDiagnostics.View($('diagnostics'));
+  const pumps=new HeatingPumps.View($('pump-diagnostics'));
   function render() {
     const p = snapshot.plant, connected = snapshot.connection.connected;
     stat('boiler',p.boiler); stat('dhw',p.dhw); stat('outside',snapshot.floors.eg.metrics.outside); stat('burner',p.burner,'');
@@ -73,7 +74,7 @@
     const io = snapshot.iobroker.connected;
     $('io-light').classList.toggle('online',io); $('io-status').textContent = io ? 'ioBroker verbunden · Heizungswerte synchronisiert' : 'ioBroker nicht verbunden';
     $('updated').textContent = snapshot.connection.last_success ? 'Letzte Heizungsabfrage ' + formatTime(snapshot.connection.last_success) : 'Warte auf Heizungsdaten';
-    renderFloors(); renderRooms(); renderSchedule(); diagnostics.render(snapshot,view);
+    renderFloors(); renderRooms(); renderSchedule(); diagnostics.render(snapshot,view); pumps.render(snapshot,view);
   }
   async function load() {
     if (inFlight) return;
@@ -115,15 +116,15 @@
     $('page-title').innerHTML=(view==='eg'?'Erdgeschoss':view==='og'?'Obergeschoss':'Heizungsübersicht')+'<span>.</span>';
     $('page-subtitle').textContent=view==='eg'?'Fußbodenheizung · Eurocontrol M':view==='og'?'Heizkörper · Eurocontrol K':'Fußbodenheizung im EG. Heizkörper im OG. Alles an einem Ort.';
     const url=new URL(location); view==='overview'?url.searchParams.delete('etage'):url.searchParams.set('etage',view); window.history.replaceState(null,'',url);
-    renderFloors();renderRooms();renderSchedule();diagnostics.render(snapshot,view);history();
+    renderFloors();renderRooms();renderSchedule();diagnostics.render(snapshot,view);pumps.render(snapshot,view);history();
     window.scrollTo(0,0);
   }
   document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>selectView(b.dataset.view)));
-  document.querySelectorAll('[data-hours]').forEach(b=>b.addEventListener('click',()=>{hours=Number(b.dataset.hours);document.querySelectorAll('[data-hours]').forEach(c=>c.classList.toggle('selected',c.dataset.hours===b.dataset.hours));history();diagnostics.load(hours);}));
-  $('refresh').addEventListener('click',()=>{load();diagnostics.load(hours);});
+  document.querySelectorAll('[data-hours]').forEach(b=>b.addEventListener('click',()=>{hours=Number(b.dataset.hours);document.querySelectorAll('[data-hours]').forEach(c=>c.classList.toggle('selected',c.dataset.hours===b.dataset.hours));history();diagnostics.load(hours);pumps.load(hours);}));
+  $('refresh').addEventListener('click',()=>{load();diagnostics.load(hours);pumps.load(hours);});
   $('history-series').addEventListener('change',history);
   document.addEventListener('heating-schedules-updated',load);
   $('theme').addEventListener('click',()=>{theme=theme==='dark'?'light':'dark';document.body.dataset.theme=theme;localStorage.setItem('heating-theme',theme);});
-  selectView(view); load(); history();diagnostics.load(hours); setInterval(()=>{if(!document.hidden)load();},5000); setInterval(()=>{if(!document.hidden){history();diagnostics.load(hours);}},30000);
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden){load();history();diagnostics.load(hours);}});
+  selectView(view); load(); history();diagnostics.load(hours);pumps.load(hours); setInterval(()=>{if(!document.hidden)load();},5000); setInterval(()=>{if(!document.hidden){history();diagnostics.load(hours);pumps.load(hours);}},30000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){load();history();diagnostics.load(hours);pumps.load(hours);}});
 })();
