@@ -405,3 +405,28 @@ der Beobachtungsaufzeichnung genutzt; danach gilt das 90-Tage-Beobachtungsarchiv
 Es werden keine Daten rückwirkend erzeugt. Fehlende/ungültige Temperaturen und
 Abstände über drei Minuten unterbrechen die Verbindungslinie; Extrema bleiben
 bei der Verdichtung erhalten. Die Anzeige verändert keine Warmwasserregelung.
+
+### Eigene Lernübersicht und Gasstützwerte
+
+Der Menüpunkt „Machine Learning“ öffnet `/heizung/lernen`. Navigation und Beobachtungs-
+details werden als gemeinsame Jinja-Teile eingebunden. Drei Karten zeigen getrennt
+EG, OG und Speicher, geprüfte Modellanzahl und die Datengrundlage. Der Balken ergibt
+sich aus den Mindestanforderungen an gültige Zeitfenster, Tage, Zeitspanne und Heiz-/
+Abkühlfenster; er ist weder Trainingsrestzeit noch ein Nachweis für Einsparungen.
+Die Detailansicht erklärt fehlende Voraussetzungen je Heizungsraum. Klimageräte
+bleiben reine Aufzeichnung; die bestehende Heizungsübersicht bleibt erreichbar.
+
+Gelegentliche manuelle Ablesungen stehen dauerhaft in `heating_gas_readings` derselben
+SQLite-Datenbank, unabhängig von der 90-Tage-Aufbewahrung des Messarchivs. Gespeichert
+werden UTC-Ablesezeit, ganzzahlige Tausendstel m³ und Erfassungszeit. Eingaben ohne
+Zeitzone gelten als Europe/Berlin. Doppelte Eingaben erzeugen keine doppelten Daten;
+Gegenrichtung des Zählers oder Konflikte mit Nachbarständen werden abgelehnt. Ein
+Zählerwechsel braucht eine gesonderte Behandlung. Das Formular schreibt ausschließlich
+diese lokale Tabelle und hat keinen Zugriff auf Bus, Tado oder Heizprogramme.
+
+Erst zwei Stützwerte ergeben einen gemessenen Gesamtverbrauch. Für das letzte Intervall
+wird die verfügbare Relaiszeit aus der Anlagenhistorie mit Abdeckung angezeigt, zusammen
+mit der bisherigen Nennleistungsreferenz. Das Gaszähler-Betriebsvolumen ist nicht direkt
+das berechnete Normvolumen. Fehlende Ablesungen werden nicht interpoliert, Modelle
+werden damit nicht ungeprüft umskaliert, und ein Gesamtgaszähler liefert keine gemessene
+Zuordnung auf EG, OG oder Warmwasser. Die Werte dienen vorerst als unabhängiger Abgleich.

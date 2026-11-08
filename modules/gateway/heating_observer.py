@@ -82,7 +82,8 @@ def learn(pairs, names):
             'features':names,'reason':'Noch nicht genügend unterschiedliche, gültige Beobachtungen.'}
     if not pairs:return result
     days=len({int(r['ts']//86400) for r in pairs})
-    result.update(days=days,span_hours=round((pairs[-1]['ts']-pairs[0]['ts'])/3600,1))
+    result.update(days=days,span_hours=round((pairs[-1]['ts']-pairs[0]['ts'])/3600,1),
+                  heated_pairs=sum(bool(r['active']) for r in pairs),cooling_pairs=sum(not r['active'] for r in pairs))
     if len(pairs)<48 or days<3 or pairs[-1]['ts']-pairs[0]['ts']<48*3600:return result
     if sum(r['active'] for r in pairs)<6 or sum(not r['active'] for r in pairs)<6:
         result['reason']='Es fehlen Heiz-/Ladephasen oder Abkühlphasen.';return result
@@ -338,3 +339,10 @@ class HeatingObserver:
                 'first_sample':rows[0][0] if rows else None,'last_sample':last[0] if last else None,
                 'minimum':min(values) if values else None,'maximum':max(values) if values else None,'latest':latest,
                 'valid_samples':len(values),'source':'Gemessener Speicherfühler; ältere Anlagenhistorie bis 30 Tage, Beobachtungsarchiv bis 90 Tage. Keine rückwirkend erzeugten Werte.'}
+
+    def energy_reference_between(self,start,end):
+        with closing(sqlite3.connect(self.db_path,timeout=5)) as db:
+            rows=db.execute("SELECT ts,json_extract(payload,'$.\"anlage.burner\"'),json_type(payload,'$.\"anlage.burner\"'),json_extract(payload,'$.\"anlage.burner_stage2\"'),json_type(payload,'$.\"anlage.burner_stage2\"') FROM heating_samples WHERE ts>=? AND ts<=? ORDER BY ts",(start,end)).fetchall()
+        samples=[{'ts':ts,'anlage.burner':bool(a) if qa in ('true','false') else None,
+                  'anlage.burner_stage2':bool(b) if qb in ('true','false') else None} for ts,a,qa,b,qb in rows]
+        return runtime_reference(samples,(end-start)/3600,end,self.config.get('plant_reference',{}))

@@ -4,6 +4,8 @@ window.HeatingObserverView=(()=>{
   const number=(v,d=1)=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('de-DE',{maximumFractionDigits:d,minimumFractionDigits:d}):'—';
   const time=ts=>ts?new Date(ts*1000).toLocaleString('de-DE',{timeZone:'Europe/Berlin',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
   const state={collecting:'Sammelt Daten',validated:'Modell geprüft',partly_validated:'Teilweise geprüft',not_validated:'Weitere Beobachtung nötig',record_only:'Nur Aufzeichnung'};
+  const progress=model=>model.state==='validated'?100:Math.round(100*Math.min(1,(model.pairs||0)/48,(model.days||0)/3,(model.span_hours||0)/48,(model.heated_pairs||0)/6,(model.cooling_pairs||0)/6));
+  const progressView=model=>`<div class="learning-progress"><progress max="100" value="${progress(model)}" aria-label="Datengrundlage ${progress(model)} Prozent"></progress><small>${model.pairs||0}/48 Zeitfenster · ${model.days||0}/3 Tage · ${number(model.span_hours||0)}/48 Std.<br>${model.heated_pairs||0}/6 Heizfenster · ${model.cooling_pairs||0}/6 Abkühlfenster</small></div>`;
   class View{
     constructor(container){
       this.container=container;this.data=null;this.samples=[];this.sequence=0;this.hours=24;
@@ -19,7 +21,7 @@ window.HeatingObserverView=(()=>{
         const responses=await Promise.all([fetch('/api/heating/observer?hours='+this.hours,{cache:'no-store'}),fetch('/api/heating/observer/history?hours='+this.hours,{cache:'no-store'})]);
         if(responses.some(r=>!r.ok))throw Error();
         const [data,history]=await Promise.all(responses.map(r=>r.json()));if(seq!==this.sequence)return;
-        this.data=data;this.samples=history.samples;this.render();
+        this.data=data;this.samples=history.samples;this.render();this.container.dispatchEvent(new CustomEvent('heating-observer-updated',{detail:data}));
       }catch{if(seq===this.sequence)this.$('observer-note').textContent='Beobachtungsdaten sind momentan nicht erreichbar; letzter Stand bleibt sichtbar.';}
     }
     render(){
@@ -39,7 +41,7 @@ window.HeatingObserverView=(()=>{
       this.$('observer-models').innerHTML=['eg','og','dhw'].map(area=>{
         const m=d.models[area],rooms=m.rooms||[];
         const title=area==='eg'?'EG · Fußbodenheizung':area==='og'?'OG · Heizkörper':'Warmwasser · '+(m.tank_litres||'—')+' Liter';
-        return `<article class="observer-model"><div class="diagnostic-heading"><h3>${title}</h3><span class="diagnostic-status ${m.state==='validated'?'ok':''}">${state[m.state]||'Sammelt Daten'}</span></div><p>${esc(m.input_note||'')}</p>${rooms.length?rooms.map(r=>`<div class="observer-model-row"><strong>${esc(r.name)}</strong><span>${state[r.state]||'Sammelt Daten'}${r.pairs!==undefined?' · '+r.pairs+' Zeitfenster':''}</span><small>${esc(r.reason||'')}${r.validation_mae_c!==undefined?' Prüfabweichung: '+number(r.validation_mae_c,3)+' °C; Vergleich: '+number(r.persistence_mae_c,3)+' °C.':''}</small></div>`).join(''):`<div class="observer-model-row"><strong>${number(m.pairs||0,0)} gültige Zeitfenster</strong><small>${esc(m.reason||'Raumdaten werden gesammelt.')}${m.validation_mae_c!==undefined?' Prüfabweichung: '+number(m.validation_mae_c,3)+' °C.':''}</small></div>`}</article>`;
+        return `<article class="observer-model"><div class="diagnostic-heading"><h3>${title}</h3><span class="diagnostic-status ${m.state==='validated'?'ok':''}">${state[m.state]||'Sammelt Daten'}</span></div><p>${esc(m.input_note||'')}</p>${rooms.length?rooms.map(r=>`<div class="observer-model-row"><strong>${esc(r.name)}</strong><span>${state[r.state]||'Sammelt Daten'}${r.pairs!==undefined?' · '+r.pairs+' Zeitfenster':''}</span>${r.state!=='record_only'?progressView(r):''}<small>${esc(r.reason||'')}${r.validation_mae_c!==undefined?' Prüfabweichung: '+number(r.validation_mae_c,3)+' °C; Vergleich: '+number(r.persistence_mae_c,3)+' °C.':''}</small></div>`).join(''):`<div class="observer-model-row"><strong>${number(m.pairs||0,0)} gültige Zeitfenster</strong>${progressView(m)}<small>${esc(m.reason||'Raumdaten werden gesammelt.')}${m.validation_mae_c!==undefined?' Prüfabweichung: '+number(m.validation_mae_c,3)+' °C.':''}</small></div>`}</article>`;
       }).join('');
       this.rooms();this.chart();
     }
@@ -75,5 +77,5 @@ window.HeatingObserverView=(()=>{
       this.$('observer-chart').innerHTML=svg+'</svg>';
     }
   }
-  return {View};
+  return {View,progress};
 })();

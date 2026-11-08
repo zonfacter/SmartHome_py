@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#163d38">
+  <title>Machine Learning · SmartHome</title>
+  <link rel="stylesheet" href="/static/css/heating.css?v=14">
+  <script defer src="/static/js/heating_observer.js?v=14"></script>
+  <script defer src="/static/js/heating_learning.js?v=14"></script>
+</head>
+<body class="learning-page">
+  {% include '_heating_navigation.html' %}
+  <main>
+    <header class="topbar"><span>SmartHome <span class="slash">/</span> Heizung <span class="slash">/</span> Lernen</span><div class="topbar-right"><span class="live-tag" id="learning-live"><i></i><span>Beobachtungsmodus</span></span><button class="icon-button" id="theme" aria-label="Farbschema wechseln"><svg><use href="#sun"/></svg></button></div></header>
+    <div class="content">
+      <div class="page-heading"><div><div class="eyebrow">VERSTEHEN, BEVOR WIR OPTIMIEREN</div><h1>Machine Learning<span>.</span></h1><p>Getrennte Modelle für EG, OG und Warmwasser. Ausschließlich Beobachtung – Heizzeiten und Einstellungen bleiben unverändert.</p></div><button class="refresh-button" id="learning-refresh" type="button"><svg><use href="#refresh"/></svg><span>Anzeige aktualisieren</span></button></div>
+      <section class="learning-summary" id="learning-summary" aria-label="Lernfortschritt je Bereich"><article class="panel"><h2>EG · Fußbodenheizung</h2><p>Lernstand wird geladen.</p></article><article class="panel"><h2>OG · Heizkörper</h2><p>Lernstand wird geladen.</p></article><article class="panel"><h2>Warmwasser</h2><p>Lernstand wird geladen.</p></article></section>
+      <p class="diagnostic-note learning-explanation">Die Balken zeigen die verfügbare Datengrundlage. Mindestens 48 gültige Zeitfenster, drei Beobachtungstage, 48 Stunden Spanne sowie Heiz- und Abkühlphasen sind nötig. Eine Modellprüfung kann anschließend weitere Daten erfordern; ein voller Balken verspricht keine Einsparung.</p>
+      <section class="panel observer-panel" id="gaszaehler" aria-labelledby="gas-heading">
+        <div class="panel-heading"><div><span class="eyebrow">GELEGENTLICHE STÜTZWERTE</span><h2 id="gas-heading">Gaszählerstände</h2><p>Nur bei Gelegenheit ablesen und eintragen.</p></div><span class="source-tag">Messwert · Gesamtanlage</span></div>
+        <div class="observer-overview"><article><span>Letzter Zählerstand</span><strong id="meter-latest">—</strong><small id="meter-last-time">Noch kein Stützwert</small></article><article><span>Verbrauch seit vorheriger Ablesung</span><strong id="meter-delta">—</strong><small id="meter-interval">Ab zwei Stützwerten verfügbar</small></article><article><span>Gespeicherte Stützwerte</span><strong id="meter-count">—</strong><small>Dauerhaft lokal gespeichert</small></article></div>
+        <form id="gas-meter-form" class="meter-form">
+          <label for="meter-date">Abgelesen am · Europe/Berlin<input id="meter-date" name="measured_at" type="datetime-local" required step="60"></label>
+          <label for="meter-volume">Zählerstand in m³<input id="meter-volume" name="volume_m3" type="text" inputmode="decimal" placeholder="z. B. 1234,567" maxlength="13" required autocomplete="off" aria-describedby="meter-hint"></label>
+          <button class="schedule-button primary" id="meter-save" type="submit">Stützwert speichern</button>
+        </form>
+        <p id="meter-feedback" class="meter-feedback" role="status" aria-live="polite"></p>
+        <p class="diagnostic-note" id="meter-hint">Den vollständigen, kumulativen Zählerstand eingeben, einschließlich der Nachkommastellen. Unregelmäßige Ablesungen sind ausreichend. Zwischenwerte werden nicht erfunden. Der Zähler misst die Gesamtanlage; EG, OG und Warmwasser lassen sich daraus nicht einzeln messen.</p>
+        <div class="meter-comparison" id="meter-comparison">Der erste Stützwert bildet die Ausgangsbasis. Erst eine weitere Ablesung ergibt einen gemessenen Verbrauch.</div>
+        <div class="pump-event-scroll"><table class="pump-event-table"><caption>Gespeicherte Ablesungen · neueste zuerst</caption><thead><tr><th>Ablesezeitpunkt</th><th>Zählerstand</th><th>Seit vorheriger Ablesung</th></tr></thead><tbody id="meter-readings"><tr><td colspan="3">Stützwerte werden geladen.</td></tr></tbody></table></div>
+      </section>
+      {% include '_heating_observer.html' %}
+      <footer><span>Alle Messungen und Modelle bleiben auf deiner VM.</span><a href="/heizung#warmwasser-verlauf">Zum Warmwasserverlauf →</a></footer>
+    </div>
+  </main>
+</body>
+</html>

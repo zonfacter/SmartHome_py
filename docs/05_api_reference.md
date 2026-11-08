@@ -37,6 +37,8 @@ Nur hier gelistete Endpunkte gelten als dokumentierter API-Stand.
 - `GET /api/heating/observer`
 - `GET /api/heating/observer/history`
 - `GET /api/heating/observer/dhw-history`
+- `GET /api/heating/gas-readings`
+- `POST /api/heating/gas-readings`
 - `POST /api/heating/schedule/preview`
 - `POST /api/heating/schedule/apply`
 
@@ -70,6 +72,16 @@ Tado-Ist-/Sollwerten, Feuchte, Heizbedarf, Quellenzeitpunkten und Datenqualität
 `observer/dhw-history?days=1|7|30|90` liefert den gemessenen Warmwasserverlauf
 in maximal 720 Abschnitten mit Mittelwert, Minimum, Maximum und Datenlücken.
 Die Routen lesen ausschließlich die lokale Datenbank; es gibt keine POST-Route.
+
+`GET /api/heating/gas-readings` zeigt dauerhaft gespeicherte kumulative Gasstände
+(neueste 100), die letzte reale Verbrauchsdifferenz und eine getrennte, unkalibrierte
+Relaisreferenz mit Datenabdeckung für denselben Zeitraum. `POST` speichert ausschließlich
+einen lokalen Stützwert: JSON `{measured_at:"2024-05-05T12:00",volume_m3:"1234,567"}`,
+Header `X-Heating-Meter: 1`, gleichbleibender Origin, maximal 2 KB. Datum ohne Offset
+gilt als Europe/Berlin; mehrdeutige/nicht existente Ortszeiten werden abgelehnt.
+Stände haben höchstens drei Nachkommastellen und müssen zu beiden zeitlichen Nachbarn
+passen. Gleicher Zeitpunkt/Stand ist idempotent, widersprüchliche Werte ergeben 409.
+Es gibt keine Interpolation, automatische Kalibrierung oder Heizungs-Stellbefehle.
 
 `preview` erhält `{area:"eg"|"og", base:[7 Tagesprogramme], days:[7 Tagesprogramme]}`.
 Ein Tagesprogramm ist eine Liste von maximal drei Objekten mit `start`/`end` im

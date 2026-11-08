@@ -46,12 +46,12 @@ test: lint check-api-docs check-openapi
 	$(PYTHON) -m pytest -q test_circuit_breakers.py
 	$(PYTHON) -m pytest -q test_docker_runtime.py
 	$(PYTHON) -m pytest -q test_secret_hygiene.py
-	$(PYTHON) -m pytest -q test_heating_dashboard.py test_heating_schedule_write.py test_heating_diagnostics.py test_heating_pumps.py test_heating_observer.py
-	node --test test_heating_schedule.cjs test_heating_help.cjs
+	$(PYTHON) -m pytest -q test_heating_dashboard.py test_heating_schedule_write.py test_heating_diagnostics.py test_heating_pumps.py test_heating_observer.py test_heating_gas_meter.py
+	node --test test_heating_schedule.cjs test_heating_help.cjs test_heating_learning.cjs
 
 smoke: lint check-api-docs check-openapi
-	$(PYTHON) -m pytest -q test_api_contracts.py test_integration_core_flows.py test_heating_dashboard.py test_heating_schedule_write.py test_heating_diagnostics.py test_heating_pumps.py test_heating_observer.py test_control_auth_security.py
-	node --test test_heating_schedule.cjs test_heating_help.cjs
+	$(PYTHON) -m pytest -q test_api_contracts.py test_integration_core_flows.py test_heating_dashboard.py test_heating_schedule_write.py test_heating_diagnostics.py test_heating_pumps.py test_heating_observer.py test_heating_gas_meter.py test_control_auth_security.py
+	node --test test_heating_schedule.cjs test_heating_help.cjs test_heating_learning.cjs
 
 run:
 	$(PYTHON) start_web_hmi.py

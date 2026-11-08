@@ -18,6 +18,7 @@ from .heating_schedule_write import ScheduleWriter, ScheduleError
 from .heating_statistics import summarize
 from .heating_pumps import diagnose, event_payload, fingerprint
 from .heating_observer import HeatingObserver, numeric
+from .heating_gas_meter import GasMeter, MeterError
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,7 @@ class HeatingService:
             db.execute('CREATE INDEX IF NOT EXISTS heating_pump_events_area_time ON heating_pump_events(area,ts)')
         self.schedule_writer = ScheduleWriter(self.root, self.config, self.fetch, self._send_schedule, self.bus_lock, self._update_schedule_cache)
         self.observer = HeatingObserver(self.root,self.db_path)
+        self.gas_meter = GasMeter(self.db_path)
 
     @staticmethod
     def _empty(point):
@@ -456,6 +458,27 @@ def register_heating_routes(manager, root=None):
         response = jsonify(service.snapshot())
         response.headers['Cache-Control'] = 'no-store'
         return response
+
+    @app.route('/heizung/lernen')
+    def heating_learning_page():
+        service.start()
+        return render_template('heating_learning.html',learning_page=True)
+
+    @app.route('/api/heating/gas-readings',methods=['GET','POST'])
+    def heating_gas_readings():
+        try:
+            if request.method=='POST':
+                origin=request.headers.get('Origin')
+                if not request.is_json or request.headers.get('X-Heating-Meter')!='1' or (origin and origin.rstrip('/')!=request.host_url.rstrip('/')):
+                    raise MeterError('Zählerstände bitte über das Formular dieser SmartHome-Oberfläche speichern.',403)
+                if request.content_length is None or request.content_length>2048:raise MeterError('Die Eingabe ist zu groß.',413)
+                result=service.gas_meter.add(request.get_json(silent=True))
+                return jsonify(result),201 if result['inserted'] else 200
+            result=service.gas_meter.summary()
+            interval=result['latest_interval']
+            if interval:interval['relay_reference']=service.observer.energy_reference_between(interval['from'],interval['to'])
+            response=jsonify(result);response.headers['Cache-Control']='no-store';return response
+        except MeterError as error:return jsonify({'message':str(error)}),error.status
 
     @app.route('/api/heating/history')
     def heating_history():
