@@ -32,6 +32,7 @@ Nur hier gelistete Endpunkte gelten als dokumentierter API-Stand.
 ## Heizung / Eurocontrol
 - `GET /api/heating/state`
 - `GET /api/heating/history`
+- `GET /api/heating/statistics`
 - `POST /api/heating/schedule/preview`
 - `POST /api/heating/schedule/apply`
 
@@ -41,7 +42,14 @@ zusätzliche Busabfragen. `history?hours=1|6|24` liefert höchstens 360 lokal
 gespeicherte Messpunkte. Ungültige Messwerte bleiben `null`; Qualität und
 Messzeitpunkt werden separat ausgegeben. `schedule_control.enabled` zeigt, ob
 gezielte Zeitprogramm-Übernahmen aktiviert sind; `read_only` ist dann `false`.
-Andere Parameter bleiben ausschließlich lesbar.
+Andere Parameter bleiben ausschließlich lesbar. Dazu gehören Diagnosecodes,
+Regleruhren, Wettergrößen, Kessel-/Warmwasserparameter und LPB-Rohblöcke.
+`statistics?hours=1|6|24` wertet den gespeicherten Startzähler und K4/K5 gemeinsam
+aus. Es liefert beobachtete Starts, Relaisminuten, Raten, Datenabdeckung und
+Zeitabschnitte; Lücken ohne gültige gemeinsame Daten bleiben `null`. Zählerüberlauf
+an der 16-Bit-Grenze und erkennbare Rücksetzungen werden getrennt behandelt.
+Die Rate bezieht sich auf beobachtete Zeit, nicht ungeprüft auf das ganze Fenster.
+Es ist eine Relais-/Zählerstatistik, keine Flammen- oder Energiemessung.
 
 `preview` erhält `{area:"eg"|"og", base:[7 Tagesprogramme], days:[7 Tagesprogramme]}`.
 Ein Tagesprogramm ist eine Liste von maximal drei Objekten mit `start`/`end` im

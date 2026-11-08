@@ -192,3 +192,75 @@ Rücksetzen, Wiederanlauf und fremde Bedieneränderungen. Die ursprünglichen
 Liveversuche betrafen ein-/zweiphasige Mittwochsprogramme; Randfälle wie ein
 leerer Tag, dritte Phase und 24:00 werden durch Codec-/Transaktionstests geprüft
 und bei einer echten Übernahme ebenfalls unabhängig ausgelesen.
+
+
+## Erweiterte lesende Diagnose und Brennerstatistik
+
+Die zweite Auswertung der passenden Profile D0016682 (K/OV200.4) und D0017684
+(M/OV200.6) wurde mit 58 skalaren und 21 Blockabfragen an beiden realen Reglern
+abgeglichen. Die Erweiterung liest ausschließlich TYPE_QUR06 ohne Nutzdaten.
+Sie ergänzt 67 Felder, insgesamt 108 POINTS. Der bestehende, eng begrenzte
+Zeitprogramm-Schreibweg wird davon nicht erweitert.
+
+- Kessel: Minimum/Maximum, Schaltdifferenz, Mindestbrennerlaufzeit und die vom
+  Regler gemeldeten berechneten Brenner-Ein-/Ausschalttemperaturen.
+- Warmwasser: Betriebsart, Reduziert-/Maximalsollwert, Schaltdifferenz,
+  Temperaturüberhöhung, Ladeart, Programm und Priorität.
+- Je Regler: Fehlercode und Priorität, Regleruhr, Relaistest-Einstellung,
+  LPB-Speisungsstatus, Anlagenfrostschutz-Einstellung, Bauweise, Quelle der
+  Sommer-/Winterumschaltung und lokale/gedämpfte/gemischte Außentemperatur.
+- OG: zusätzlich die bisher nur am EG angezeigten Absenk-/Frost- und
+  Vorlaufgrenzen, Regler-Raumfühler, Vorlaufvorgabe, Pumpennachlauf und -funktion.
+- 21 LPB-Blöcke werden in einer geschlossenen Rohdiagnose einschließlich ihrer
+  Zusatzkennzeichen angezeigt. Ungeklärte Attribute werden weder als aktive
+  Sperre noch als Ursache für einen Pumpenstopp interpretiert.
+
+Der zweibytegroße Fehlerblock `0500006B` enthält Code an Offset 0 und Priorität
+an Offset 1, ohne skalaren Gültigkeitspräfix. Die Regleruhr `0500000B` zeigt nur
+Wochentag und Uhrzeit; die übrigen Felder werden nicht als Kalenderdatum benutzt.
+Der K-Erzeugerstatus `11000209` ist 9 Bytes lang; Bytes 5–8 enthalten einen
+vorzeichenbehafteten Sekunden-Zähler, in Stunden umgerechnet. Negative Werte
+bleiben unverfügbar. Der reale Wert passte zum zuvor vom Betreiber notierten
+Betriebsstundenzähler. Die M definiert an dieser Stelle kein Stundenfeld und
+verwendet ausschließlich die vollständige Rohdarstellung.
+
+Nicht vorhandene Sensoren bleiben `null`. Ein ungültiger lokaler M-Außenfühler
+schließt eine über LPB übernommene Außentemperatur nicht aus. Der Speisungsstatus
+ist keine Busspannungsmessung. Nicht bekannte Enumwerte erscheinen als Code;
+Programm/Priorität folgen den begrenzten Legacy-Wertebereichen, nicht beliebigen
+modernen BSB-Zuordnungen. Grunddaten und Profil-SHA256 sind oben dokumentiert.
+Private Vollmitschnitte und Herstellerkataloge bleiben außerhalb des Repositorys.
+
+`GET /api/heating/statistics?hours=1|6|24` berechnet aus unverdichteten lokalen
+Messpunkten gemeinsam gültige Intervalle für Startzähler und K4/K5. Abstände über
+120 Sekunden bzw. drei Pollintervalle werden ausgelassen. Bei Relaiswechseln
+wird der vorherige beobachtete Zustand bis zum nächsten Messpunkt gehalten;
+die Zeitauflösung entspricht der Abtastung. K4 oder K5 an bedeutet Relaislauf;
+beide müssen explizit aus sein, um einen Auszustand zu bestätigen. Historische
+fehlende K5-Werte werden nicht als aus ergänzt. Eine Rate ohne Daten bleibt
+`null`, nicht 0. Die Abdeckung bezieht sich auf das ganze gewählte Zeitfenster.
+
+Der Startzähler hat 16 Bit. Übergänge nahe 65535 nach 0 werden als Überlauf behandelt;
+andere Rückgänge werden als Rücksetzung ausgelassen. Die Statistik liefert
+Relaisminuten je beobachtetem Start, keine ausgemessenen vollständigen Brennerzyklen.
+Weder Relaiskontakte noch die Statistik beweisen eine Flamme oder Gasmenge.
+Der native Betriebsstundenzähler ist zusätzlich als separater Gesamtwert sichtbar.
+
+Der Verlauf speichert jetzt auch Betriebsstunden, zweite Brennerstufe und alle
+Wettergrößen. Gemischte alte/neue Zeilen werden über eine gemeinsame Schlüsselmenge
+zusammengeführt; fehlende ältere Felder bleiben `null`, Zähler werden nicht gemittelt.
+Der Temperaturverlauf kann auf aktuelle/gedämpfte/gemischte Außentemperatur des
+gewählten Heizkreises umgeschaltet werden. Kein Verlauf wird rückwirkend erfunden.
+
+Alle neuen POINTS werden über die bestehende ioBroker-Integration als bestätigte,
+nicht schreibbare Zustände exportiert. TEXT_KINDS und Rohblöcke sind Strings,
+Fehlercodes Zahlen, echte boolesche Felder Booleans. Zusätzlich stehen unter
+`0_userdata.0.heizung.statistik.*_24h` beobachtete Starts, Relaisminuten,
+Starts/Stunde, Relaisminuten/Start und Abdeckung. Die Statistik wird nach dem
+Speichern des neuen Messpunkts veröffentlicht. Fehler-/Wetterwerte teilen die
+vorhandenen Abfragen; Einstellungen und Rohblöcke werden nur langsam gelesen.
+Kein Browser erzeugt zusätzliche LPB-Abfragen.
+
+`test_heating_diagnostics.py` prüft Blockgrenzen, Nullwerte, K/M-Trennung,
+Uhrzeit-Platzhalter, Überlauf/Rücksetzung, Datenlücken, zweite Brennerstufe,
+Fenstergrenzen und die Weiterverarbeitung historischer Daten.

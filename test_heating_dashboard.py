@@ -180,6 +180,9 @@ class HeatingTests(unittest.TestCase):
         self.assertEqual(client.get('/api/heating/history?hours=900').status_code,400)
         self.assertEqual(client.get('/api/heating/history?hours=invalid').status_code,400)
         self.assertEqual(client.get('/api/heating/history?hours=6').json['samples'],[])
+        self.assertEqual(client.get('/api/heating/statistics?hours=7').status_code,400)
+        self.assertEqual(client.get('/api/heating/statistics?hours=bad').status_code,400)
+        self.assertIsNone(client.get('/api/heating/statistics?hours=1').json['starts'])
         self.assertIsNone(service.thread)
 
 

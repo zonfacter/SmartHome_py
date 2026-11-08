@@ -5,9 +5,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#163d38">
   <title>Heizung · SmartHome</title>
-  <link rel="stylesheet" href="/static/css/heating.css?v=5">
-  <script defer src="/static/js/heating_schedule.js?v=5"></script>
-  <script defer src="/static/js/heating.js?v=5"></script>
+  <link rel="stylesheet" href="/static/css/heating.css?v=6">
+  <script defer src="/static/js/heating_schedule.js?v=6"></script>
+  <script defer src="/static/js/heating_diagnostics.js?v=6"></script>
+  <script defer src="/static/js/heating.js?v=6"></script>
 </head>
 <body>
   <svg class="svg-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
@@ -44,6 +45,13 @@
       </section>
       <div class="section-heading"><div><span class="eyebrow">GETRENNT GEREGELT</span><h2>Deine Heizkreise</h2></div><span class="muted small">Messwerte und Einstellungen · nur lesend</span></div>
       <section class="floor-grid" id="floor-grid" aria-label="Heizkreise"></section>
+      <section class="panel cycle-panel" id="brennerstatistik" aria-labelledby="cycle-heading">
+        <div class="panel-heading"><div><h2 id="cycle-heading">Brennerstatistik</h2><p>Zähler der K und beobachtete Relaiskontakte</p></div><div class="segmented" aria-label="Statistikzeitraum"><button data-hours="1">1 Std.</button><button data-hours="6" class="selected">6 Std.</button><button data-hours="24">24 Std.</button></div></div>
+        <div class="cycle-stats"><article><span>Betriebsstunden gesamt</span><strong id="burner-hours">—</strong><small id="lifetime-starts">Startzähler wird gelesen</small></article><article><span>Beobachtete Starts</span><strong id="observed-starts">—</strong><small>Im gültig beobachteten Abschnitt</small></article><article><span>Starts / beobachtete Stunde</span><strong id="starts-per-hour">—</strong><small>Auf die Datenabdeckung bezogen</small></article><article><span>Relaisminuten / Start</span><strong id="minutes-per-start">—</strong><small>Abgetastete K4-/K5-Kontakte</small></article></div>
+        <div class="cycle-coverage"><span id="cycle-coverage">Messintervalle werden gesammelt</span><div><i id="cycle-meter"></i></div></div>
+        <div id="cycle-chart" class="cycle-chart" aria-label="Brennerstarts je beobachtetem Zeitabschnitt"></div><p id="cycle-note" class="diagnostic-note">Eine Datenbasis entsteht mit den nächsten Messungen.</p>
+      </section>
+      <section class="diagnostics-section" id="reglerdiagnose" aria-labelledby="diagnostics-heading"><div class="section-heading"><div><span class="eyebrow">AUS DEM SIEMENS-PROFIL</span><h2 id="diagnostics-heading">Anlage & Reglerdiagnose</h2></div><span class="source-tag">Nur lesend</span></div><div id="diagnostics"></div></section>
       <section class="panel schedule-panel" aria-labelledby="schedule-heading">
         <div class="panel-heading"><div><h2 id="schedule-heading">Heizzeiten der Woche</h2><p>Eigene Zeitprogramme für Erdgeschoss und Obergeschoss</p></div><div class="segmented" aria-label="Darstellung der Heizzeiten"><button type="button" data-schedule-mode="grid" class="selected" aria-pressed="true">Wochenraster</button><button type="button" data-schedule-mode="list" aria-pressed="false">Zeitliste</button></div></div>
         <div id="schedule-table" aria-label="Zeitfenster je Wochentag und Heizkreis"></div>
@@ -51,9 +59,9 @@
         <p id="schedule-message" class="schedule-message" role="status" aria-live="polite"></p>
       </section>
       <section class="panel history-panel">
-        <div class="panel-heading"><div><h2>Temperaturverlauf</h2><p>Vorlauf im Erdgeschoss und Kesseltemperatur</p></div><div class="segmented" aria-label="Verlaufszeitraum"><button data-hours="1">1 Std.</button><button data-hours="6" class="selected">6 Std.</button><button data-hours="24">24 Std.</button></div></div>
-        <div class="chart-container" id="history-chart"><div class="empty-chart"><svg><use href="#chart"/></svg><strong>Ein Verlauf entsteht mit der Zeit</strong><span>Neue Messwerte werden auf der SmartHome-VM gespeichert.</span></div></div>
-        <div class="chart-legend"><span><i class="teal-dot"></i>EG · Vorlauf</span><span><i class="amber-dot"></i>Kesseltemperatur</span><span class="history-note">30 Tage lokal gespeichert</span></div>
+        <div class="panel-heading"><div><h2>Temperaturverlauf</h2><p id="history-description">Vorlauf im Erdgeschoss und Kesseltemperatur</p></div><div class="segmented" aria-label="Verlaufszeitraum"><button data-hours="1">1 Std.</button><button data-hours="6" class="selected">6 Std.</button><button data-hours="24">24 Std.</button></div></div>
+        <label class="history-selector">Verlauf anzeigen<select id="history-series" aria-label="Verlauf anzeigen"><option value="heating">Heizung</option><option value="weather">Außentemperaturen</option></select></label><div class="chart-container" id="history-chart"><div class="empty-chart"><svg><use href="#chart"/></svg><strong>Ein Verlauf entsteht mit der Zeit</strong><span>Neue Messwerte werden auf der SmartHome-VM gespeichert.</span></div></div>
+        <div class="chart-legend" id="history-legend"><span><i class="teal-dot"></i>EG · Vorlauf</span><span><i class="amber-dot"></i>Kesseltemperatur</span><span class="history-note">30 Tage lokal gespeichert</span></div>
       </section>
       <section class="rooms-section"><div class="section-heading"><div><span class="eyebrow">TADO · VIA IOBROKER</span><h2>Die Temperatur in deinen Räumen</h2></div><span class="source-tag" id="tado-status">Verbindung wird geprüft</span></div><div class="rooms-grid" id="rooms-grid"><div class="panel empty-rooms">Raumtemperaturen werden geladen …</div></div><p class="rooms-note">Tado-Messwerte werden angezeigt und nicht als Raumfühler an die Heizungsregler gesendet.</p></section>
       <footer><div><span class="connection-light" id="io-light"></span><span id="io-status">ioBroker wird verbunden</span></div><span id="updated">Warte auf den ersten Messwert</span><a href="/">Zur SmartHome-Zentrale ↗</a></footer>

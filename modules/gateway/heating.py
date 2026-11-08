@@ -13,8 +13,9 @@ import time
 import urllib.request
 
 from flask import jsonify, render_template, request
-from .heating_lpb import POINTS, WEEKDAYS, decode, decode_schedule, read_frame
+from .heating_lpb import POINTS, WEEKDAYS, TEXT_KINDS, RELAY_KINDS, decode, decode_schedule, read_frame
 from .heating_schedule_write import ScheduleWriter, ScheduleError
+from .heating_statistics import summarize
 
 logger = logging.getLogger(__name__)
 
@@ -152,8 +153,8 @@ class HeatingService:
             except Exception:
                 logger.warning('Heating schedule recovery is still pending')
             self._poll_bus()
-        self._sync_iobroker()
         self._save_history()
+        self._sync_iobroker()
 
     def _poll_bus(self):
         now = time.time()
@@ -280,8 +281,8 @@ class HeatingService:
                     existing = bridge.call('getObject', key)
                     if existing and existing.get('native', {}).get('managed_by') != 'smarthome-heating':
                         raise ValueError('existing ioBroker state belongs to another integration')
-                    common = {'name': point.label, 'type': 'boolean' if point.kind.startswith('relay') or point.kind in ('boolean', 'enable') else 'string' if point.kind == 'mode' else 'number',
-                              'role': 'indicator' if point.kind.startswith('relay') or point.kind in ('boolean', 'enable') else 'text' if point.kind == 'mode' else 'value.temperature' if point.unit == '°C' else 'value',
+                    common = {'name': point.label, 'type': 'boolean' if point.kind in RELAY_KINDS or point.kind in ('boolean', 'enable') else 'string' if point.kind in TEXT_KINDS or point.kind.startswith('raw') else 'number',
+                              'role': 'indicator' if point.kind in RELAY_KINDS or point.kind in ('boolean', 'enable') else 'text' if point.kind in TEXT_KINDS or point.kind.startswith('raw') else 'value.temperature' if point.unit == '°C' else 'value',
                               'read': True, 'write': False}
                     if point.unit:
                         common['unit'] = point.unit
@@ -293,6 +294,23 @@ class HeatingService:
                     self.objects_created.add(key)
                 valid = item['quality'] == 'valid'
                 bridge.call('setState', key, {'val': item['value'] if valid else None, 'ack': True, 'q': 0 if valid else 0x40})
+            stats=self.statistics(24)
+            for key,label,unit in [('starts','Beobachtete Brennerstarts · 24 h',''),
+                                   ('relay_runtime_minutes','Beobachtete Relaislaufzeit · 24 h','min'),
+                                   ('starts_per_hour','Starts je beobachteter Stunde · 24 h',''),
+                                   ('relay_minutes_per_start','Relaisminuten je beobachtetem Start · 24 h','min'),
+                                   ('coverage_percent','Datenabdeckung · 24 h','%')]:
+                state_key=f'{IoBroker.PREFIX}.statistik.{key}_24h'
+                if state_key not in self.objects_created:
+                    existing=bridge.call('getObject',state_key)
+                    if existing and existing.get('native',{}).get('managed_by')!='smarthome-heating':
+                        raise ValueError('existing statistics state belongs to another integration')
+                    if not existing:
+                        bridge.call('setObject',state_key,{'type':'state','common':{'name':label,'type':'number','role':'value',
+                            'read':True,'write':False,**({'unit':unit} if unit else {})},'native':{'managed_by':'smarthome-heating'}})
+                    self.objects_created.add(state_key)
+                valid=stats[key] is not None
+                bridge.call('setState',state_key,{'val':stats[key],'ack':True,'q':0 if valid else 0x40})
             for area,days in snapshot['schedules'].items():
                 for day in days:
                     key=f'{IoBroker.PREFIX}.{area}.schedule_{day["day"]}'
@@ -318,10 +336,10 @@ class HeatingService:
         snapshot = self.snapshot()
         data = {}
         for area in ('eg', 'og'):
-            for key in ('flow_actual', 'flow_setpoint', 'room_setpoint'):
+            for key in ('flow_actual', 'flow_setpoint', 'room_setpoint','outside','outside_attenuated','outside_composite'):
                 item = snapshot['floors'][area]['metrics'].get(key)
                 data[f'{area}.{key}'] = item['value'] if item and item['quality'] == 'valid' else None
-        for key in ('boiler', 'dhw', 'burner', 'burner_stage2', 'starts'):
+        for key in ('boiler', 'dhw', 'burner', 'burner_stage2', 'starts','burner_hours'):
             item = snapshot['plant'][key]
             data['anlage.' + key] = item['value'] if item['quality'] == 'valid' else None
         with closing(sqlite3.connect(self.db_path, timeout=5)) as db, db:
@@ -336,20 +354,30 @@ class HeatingService:
         # Bound response size and average into time buckets, preserving gaps.
         width = max(1, (len(rows)+359)//360)
         result = []
+        parsed = [json.loads(row[1]) for row in rows]
+        keys = sorted(set().union(*(entry.keys() for entry in parsed)))
         for start in range(0, len(rows), width):
             bucket = rows[start:start+width]
-            entries = [json.loads(row[1]) for row in bucket]
+            entries = parsed[start:start+width]
             merged = {}
-            for key in entries[0]:
+            for key in keys:
                 values = [e[key] for e in entries if isinstance(e.get(key), (int, float))]
                 if len(values) != len(entries):
                     merged[key] = None
-                elif key in ('anlage.burner', 'anlage.burner_stage2', 'anlage.starts', 'eg.flow_setpoint', 'eg.room_setpoint', 'og.room_setpoint'):
+                elif key in ('anlage.burner', 'anlage.burner_stage2', 'anlage.starts', 'anlage.burner_hours', 'eg.flow_setpoint', 'eg.room_setpoint', 'og.room_setpoint'):
                     merged[key] = entries[-1][key]
                 else:
                     merged[key] = sum(values)/len(values)
             result.append({'ts': bucket[-1][0], **merged})
         return result
+
+    def statistics(self, hours):
+        now=time.time()
+        with closing(sqlite3.connect(self.db_path,timeout=5)) as db:
+            rows=db.execute('SELECT ts,payload FROM heating_samples WHERE ts>=? ORDER BY ts',(int(now-hours*3600),)).fetchall()
+        return summarize([{'ts':ts,**json.loads(data)} for ts,data in rows],hours,now,
+                         max_gap=max(120,self.interval*3))
+
 
 
 def register_heating_routes(manager, root=None):
@@ -377,6 +405,16 @@ def register_heating_routes(manager, root=None):
         if hours not in (1, 6, 24):
             return jsonify({'error': 'invalid_hours'}), 400
         return jsonify({'hours': hours, 'samples': service.history(hours)})
+
+    @app.route('/api/heating/statistics')
+    def heating_statistics():
+        try:
+            hours=int(request.args.get('hours','6'))
+        except ValueError:
+            return jsonify({'error':'invalid_hours'}),400
+        if hours not in (1,6,24):
+            return jsonify({'error':'invalid_hours'}),400
+        return jsonify(service.statistics(hours))
 
     def schedule_guard():
         if request.headers.get('X-Heating-Schedule') != '1' or not request.is_json:
