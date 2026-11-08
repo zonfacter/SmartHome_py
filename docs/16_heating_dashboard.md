@@ -325,3 +325,72 @@ Sie schlägt keine pauschalen Zahlenwerte vor, speichert keine Konfiguration
 und führt keine Schreibbefehle aus. Unbekannte Signalattribute bleiben offen.
 Alle Hilfetexte werden als lokale statische Datei ausgeliefert. Nur der
 bewusst anklickbare Herstellerlink öffnet eine externe Dokumentation.
+
+## Lernende Beobachtung ohne Stellzugriff
+
+Die optionale, ignorierte `config/heating_observer.json` aktiviert ausschließlich
+`mode: observe`. Andere Modi werden abgelehnt. Ein Beispiel liegt unter
+`config/heating_observer.example.json`. Das Beobachtungsmodul bekommt nur
+Snapshots und einen lokalen SQLite-Pfad; es besitzt weder Bus-/HTTP-Transport
+noch einen Writer. Es ändert keine Reglerparameter, Tado-Vorgaben oder
+Zeitprogramme. Die bisherigen manuellen Zeitprogramm-Routen bleiben separat.
+
+Bei aktiviertem Beobachter startet der vorhandene Collector bereits beim
+Dienststart, auch ohne Browser. Nach dem ioBroker-Abgleich wird höchstens einmal
+pro Minute ein kompakter Datensatz in `heating_observations` gespeichert,
+90 Tage aufbewahrt und nicht rückwirkend aus unvollständigen Altdaten erzeugt.
+Raum-ID, Etage, Gerätetyp, Temperatur, Sollwert, Feuchte, Heizbedarf und
+Quellenzeitpunkte bleiben getrennt. Tado-Felder werden einzeln nach q, Alter,
+Numerik und Wertebereich geprüft. 0 % Heizbedarf ist gültig; fehlende Werte sind
+keine Null. Verbindungsabbrüche werden nicht als frische Trainingsdaten genutzt.
+
+Das stündliche Lernen läuft in einem eigenen Thread mit einer standardisierten
+Ridge-Regression ohne zusätzliche ML-Paketabhängigkeiten. EG und OG erhalten
+je Heizungsraum ein eigenes thermisches Antwortmodell, der Speicher ein eigenes
+Lade-/Abkühlmodell. Klimageräte und unbestätigte Gerätetypen werden aufgezeichnet,
+aber nicht als Gas-Heizungsraum trainiert. Keller-Räume werden aufgezeichnet,
+gehören jedoch nicht zum EG-/OG-Modell. Keine widersprüchlichen Raumwerte werden
+gemittelt oder durch einen vorgegebenen Referenzraum ersetzt.
+
+Das Modellfenster umfasst 28 Tage, auf fünf Minuten ausgedünnt. Nicht überlappende
+15–30-Minuten-Intervalle müssen vollständig gültig sein; Lücken über sieben
+Minuten schließen ein Intervall aus. Raum-Modelle verwenden Wetterdifferenz
+und eine mit Q1 und gültigem Tado-Heizbedarf gewichtete Versorgungsgröße:
+EG-Vorlauf bzw. OG-Kesseltemperatur als Proxy. Das ist kein gemessener Wärmestrom.
+Das Speichermodell nutzt Q3, Kessel- und Speichertemperatur; die Umgebung ist
+explizit mit 20 °C angenommen. Größere Temperaturstürze ohne Ladung werden als
+mögliche Entnahmen aus der Abkühlmodellierung ausgeschlossen. Es gibt keinen
+Zapfmengen- oder Hygienemodell-Nachweis.
+
+Mindestens 48 Intervalle, drei Beobachtungstage und 48 Stunden Spanne sowie
+Heiz-/Abkühlphasen und veränderliche Eingänge sind nötig. Die letzten 20 Prozent
+bleiben zeitlich nachgelagerte Prüfdaten. Erst wenn Vorzeichen plausibel sind
+und der Temperaturfehler kleiner als bei unveränderter Temperatur ist, wird
+`validated` gemeldet. Danach wird auf allen geeigneten Daten neu angepasst.
+Eine geprüfte Temperaturreaktion garantiert weder kausale Identifikation noch
+Energieeinsparung; es werden keine Steuerempfehlungen automatisch ausgeführt.
+Lernstand und Zeitpunkt stehen dauerhaft in `heating_learning`.
+
+### Relaiszeit und Nennleistungsreferenz
+
+Die zusätzliche Rechnung verwendet Roh-Historienintervalle mit gültigen K4/K5
+an beiden Enden, höchstens drei Minuten Abstand. Sie benötigt keinen gültigen
+Startzähler. Gezählt wird die Vereinigung der Kontakte, keine doppelte Laufzeit
+bei zwei aktiven Stufen; Stufenzeiten sind separat enthalten. Messlücken werden
+nicht hochgerechnet. Dies bleibt eine abgetastete Relaiszeit, keine Flammenmessung.
+
+Die Typenschild-Nennwärmebelastung (Hi/Heizwertbasis) und Nennwärmeleistung sind
+getrennte Konfigurationsfelder. Referenzenergie = Nennbelastung mal beobachtete
+Relaisstunden, unter der ausdrücklich unbestätigten Annahme voller Belastung
+während jeder Relaisminute. Gasäquivalent = Referenzenergie / angenommener
+Heizwert (standardmäßig nur als Beispiel 10 kWh/Nm³). Es handelt sich um
+Normvolumen, nicht Zähler-Betriebsvolumen. Für reale Gasabrechnung sind unter
+anderem Brennwert und Zustandszahl erforderlich; Hi und Hs sind nicht austauschbar.
+Der Abgasverlust wird nicht als Anlagen-/Jahresnutzungsgrad verwendet. Eine
+Umrüstsatznummer und ein einzelner Messzettel bestätigen keine Stufenleistung.
+
+Die Oberfläche unter `#beobachtung` zeigt Aufzeichnungsstand, Modelle,
+Raum-/Speicherverläufe und ausdrücklich unkalibrierte Richtwerte.
+`GET /api/heating/observer` und `/api/heating/observer/history` sind rein lesend,
+mit `hours=1|6|24`. Historien liefern maximal 360 Punkte; ungültige Werte in einem
+Verdichtungsabschnitt bleiben Lücken. Alle Daten bleiben lokal auf der VM.

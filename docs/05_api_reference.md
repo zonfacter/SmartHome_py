@@ -34,6 +34,8 @@ Nur hier gelistete Endpunkte gelten als dokumentierter API-Stand.
 - `GET /api/heating/history`
 - `GET /api/heating/statistics`
 - `GET /api/heating/pumps`
+- `GET /api/heating/observer`
+- `GET /api/heating/observer/history`
 - `POST /api/heating/schedule/preview`
 - `POST /api/heating/schedule/apply`
 
@@ -58,6 +60,13 @@ und SQLite. Feldwerte und Attributbits sind getrennt; `effective:null` und
 `cause_status:"unresolved"` verhindern eine ungeprüfte Ursachenzuweisung.
 Die aktuelle Diagnose steht außerdem unter `state.floors.<eg|og>.pump_diagnosis`.
 Der Mitschnitt beginnt mit dieser Erweiterung und wird sieben Tage aufbewahrt.
+
+`observer?hours=1|6|24` liefert den ausdrücklich nicht steuernden Lernstand für
+EG, OG und Warmwasser, Aufzeichnungsabdeckung, Raumkennungen und eine unkalibrierte
+Nennleistungs-/Gasäquivalentrechnung. `mode:"observe"` und `can_control:false`
+sind fest. `observer/history?hours=1|6|24` liefert höchstens 360 Beobachtungen mit
+Tado-Ist-/Sollwerten, Feuchte, Heizbedarf, Quellenzeitpunkten und Datenqualität.
+Die Routen lesen ausschließlich die lokale Datenbank; es gibt keine POST-Route.
 
 `preview` erhält `{area:"eg"|"og", base:[7 Tagesprogramme], days:[7 Tagesprogramme]}`.
 Ein Tagesprogramm ist eine Liste von maximal drei Objekten mit `start`/`end` im

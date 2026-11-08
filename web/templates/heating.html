@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#163d38">
   <title>Heizung · SmartHome</title>
-  <link rel="stylesheet" href="/static/css/heating.css?v=9">
+  <link rel="stylesheet" href="/static/css/heating.css?v=11">
   <script defer src="/static/js/heating_help.js?v=9"></script>
   <script defer src="/static/js/heating_schedule.js?v=7"></script>
   <script defer src="/static/js/heating_diagnostics.js?v=9"></script>
   <script defer src="/static/js/heating_pumps.js?v=7"></script>
-  <script defer src="/static/js/heating.js?v=9"></script>
+  <script defer src="/static/js/heating_observer.js?v=11"></script>
+  <script defer src="/static/js/heating.js?v=11"></script>
 </head>
 <body>
   <svg class="svg-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
@@ -47,6 +48,13 @@
       </section>
       <div class="section-heading"><div><span class="eyebrow">GETRENNT GEREGELT</span><h2>Deine Heizkreise</h2></div><span class="muted small">Messwerte und Einstellungen · nur lesend</span></div>
       <section class="floor-grid" id="floor-grid" aria-label="Heizkreise"></section>
+      <section class="panel observer-panel" id="beobachtung" aria-labelledby="observer-heading"><div class="panel-heading"><div><span class="eyebrow">LOKALES LERNEN AUF DER VM</span><h2 id="observer-heading">Lernende Beobachtung</h2><p id="observer-state">Beobachtungsmodus wird geprüft</p></div><span class="source-tag">Nur beobachten · keine Eingriffe</span></div><div id="observer-panel">
+        <div class="observer-overview"><article><span>Gespeicherte Datensätze</span><strong id="observer-count">—</strong></article><article><span>Aufgezeichneter Zeitraum</span><strong id="observer-span">—</strong></article><article><span id="observer-last">Noch keine Aufzeichnung</span><small>90 Tage lokal · getrennte Raumkennungen</small></article></div>
+        <p class="diagnostic-note" id="observer-note">Heizzeiten und Einstellungen bleiben unverändert.</p><div id="observer-models" class="observer-models"></div>
+        <div class="observer-history-heading"><h3>Aufzeichnung & Relais-Richtwerte</h3><div class="segmented" aria-label="Beobachtungszeitraum"><button type="button" data-observer-hours="1">1 Std.</button><button type="button" data-observer-hours="6">6 Std.</button><button type="button" data-observer-hours="24" class="selected">24 Std.</button></div></div>
+        <div class="observer-controls"><label>Bereich<select id="observer-area" aria-label="Beobachtungsbereich"><option value="eg">EG · Fußbodenheizung</option><option value="og">OG · Heizkörper</option><option value="dhw">Warmwasserspeicher</option></select></label><label>Raum / Sensor<select id="observer-room" aria-label="Beobachteter Raum"></select></label></div><div class="chart-container" id="observer-chart"></div><p class="diagnostic-note" id="observer-legend"></p>
+        <div class="observer-energy"><article><span>Beobachtete Brennerrelaiszeit</span><strong id="observer-runtime">—</strong></article><article><span>Brennstoff-Richtwert · Nennbelastung</span><strong id="observer-energy">—</strong></article><article><span>Gasäquivalent · Beispiel-Heizwert</span><strong id="observer-gas">—</strong></article></div><p class="diagnostic-note" id="observer-energy-note"></p><details class="observer-assumptions"><summary>Annahmen zur Richtwertrechnung</summary><p class="diagnostic-note" id="observer-reference"></p></details>
+      </div></section>
       <section class="diagnostics-section" id="pumpendiagnose" aria-labelledby="pump-heading"><div class="section-heading"><div><span class="eyebrow">KONTAKT, ANFORDERUNG & KONTEXT</span><h2 id="pump-heading">Warum läuft die Pumpe? <button type="button" class="heating-help-trigger" data-heating-help="pump" data-help-area="eg" aria-label="Hilfe zu Pumpenkontakten" aria-haspopup="dialog">?</button></h2></div><span class="source-tag">Nur lesend · Ursachenprüfung</span></div><div id="pump-diagnostics" class="diagnostic-grid"></div></section>
       <section class="panel cycle-panel" id="brennerstatistik" aria-labelledby="cycle-heading">
         <div class="panel-heading"><div><h2 id="cycle-heading">Brennerstatistik</h2><p>Zähler der K und beobachtete Relaiskontakte</p></div><div class="segmented" aria-label="Statistikzeitraum"><button data-hours="1">1 Std.</button><button data-hours="6" class="selected">6 Std.</button><button data-hours="24">24 Std.</button></div></div>

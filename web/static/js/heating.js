@@ -64,6 +64,7 @@
   const diagnostics=new HeatingDiagnostics.View($('diagnostics'));
   const pumps=new HeatingPumps.View($('pump-diagnostics'));
   const help=new HeatingHelp.View($('heating-help'),$('heating-guide'));
+  const observer=new HeatingObserverView.View($('beobachtung'));
   function render() {
     const p = snapshot.plant, connected = snapshot.connection.connected;
     stat('boiler',p.boiler); stat('dhw',p.dhw); stat('outside',snapshot.floors.eg.metrics.outside); stat('burner',p.burner,'');
@@ -84,7 +85,7 @@
     if (inFlight) return;
     inFlight=true; $('refresh').disabled=true;
       try { const response=await fetch('/api/heating/state',{cache:'no-store'}); if(!response.ok) throw Error(); snapshot=await response.json(); render();
-        if(initialAnchorPending){initialAnchorPending=false;const id=location.hash.slice(1);if(['pumpendiagnose','brennerstatistik','reglerdiagnose','schedule-table'].includes(id))requestAnimationFrame(()=>$(id)?.scrollIntoView({block:'start'}));}
+        if(initialAnchorPending){initialAnchorPending=false;const id=location.hash.slice(1);if(['beobachtung','pumpendiagnose','brennerstatistik','reglerdiagnose','schedule-table'].includes(id))requestAnimationFrame(()=>$(id)?.scrollIntoView({block:'start'}));}
       }
     catch { $('connection-note').hidden=false; $('connection-note').textContent='Die SmartHome-VM ist gerade nicht erreichbar. Anzeige wird automatisch erneut geladen.'; $('live-tag').classList.remove('online'); $('live-tag').querySelector('span').textContent='Anzeige offline'; }
     finally { inFlight=false; $('refresh').disabled=false; }
@@ -122,15 +123,15 @@
     $('page-title').innerHTML=(view==='eg'?'Erdgeschoss':view==='og'?'Obergeschoss':'Heizungsübersicht')+'<span>.</span>';
     $('page-subtitle').textContent=view==='eg'?'Fußbodenheizung · Eurocontrol M':view==='og'?'Heizkörper · Eurocontrol K':'Fußbodenheizung im EG. Heizkörper im OG. Alles an einem Ort.';
     const url=new URL(location); view==='overview'?url.searchParams.delete('etage'):url.searchParams.set('etage',view); window.history.replaceState(null,'',url);
-    help.update(snapshot,view);renderFloors();renderRooms();renderSchedule();diagnostics.render(snapshot,view);pumps.render(snapshot,view);history();
+    help.update(snapshot,view);renderFloors();renderRooms();renderSchedule();diagnostics.render(snapshot,view);pumps.render(snapshot,view);observer.setView(view);history();
     window.scrollTo(0,0);
   }
   document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>selectView(b.dataset.view)));
   document.querySelectorAll('[data-hours]').forEach(b=>b.addEventListener('click',()=>{hours=Number(b.dataset.hours);document.querySelectorAll('[data-hours]').forEach(c=>c.classList.toggle('selected',c.dataset.hours===b.dataset.hours));history();diagnostics.load(hours);pumps.load(hours);}));
-  $('refresh').addEventListener('click',()=>{load();diagnostics.load(hours);pumps.load(hours);});
+  $('refresh').addEventListener('click',()=>{load();diagnostics.load(hours);pumps.load(hours);observer.load();});
   $('history-series').addEventListener('change',history);
   document.addEventListener('heating-schedules-updated',load);
   $('theme').addEventListener('click',()=>{theme=theme==='dark'?'light':'dark';document.body.dataset.theme=theme;localStorage.setItem('heating-theme',theme);});
-  selectView(view); load(); history();diagnostics.load(hours);pumps.load(hours); setInterval(()=>{if(!document.hidden)load();},5000); setInterval(()=>{if(!document.hidden){history();diagnostics.load(hours);pumps.load(hours);}},30000);
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden){load();history();diagnostics.load(hours);pumps.load(hours);}});
+  selectView(view); load(); history();diagnostics.load(hours);pumps.load(hours);observer.load(); setInterval(()=>{if(!document.hidden)load();},5000); setInterval(()=>{if(!document.hidden){history();diagnostics.load(hours);pumps.load(hours);observer.load();}},30000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){load();history();diagnostics.load(hours);pumps.load(hours);observer.load();}});
 })();

@@ -17,8 +17,19 @@ from .heating_lpb import POINTS, WEEKDAYS, TEXT_KINDS, RELAY_KINDS, decode, deco
 from .heating_schedule_write import ScheduleWriter, ScheduleError
 from .heating_statistics import summarize
 from .heating_pumps import diagnose, event_payload, fingerprint
+from .heating_observer import HeatingObserver, numeric
 
 logger = logging.getLogger(__name__)
+
+
+def tado_number(state,low,high,now=None):
+    now=time.time() if now is None else now
+    value=state.get('val');stamp=state.get('ts')
+    if value is None:return None,'unavailable'
+    if state.get('q') or not numeric(value) or not low<=value<=high or not numeric(stamp) or stamp<=0 or stamp/1000>now+60:
+        return None,'error'
+    if now-stamp/1000>900:return None,'stale'
+    return value,'valid'
 
 
 class IoBroker:
@@ -109,6 +120,7 @@ class HeatingService:
             db.execute('CREATE TABLE IF NOT EXISTS heating_pump_events (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, area TEXT NOT NULL, payload TEXT NOT NULL)')
             db.execute('CREATE INDEX IF NOT EXISTS heating_pump_events_area_time ON heating_pump_events(area,ts)')
         self.schedule_writer = ScheduleWriter(self.root, self.config, self.fetch, self._send_schedule, self.bus_lock, self._update_schedule_cache)
+        self.observer = HeatingObserver(self.root,self.db_path)
 
     @staticmethod
     def _empty(point):
@@ -158,6 +170,11 @@ class HeatingService:
             self._poll_bus()
         self._save_history()
         self._sync_iobroker()
+        try:
+            self.observer.record(self.snapshot())
+        except Exception as error:
+            self.observer.error=type(error).__name__
+            logger.warning('Heating observation interrupted (%s)',type(error).__name__)
 
     def _poll_bus(self):
         now = time.time()
@@ -253,7 +270,8 @@ class HeatingService:
             alive = bridge.call('getStates', 'system.adapter.tado.*.alive') or {}
             tado_connected = any(v.get('val') is True for v in connection.values()) and any(v.get('val') is True for v in alive.values())
             readings = {}
-            for suffix in ('sensorDataPoints.insideTemperature.celsius', 'sensorDataPoints.humidity.percentage', 'setting.temperature.celsius', 'name'):
+            for suffix in ('sensorDataPoints.insideTemperature.celsius', 'sensorDataPoints.humidity.percentage', 'setting.temperature.celsius', 'name',
+                           'activityDataPoints.heatingPower.percentage','type','setting.power','activityDataPoints.acPower.value'):
                 readings.update(bridge.call('getStates', 'tado.*.Rooms.*.' + suffix) or {})
             names = self.config.get('room_names', {})
             floors = self.config.get('room_floors', {})
@@ -271,11 +289,19 @@ class HeatingService:
                 value = state.get('val')
                 if not native_name and value is None:
                     continue
-                rooms.append({'id': prefix, 'name': str(name), 'floor': floor,
-                              'temperature': value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and not state.get('q') else None,
-                              'setpoint': readings.get(prefix + '.setting.temperature.celsius', {}).get('val'),
-                              'humidity': readings.get(prefix + '.sensorDataPoints.humidity.percentage', {}).get('val'),
-                              'timestamp': state.get('ts', 0)/1000})
+                fields={'temperature':('sensorDataPoints.insideTemperature.celsius',-20,70),
+                        'setpoint':('setting.temperature.celsius',0,50),'humidity':('sensorDataPoints.humidity.percentage',0,100),
+                        'demand':('activityDataPoints.heatingPower.percentage',0,100)}
+                values={};quality={};timestamps={}
+                for key,(suffix,low,high) in fields.items():
+                    source=readings.get(prefix+'.'+suffix,{})
+                    values[key],quality[key]=tado_number(source,low,high)
+                    timestamps[key]=source.get('ts',0)/1000 if numeric(source.get('ts')) else None
+                rooms.append({'id':prefix,'name':str(name),'floor':floor,**values,'quality':quality,'timestamps':timestamps,
+                              'type':readings.get(prefix+'.type',{}).get('val'),
+                              'power':readings.get(prefix+'.setting.power',{}).get('val'),
+                              'ac_power':readings.get(prefix+'.activityDataPoints.acPower.value',{}).get('val'),
+                              'timestamp':timestamps['temperature'] or 0})
             with self.lock:
                 self.rooms = sorted(rooms, key=lambda r: r['name'].casefold())
                 self.io_status = {'connected': True, 'tado_connected': tado_connected, 'namespace': IoBroker.PREFIX}
@@ -346,7 +372,7 @@ class HeatingService:
                     bridge.call('setState',key,{'val':text if valid else None,'ack':True,'q':0 if valid else 0x40})
         except Exception as error:
             with self.lock:
-                self.io_status.update(connected=False, message='ioBroker-Verbindung unterbrochen')
+                self.io_status.update(connected=False,tado_connected=False, message='ioBroker-Verbindung unterbrochen')
             logger.warning('Heating ioBroker sync failed (%s)', type(error).__name__)
         finally:
             bridge.close()
@@ -463,6 +489,23 @@ def register_heating_routes(manager, root=None):
         return jsonify({'hours':hours,'floors':{area:floor['pump_diagnosis'] for area,floor in snapshot['floors'].items()},
                         'events':service.pump_events(hours),'event_limit_per_floor':40})
 
+    @app.route('/api/heating/observer')
+    def heating_observer():
+        try:hours=int(request.args.get('hours','24'))
+        except ValueError:return jsonify({'error':'invalid_hours'}),400
+        if hours not in (1,6,24):return jsonify({'error':'invalid_hours'}),400
+        result=service.observer.status()
+        result['energy_reference']=service.observer.energy_reference(hours)
+        response=jsonify(result);response.headers['Cache-Control']='no-store';return response
+
+    @app.route('/api/heating/observer/history')
+    def heating_observer_history():
+        try:hours=int(request.args.get('hours','6'))
+        except ValueError:return jsonify({'error':'invalid_hours'}),400
+        if hours not in (1,6,24):return jsonify({'error':'invalid_hours'}),400
+        response=jsonify({'hours':hours,'samples':service.observer.history(hours)})
+        response.headers['Cache-Control']='no-store';return response
+
     def schedule_guard():
         if request.headers.get('X-Heating-Schedule') != '1' or not request.is_json:
             raise ScheduleError('Übertragung benötigt eine bestätigte JSON-Anfrage.', 403)
@@ -496,4 +539,6 @@ def register_heating_routes(manager, root=None):
     def heating_schedule_apply():
         return schedule_request('apply')
 
+    if service.observer.enabled:
+        service.start()  # continuous collection after VM/service restart, without an open browser
     return service

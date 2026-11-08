@@ -1,0 +1,14 @@
+{
+  "enabled": false,
+  "mode": "observe",
+  "plant_reference": {
+    "model": "Typenschild prüfen",
+    "rated_input_hi_kw": null,
+    "rated_output_kw": null,
+    "assumed_hi_kwh_per_nm3": 10.0,
+    "calorific_value_is_assumption": true,
+    "stage_powers_confirmed": false,
+    "dhw_tank_litres": null,
+    "note": "Nur Beispiel-Heizwert. Nennwärmebelastung auf Hi-Basis und Wärmeleistung getrennt vom Typenschild übernehmen. Keine Verbrauchsmessung."
+  }
+}
