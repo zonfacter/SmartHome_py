@@ -65,6 +65,7 @@
   const pumps=new HeatingPumps.View($('pump-diagnostics'));
   const help=new HeatingHelp.View($('heating-help'),$('heating-guide'));
   const observer=new HeatingObserverView.View($('beobachtung'));
+  const dhwHistory=new HeatingDhwView.View($('warmwasser-verlauf'));
   function render() {
     const p = snapshot.plant, connected = snapshot.connection.connected;
     stat('boiler',p.boiler); stat('dhw',p.dhw); stat('outside',snapshot.floors.eg.metrics.outside); stat('burner',p.burner,'');
@@ -85,7 +86,7 @@
     if (inFlight) return;
     inFlight=true; $('refresh').disabled=true;
       try { const response=await fetch('/api/heating/state',{cache:'no-store'}); if(!response.ok) throw Error(); snapshot=await response.json(); render();
-        if(initialAnchorPending){initialAnchorPending=false;const id=location.hash.slice(1);if(['beobachtung','pumpendiagnose','brennerstatistik','reglerdiagnose','schedule-table'].includes(id))requestAnimationFrame(()=>$(id)?.scrollIntoView({block:'start'}));}
+        if(initialAnchorPending){initialAnchorPending=false;const id=location.hash.slice(1);if(['warmwasser-verlauf','beobachtung','pumpendiagnose','brennerstatistik','reglerdiagnose','schedule-table'].includes(id))requestAnimationFrame(()=>$(id)?.scrollIntoView({block:'start'}));}
       }
     catch { $('connection-note').hidden=false; $('connection-note').textContent='Die SmartHome-VM ist gerade nicht erreichbar. Anzeige wird automatisch erneut geladen.'; $('live-tag').classList.remove('online'); $('live-tag').querySelector('span').textContent='Anzeige offline'; }
     finally { inFlight=false; $('refresh').disabled=false; }
@@ -128,10 +129,10 @@
   }
   document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>selectView(b.dataset.view)));
   document.querySelectorAll('[data-hours]').forEach(b=>b.addEventListener('click',()=>{hours=Number(b.dataset.hours);document.querySelectorAll('[data-hours]').forEach(c=>c.classList.toggle('selected',c.dataset.hours===b.dataset.hours));history();diagnostics.load(hours);pumps.load(hours);}));
-  $('refresh').addEventListener('click',()=>{load();diagnostics.load(hours);pumps.load(hours);observer.load();});
+  $('refresh').addEventListener('click',()=>{load();diagnostics.load(hours);pumps.load(hours);observer.load();dhwHistory.load();});
   $('history-series').addEventListener('change',history);
   document.addEventListener('heating-schedules-updated',load);
   $('theme').addEventListener('click',()=>{theme=theme==='dark'?'light':'dark';document.body.dataset.theme=theme;localStorage.setItem('heating-theme',theme);});
-  selectView(view); load(); history();diagnostics.load(hours);pumps.load(hours);observer.load(); setInterval(()=>{if(!document.hidden)load();},5000); setInterval(()=>{if(!document.hidden){history();diagnostics.load(hours);pumps.load(hours);observer.load();}},30000);
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden){load();history();diagnostics.load(hours);pumps.load(hours);observer.load();}});
+  selectView(view); load(); history();diagnostics.load(hours);pumps.load(hours);observer.load();dhwHistory.load(); setInterval(()=>{if(!document.hidden)load();},5000); setInterval(()=>{if(!document.hidden){history();diagnostics.load(hours);pumps.load(hours);observer.load();dhwHistory.load();}},30000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){load();history();diagnostics.load(hours);pumps.load(hours);observer.load();dhwHistory.load();}});
 })();

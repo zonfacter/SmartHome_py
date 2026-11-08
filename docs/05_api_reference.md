@@ -36,6 +36,7 @@ Nur hier gelistete Endpunkte gelten als dokumentierter API-Stand.
 - `GET /api/heating/pumps`
 - `GET /api/heating/observer`
 - `GET /api/heating/observer/history`
+- `GET /api/heating/observer/dhw-history`
 - `POST /api/heating/schedule/preview`
 - `POST /api/heating/schedule/apply`
 
@@ -66,6 +67,8 @@ EG, OG und Warmwasser, Aufzeichnungsabdeckung, Raumkennungen und eine unkalibrie
 Nennleistungs-/Gasäquivalentrechnung. `mode:"observe"` und `can_control:false`
 sind fest. `observer/history?hours=1|6|24` liefert höchstens 360 Beobachtungen mit
 Tado-Ist-/Sollwerten, Feuchte, Heizbedarf, Quellenzeitpunkten und Datenqualität.
+`observer/dhw-history?days=1|7|30|90` liefert den gemessenen Warmwasserverlauf
+in maximal 720 Abschnitten mit Mittelwert, Minimum, Maximum und Datenlücken.
 Die Routen lesen ausschließlich die lokale Datenbank; es gibt keine POST-Route.
 
 `preview` erhält `{area:"eg"|"og", base:[7 Tagesprogramme], days:[7 Tagesprogramme]}`.

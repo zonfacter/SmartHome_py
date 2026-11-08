@@ -304,3 +304,36 @@ class HeatingObserver:
             rows=db.execute('SELECT ts,payload FROM heating_samples WHERE ts>=? ORDER BY ts',(int(now-hours*3600),)).fetchall()
         return runtime_reference([{'ts':ts,**json.loads(data)} for ts,data in rows],hours,now,
                                  self.config.get('plant_reference',{}))
+
+    def dhw_history(self,days,now=None):
+        """Measured tank temperatures only; bounded buckets retain extrema and gaps."""
+        now=int(time.time() if now is None else now);cutoff=now-days*86400
+        with closing(sqlite3.connect(self.db_path,timeout=5)) as db:
+            if self.enabled:
+                first=db.execute('SELECT MIN(ts) FROM heating_observations').fetchone()[0]
+                rows=db.execute("SELECT ts,CASE WHEN json_extract(payload,'$.plant.dhw.q')='valid' THEN json_extract(payload,'$.plant.dhw.v') END FROM heating_observations WHERE ts>=? AND ts<=? ORDER BY ts",(cutoff,now)).fetchall()
+            else:first=None;rows=[]
+            # Older measured plant history is available before room observation began.
+            legacy=db.execute("SELECT ts,json_extract(payload,'$.\"anlage.dhw\"') FROM heating_samples WHERE ts>=? AND ts<? ORDER BY ts",(cutoff,min(first,now+1) if first is not None else now+1)).fetchall()
+        rows=legacy+rows;seconds=math.ceil(days*86400/720);buckets={};previous=None;values=[]
+        for ts,value in rows:
+            if ts>now:continue
+            index=min(719,(ts-cutoff)//seconds)
+            bucket=buckets.setdefault(index,{'ts':ts,'from':ts,'to':ts,'values':[],'break_before':False})
+            bucket['ts']=bucket['to']=ts
+            valid=numeric(value) and 0<=value<=120
+            if previous is None or ts-previous>180 or not valid:bucket['break_before']=True
+            if valid:bucket['values'].append(value);values.append(value)
+            previous=ts if valid else None
+        samples=[]
+        for bucket in buckets.values():
+            measured_values=bucket.pop('values')
+            bucket.update(temperature=round(sum(measured_values)/len(measured_values),3) if measured_values else None,
+                          minimum=min(measured_values) if measured_values else None,maximum=max(measured_values) if measured_values else None,count=len(measured_values))
+            samples.append(bucket)
+        last=rows[-1] if rows else None
+        latest={'ts':last[0],'temperature':last[1]} if last and numeric(last[1]) and 0<=last[1]<=120 else None
+        return {'days':days,'retention_days':90,'bucket_seconds':seconds,'samples':samples,
+                'first_sample':rows[0][0] if rows else None,'last_sample':last[0] if last else None,
+                'minimum':min(values) if values else None,'maximum':max(values) if values else None,'latest':latest,
+                'valid_samples':len(values),'source':'Gemessener Speicherfühler; ältere Anlagenhistorie bis 30 Tage, Beobachtungsarchiv bis 90 Tage. Keine rückwirkend erzeugten Werte.'}

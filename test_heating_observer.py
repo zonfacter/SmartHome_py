@@ -138,8 +138,43 @@ class ObserverTests(unittest.TestCase):
                 self.assertEqual(c.get(path).status_code,200)
                 self.assertEqual(c.get(path+'?hours=999').status_code,400)
                 self.assertEqual(c.post(path,json={}).status_code,405)
+            for days in (1,7,30,90):
+                self.assertEqual(c.get('/api/heating/observer/dhw-history?days='+str(days)).status_code,200)
+            self.assertEqual(c.get('/api/heating/observer/dhw-history?days=999').status_code,400)
+            self.assertEqual(c.get('/api/heating/observer/dhw-history?days=bad').status_code,400)
+            self.assertEqual(c.post('/api/heating/observer/dhw-history').status_code,405)
             self.assertFalse(c.get('/api/heating/observer').json['can_control'])
             self.assertIsNone(service.thread)
+
+    def test_dhw_history_joins_measured_legacy_and_observation_without_duplicates(self):
+        with tempfile.TemporaryDirectory() as root:
+            observer=HeatingObserver(root,Path(root)/'data.db',{'enabled':True})
+            with closing(sqlite3.connect(observer.db_path)) as db,db:
+                db.execute('CREATE TABLE heating_samples(ts INTEGER PRIMARY KEY,payload TEXT)')
+                for ts,value in ((1000,42),(1060,45),(1120,99),(1180,99)):
+                    db.execute('INSERT INTO heating_samples VALUES (?,?)',(ts,json.dumps({'anlage.dhw':value})))
+                for ts,value,q in ((1120,50,'valid'),(1180,55,'valid'),(1240,60,'stale'),(1300,48,'valid'),(2000,40,'valid')):
+                    db.execute('INSERT INTO heating_observations VALUES (?,?)',(ts,json.dumps({'plant':{'dhw':{'q':q,'v':value}}})))
+            history=observer.dhw_history(1,now=2100)
+            self.assertEqual(history['valid_samples'],6)
+            self.assertEqual((history['minimum'],history['maximum']),(40,55))
+            self.assertEqual(history['latest'],{'ts':2000,'temperature':40})
+            self.assertTrue(history['samples'][-1]['break_before'])
+            self.assertTrue(any(s['temperature'] is None or s['break_before'] for s in history['samples'][1:]))
+
+    def test_dhw_history_bounds_response_and_preserves_short_temperature_peaks(self):
+        with tempfile.TemporaryDirectory() as root:
+            observer=HeatingObserver(root,Path(root)/'data.db',{'enabled':True})
+            now=90*86400
+            with closing(sqlite3.connect(observer.db_path)) as db,db:
+                db.execute('CREATE TABLE heating_samples(ts INTEGER PRIMARY KEY,payload TEXT)')
+                for i in range(8000):
+                    value=65 if i==4001 else 40
+                    db.execute('INSERT INTO heating_observations VALUES (?,?)',(now-i*900,json.dumps({'plant':{'dhw':{'q':'valid','v':value}}})))
+            history=observer.dhw_history(90,now)
+            self.assertLessEqual(len(history['samples']),720)
+            self.assertEqual(history['maximum'],65)
+            self.assertTrue(any(s['maximum']==65 and s['temperature']<65 for s in history['samples']))
 
     def test_enabled_observation_starts_collector_without_a_browser(self):
         with tempfile.TemporaryDirectory() as root:

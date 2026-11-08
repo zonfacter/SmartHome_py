@@ -394,3 +394,14 @@ Raum-/Speicherverläufe und ausdrücklich unkalibrierte Richtwerte.
 `GET /api/heating/observer` und `/api/heating/observer/history` sind rein lesend,
 mit `hours=1|6|24`. Historien liefern maximal 360 Punkte; ungültige Werte in einem
 Verdichtungsabschnitt bleiben Lücken. Alle Daten bleiben lokal auf der VM.
+
+### Warmwasser-Langzeitverlauf
+
+Die eigene Karte `#warmwasser-verlauf` zeigt den gemessenen Speicherfühler für
+24 Stunden, 7, 30 oder 90 Tage. `GET /api/heating/observer/dhw-history?days=1|7|30|90`
+liefert höchstens 720 Zeitabschnitte mit Mittelwert, Minimum, Maximum und Anzahl.
+Ältere tatsächlich gemessene Anlagenhistorie (bis 30 Tage) wird bis zum Beginn
+der Beobachtungsaufzeichnung genutzt; danach gilt das 90-Tage-Beobachtungsarchiv.
+Es werden keine Daten rückwirkend erzeugt. Fehlende/ungültige Temperaturen und
+Abstände über drei Minuten unterbrechen die Verbindungslinie; Extrema bleiben
+bei der Verdichtung erhalten. Die Anzeige verändert keine Warmwasserregelung.

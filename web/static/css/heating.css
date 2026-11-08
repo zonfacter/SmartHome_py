@@ -47,3 +47,4 @@
 @media(max-width:1100px){.observer-models{grid-template-columns:1fr}.observer-energy,.observer-overview{gap:14px}.observer-energy strong{font-size:16px}}@media(max-width:520px){.observer-panel{padding:18px 15px}.observer-overview,.observer-energy{grid-template-columns:1fr 1fr}.observer-overview article:last-child,.observer-energy article:last-child{grid-column:1/-1}.observer-controls{flex-direction:column}.observer-controls label{justify-content:space-between}.observer-controls select{max-width:220px}.observer-panel .chart-container{height:170px}}
 
 .observer-controls label[hidden]{display:none}
+.dhw-history-panel .chart-container{height:200px}.dhw-history-panel>.panel-heading{flex-wrap:wrap;gap:14px}.dhw-history-panel .segmented{flex-wrap:wrap}

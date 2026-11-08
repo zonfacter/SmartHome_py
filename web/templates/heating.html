@@ -5,13 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#163d38">
   <title>Heizung · SmartHome</title>
-  <link rel="stylesheet" href="/static/css/heating.css?v=11">
+  <link rel="stylesheet" href="/static/css/heating.css?v=12">
   <script defer src="/static/js/heating_help.js?v=9"></script>
   <script defer src="/static/js/heating_schedule.js?v=7"></script>
   <script defer src="/static/js/heating_diagnostics.js?v=9"></script>
   <script defer src="/static/js/heating_pumps.js?v=7"></script>
   <script defer src="/static/js/heating_observer.js?v=11"></script>
-  <script defer src="/static/js/heating.js?v=11"></script>
+  <script defer src="/static/js/heating_dhw.js?v=12"></script>
+  <script defer src="/static/js/heating.js?v=12"></script>
 </head>
 <body>
   <svg class="svg-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
@@ -45,6 +46,11 @@
         <article class="stat-card"><div class="stat-top"><span>Warmwasser</span><span class="stat-icon blue"><svg><use href="#drop"/></svg></span></div><div class="stat-value" id="dhw">—<small>°C</small></div><div class="stat-foot" id="dhw-target">Sollwert wird gelesen</div></article>
         <article class="stat-card"><div class="stat-top"><span>Außentemperatur</span><span class="stat-icon sand"><svg><use href="#sun"/></svg></span></div><div class="stat-value" id="outside">—<small>°C</small></div><div class="stat-foot">Reglerwert · Eurocontrol M</div></article>
         <article class="stat-card"><div class="stat-top"><span>Brennerrelais</span><span class="stat-icon coral"><svg><use href="#flame"/></svg></span></div><div class="stat-value state-value" id="burner">—</div><div class="stat-foot" id="burner-starts">Starts werden gelesen</div></article>
+      </section>
+      <section class="panel observer-panel dhw-history-panel" id="warmwasser-verlauf" aria-labelledby="dhw-history-heading">
+        <div class="panel-heading"><div><span class="eyebrow">200-LITER-SPEICHER · LANGZEITVERLAUF</span><h2 id="dhw-history-heading">Warmwassertemperatur</h2></div><div class="segmented" aria-label="Warmwasser-Zeitraum"><button type="button" class="selected" data-dhw-days="1" aria-pressed="true">24 Std.</button><button type="button" data-dhw-days="7" aria-pressed="false">7 Tage</button><button type="button" data-dhw-days="30" aria-pressed="false">30 Tage</button><button type="button" data-dhw-days="90" aria-pressed="false">90 Tage</button></div></div>
+        <div class="observer-overview"><article><span>Zuletzt gemessen</span><strong id="dhw-history-latest">—</strong></article><article><span>Minimum im Zeitraum</span><strong id="dhw-history-min">—</strong></article><article><span>Maximum im Zeitraum</span><strong id="dhw-history-max">—</strong></article></div>
+        <div class="chart-container" id="dhw-history-chart"></div><p class="diagnostic-note">Gemessene Speichertemperatur · bei Verdichtung Mittelwert mit Minimum–Maximum je Abschnitt. Details am Messpunkt.</p><p class="diagnostic-note" id="dhw-history-note">Gespeicherte Messwerte werden geladen.</p>
       </section>
       <div class="section-heading"><div><span class="eyebrow">GETRENNT GEREGELT</span><h2>Deine Heizkreise</h2></div><span class="muted small">Messwerte und Einstellungen · nur lesend</span></div>
       <section class="floor-grid" id="floor-grid" aria-label="Heizkreise"></section>

@@ -506,6 +506,14 @@ def register_heating_routes(manager, root=None):
         response=jsonify({'hours':hours,'samples':service.observer.history(hours)})
         response.headers['Cache-Control']='no-store';return response
 
+    @app.route('/api/heating/observer/dhw-history')
+    def heating_dhw_history():
+        try:days=int(request.args.get('days','1'))
+        except ValueError:return jsonify({'error':'invalid_days'}),400
+        if days not in (1,7,30,90):return jsonify({'error':'invalid_days'}),400
+        response=jsonify(service.observer.dhw_history(days))
+        response.headers['Cache-Control']='no-store';return response
+
     def schedule_guard():
         if request.headers.get('X-Heating-Schedule') != '1' or not request.is_json:
             raise ScheduleError('Übertragung benötigt eine bestätigte JSON-Anfrage.', 403)
