@@ -14,14 +14,14 @@
     if (h>24 || m>59 || (h===24 && m!==0)) throw Error('Die Uhrzeit muss zwischen 00:00 und 24:00 liegen.');
     return h*60+m;
   }
-  function validate(periods, quarterHours = false) {
+  function validate(periods, tenMinuteSteps = false) {
     if (!Array.isArray(periods) || periods.length>3) throw Error('Pro Tag sind höchstens drei Komfortphasen möglich.');
     let previous=0;
     return periods.map((p,i) => {
       const start=parse(p.start), end=parse(p.end);
       if (start>=1440 || end<=start) throw Error('Das Ende muss nach dem Beginn liegen. Für Mitternacht bitte 24:00 verwenden.');
       if (i && start<previous) throw Error('Die Zeitfenster müssen aufsteigend sein und dürfen sich nicht überschneiden.');
-      if (quarterHours && (start%15 || end%15)) throw Error('Bitte Viertelstunden verwenden: :00, :15, :30 oder :45.');
+      if (tenMinuteSteps && (start%10 || end%10)) throw Error('Bitte Zehn-Minuten-Schritte verwenden: :00, :10, :20, :30, :40 oder :50.');
       previous=end;
       return {start:format(start),end:format(end),start_minute:start,end_minute:end};
     });

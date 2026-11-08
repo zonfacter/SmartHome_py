@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#163d38">
   <title>Heizung · SmartHome</title>
-  <link rel="stylesheet" href="/static/css/heating.css?v=3">
-  <script defer src="/static/js/heating_schedule.js?v=3"></script>
-  <script defer src="/static/js/heating.js?v=3"></script>
+  <link rel="stylesheet" href="/static/css/heating.css?v=4">
+  <script defer src="/static/js/heating_schedule.js?v=4"></script>
+  <script defer src="/static/js/heating.js?v=4"></script>
 </head>
 <body>
   <svg class="svg-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
@@ -62,7 +62,7 @@
   <dialog id="schedule-editor" class="schedule-editor" aria-labelledby="schedule-editor-title" aria-describedby="schedule-editor-note">
     <form novalidate>
       <div class="editor-heading"><div><span class="eyebrow">WOCHENPROGRAMM · ENTWURF</span><h2 id="schedule-editor-title">Zeiten planen</h2></div><button type="button" class="schedule-button quiet" data-close-editor aria-label="Editor schließen">Schließen</button></div>
-      <p id="schedule-editor-note">Plane bis zu drei Komfortphasen pro Tag in Viertelstunden. Der Entwurf wird nur in diesem Browser gespeichert und nicht an die Heizung gesendet.</p>
+      <p id="schedule-editor-note">Plane bis zu drei Komfortphasen pro Tag in Zehn-Minuten-Schritten. Der Entwurf wird nur in diesem Browser gespeichert und nicht an die Heizung gesendet.</p>
       <label class="editor-day">Wochentag<select name="day" aria-label="Wochentag"><option value="0">Montag</option><option value="1">Dienstag</option><option value="2">Mittwoch</option><option value="3">Donnerstag</option><option value="4">Freitag</option><option value="5">Samstag</option><option value="6">Sonntag</option></select></label>
       <div class="editor-times-heading"><span>Komfortphase</span><span>Beginn</span><span>Ende</span></div>
       <div class="editor-period"><label><input type="checkbox" name="enabled0" data-period-enabled> Zeitfenster 1</label><input type="text" name="start0" inputmode="numeric" maxlength="5" placeholder="06:00" aria-label="Beginn Zeitfenster 1" autocomplete="off"><input type="text" name="end0" inputmode="numeric" maxlength="5" placeholder="20:00" aria-label="Ende Zeitfenster 1" autocomplete="off"></div>

@@ -2,10 +2,10 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {parse,validate,targetDays,validDraft}=require('./web/static/js/heating_schedule.js');
-test('midnight and quarter-hour ranges retain exact minutes',()=>{
+test('midnight and ten-minute ranges retain exact minutes',()=>{
   assert.equal(parse('24:00'),1440);
-  assert.deepEqual(validate([{start:'05:15',end:'06:30'},{start:'15:00',end:'24:00'}],true),[
-    {start:'05:15',end:'06:30',start_minute:315,end_minute:390},
+  assert.deepEqual(validate([{start:'05:10',end:'06:30'},{start:'15:00',end:'24:00'}],true),[
+    {start:'05:10',end:'06:30',start_minute:310,end_minute:390},
     {start:'15:00',end:'24:00',start_minute:900,end_minute:1440}]);
   assert.deepEqual(validate([],true),[]);
 });
@@ -14,7 +14,7 @@ test('invalid, reversed, overlapping and too many phases are rejected',()=>{
   for (const phases of [
     [{start:'24:00',end:'24:00'}], [{start:'06:00',end:'06:00'}],
     [{start:'20:00',end:'06:00'}], [{start:'06:00',end:'08:00'},{start:'07:45',end:'09:00'}],
-    Array.from({length:4},()=>({start:'06:00',end:'07:00'})), [{start:'06:01',end:'08:00'}]
+    Array.from({length:4},()=>({start:'06:00',end:'07:00'})), [{start:'06:01',end:'08:00'}], [{start:'06:15',end:'08:00'}]
   ]) assert.throws(()=>validate(phases,true));
   assert.equal(validate([{start:'06:01',end:'08:02'}])[0].start_minute,361);
 });

@@ -120,7 +120,7 @@ Bereich die Absenkphase in Automatik. Dies sind keine Pumpen-Sperrzeiten.
 Auf schmalen Bildschirmen lässt sich das Raster innerhalb seiner Karte verschieben.
 
 Ein Tag oder „Zeiten entwerfen“ öffnet einen Editor für maximal drei Zeitfenster,
-Viertelstunden, 24:00 als Tagesende und Kopieren auf Werktage, Wochenende oder
+Zehn-Minuten-Schritte, 24:00 als Tagesende und Kopieren auf Werktage, Wochenende oder
 alle sieben Tage. Ungültige Zeiten und Überschneidungen werden zurückgewiesen.
 Entwürfe verwenden getrennte Browser-Schlüssel `heating-schedule-draft-v1-eg` und
 `heating-schedule-draft-v1-og`. Sie bleiben über Neuladen erhalten, werden weder
@@ -128,11 +128,19 @@ an die VM noch an ioBroker oder die Heizung gesendet. „Reglerstand anzeigen“
 ermöglicht den Vergleich; Verwerfen lässt sich während der Sitzung rückgängig machen.
 Ein geänderter Reglerstand gegenüber der Entwurfsbasis wird kenntlich gemacht.
 
-Es gibt weiterhin keine schreibende Heizungsroute. Der vorhandene BSB-LAN-Code
-enthält einen generischen `VT_TIMEPROG`-Encoder mit zwölf Bytes, bezeichnet ihn
-aber selbst als `TODO test it`. Das bestätigt noch keine sicheren Schreibvorgänge
-für diese beiden Eurocontrol-Varianten oder deren deaktivierte Schaltpunkte.
-Daher ist die direkte Übertragung in dieser Version nicht implementiert.
+Es gibt weiterhin keine schreibende Heizungsroute. Die gezielte Liveprüfung am
+2026-11-08 hat inzwischen das Schreiben des Mittwochsprogramms `05000A8E` für
+beide Regler bestätigt: unverändertes SET mit ACK, kontrollierte Änderung,
+unabhängiges Rücklesen, Wiederherstellung und Vergleich aller 14 Tagesprogramme.
+Die ursprünglichen Komfortphasen blieben anschließend vollständig erhalten.
+Inaktive Schaltblöcke können beim SET von `80 00 00 00` nach `98 00 18 00`
+normalisiert werden. Das sind keine zusätzlichen Komfortphasen.
+Die K rundete Minute 15 auf Minute 10 ab, die M Minute 45 auf Minute 40.
+Der Editor verwendet daher gemeinsame
+Zehn-Minuten-Schritte; ein ACK allein genügt nicht als Übernahmeprüfung.
+Das Übertragen von Browserentwürfen bleibt eine separate, noch nicht implementierte
+Funktion. Die Tests beweisen keine beliebigen SETs für alle RVA-Varianten und
+prüften keine Löschung sämtlicher Phasen oder einen dritten aktiven Zeitblock.
 Validierung: `node --test test_heating_schedule.cjs` ist Teil von `make smoke`
 und `make test`; zusätzlich Browserprüfung von Editor, Kopieren, Vergleich,
 Persistenz, Zeitliste und mobiler Darstellung.
