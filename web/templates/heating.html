@@ -5,11 +5,12 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#163d38">
   <title>Heizung · SmartHome</title>
-  <link rel="stylesheet" href="/static/css/heating.css?v=7">
+  <link rel="stylesheet" href="/static/css/heating.css?v=9">
+  <script defer src="/static/js/heating_help.js?v=9"></script>
   <script defer src="/static/js/heating_schedule.js?v=7"></script>
-  <script defer src="/static/js/heating_diagnostics.js?v=7"></script>
+  <script defer src="/static/js/heating_diagnostics.js?v=9"></script>
   <script defer src="/static/js/heating_pumps.js?v=7"></script>
-  <script defer src="/static/js/heating.js?v=8"></script>
+  <script defer src="/static/js/heating.js?v=9"></script>
 </head>
 <body>
   <svg class="svg-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
@@ -36,7 +37,7 @@
   <main>
     <header class="topbar"><span>SmartHome <span class="slash">/</span> Heizung</span><div class="topbar-right"><span class="live-tag" id="live-tag"><i></i><span>Verbinde …</span></span><button class="icon-button" id="theme" aria-label="Farbschema wechseln"><svg><use href="#sun"/></svg></button></div></header>
     <div class="content">
-      <div class="page-heading"><div><div class="eyebrow">WÄRME & WOHLBEFINDEN</div><h1 id="page-title">Heizungsübersicht<span>.</span></h1><p id="page-subtitle">Fußbodenheizung im EG. Heizkörper im OG. Alles an einem Ort.</p></div><button class="refresh-button" id="refresh" aria-label="Anzeige aktualisieren"><svg><use href="#refresh"/></svg><span>Anzeige aktualisieren</span></button></div>
+      <div class="page-heading"><div><div class="eyebrow">WÄRME & WOHLBEFINDEN</div><h1 id="page-title">Heizungsübersicht<span>.</span></h1><p id="page-subtitle">Fußbodenheizung im EG. Heizkörper im OG. Alles an einem Ort.</p></div><button type="button" class="schedule-button help-start" data-open-heating-guide>Einrichtung & Werte verstehen</button><button class="refresh-button" id="refresh" aria-label="Anzeige aktualisieren"><svg><use href="#refresh"/></svg><span>Anzeige aktualisieren</span></button></div>
       <div id="connection-note" class="notice" role="status" hidden></div>
       <section class="stats-grid" aria-label="Heizungsanlage">
         <article class="stat-card"><div class="stat-top"><span>Kesseltemperatur</span><span class="stat-icon amber"><svg><use href="#heat"/></svg></span></div><div class="stat-value" id="boiler">—<small>°C</small></div><div class="stat-foot">Eurocontrol K <span id="boiler-quality"></span></div></article>
@@ -46,7 +47,7 @@
       </section>
       <div class="section-heading"><div><span class="eyebrow">GETRENNT GEREGELT</span><h2>Deine Heizkreise</h2></div><span class="muted small">Messwerte und Einstellungen · nur lesend</span></div>
       <section class="floor-grid" id="floor-grid" aria-label="Heizkreise"></section>
-      <section class="diagnostics-section" id="pumpendiagnose" aria-labelledby="pump-heading"><div class="section-heading"><div><span class="eyebrow">KONTAKT, ANFORDERUNG & KONTEXT</span><h2 id="pump-heading">Warum läuft die Pumpe?</h2></div><span class="source-tag">Nur lesend · Ursachenprüfung</span></div><div id="pump-diagnostics" class="diagnostic-grid"></div></section>
+      <section class="diagnostics-section" id="pumpendiagnose" aria-labelledby="pump-heading"><div class="section-heading"><div><span class="eyebrow">KONTAKT, ANFORDERUNG & KONTEXT</span><h2 id="pump-heading">Warum läuft die Pumpe? <button type="button" class="heating-help-trigger" data-heating-help="pump" data-help-area="eg" aria-label="Hilfe zu Pumpenkontakten" aria-haspopup="dialog">?</button></h2></div><span class="source-tag">Nur lesend · Ursachenprüfung</span></div><div id="pump-diagnostics" class="diagnostic-grid"></div></section>
       <section class="panel cycle-panel" id="brennerstatistik" aria-labelledby="cycle-heading">
         <div class="panel-heading"><div><h2 id="cycle-heading">Brennerstatistik</h2><p>Zähler der K und beobachtete Relaiskontakte</p></div><div class="segmented" aria-label="Statistikzeitraum"><button data-hours="1">1 Std.</button><button data-hours="6" class="selected">6 Std.</button><button data-hours="24">24 Std.</button></div></div>
         <div class="cycle-stats"><article><span>Betriebsstunden gesamt</span><strong id="burner-hours">—</strong><small id="lifetime-starts">Startzähler wird gelesen</small></article><article><span>Beobachtete Starts</span><strong id="observed-starts">—</strong><small>Im gültig beobachteten Abschnitt</small></article><article><span>Starts / beobachtete Stunde</span><strong id="starts-per-hour">—</strong><small>Auf die Datenabdeckung bezogen</small></article><article><span>Relaisminuten / Start</span><strong id="minutes-per-start">—</strong><small>Abgetastete K4-/K5-Kontakte</small></article></div>
@@ -55,7 +56,7 @@
       </section>
       <section class="diagnostics-section" id="reglerdiagnose" aria-labelledby="diagnostics-heading"><div class="section-heading"><div><span class="eyebrow">AUS DEM SIEMENS-PROFIL</span><h2 id="diagnostics-heading">Anlage & Reglerdiagnose</h2></div><span class="source-tag">Nur lesend</span></div><div id="diagnostics"></div></section>
       <section class="panel schedule-panel" aria-labelledby="schedule-heading">
-        <div class="panel-heading"><div><h2 id="schedule-heading">Heizzeiten der Woche</h2><p>Eigene Zeitprogramme für Erdgeschoss und Obergeschoss</p></div><div class="segmented" aria-label="Darstellung der Heizzeiten"><button type="button" data-schedule-mode="grid" class="selected" aria-pressed="true">Wochenraster</button><button type="button" data-schedule-mode="list" aria-pressed="false">Zeitliste</button></div></div>
+        <div class="panel-heading"><div><h2 id="schedule-heading">Heizzeiten der Woche <button type="button" class="heating-help-trigger" data-heating-help="schedule" data-help-area="anlage" aria-label="Hilfe zu Heizzeiten" aria-haspopup="dialog">?</button></h2><p>Eigene Zeitprogramme für Erdgeschoss und Obergeschoss</p></div><div class="segmented" aria-label="Darstellung der Heizzeiten"><button type="button" data-schedule-mode="grid" class="selected" aria-pressed="true">Wochenraster</button><button type="button" data-schedule-mode="list" aria-pressed="false">Zeitliste</button></div></div>
         <div id="schedule-table" aria-label="Zeitfenster je Wochentag und Heizkreis"></div>
         <p class="schedule-note">In Automatik gilt außerhalb der Komfortphasen die Absenkung. Pumpen und Brenner werden zusätzlich nach Wärmebedarf gesteuert. Entwürfe bleiben lokal, bis du „Übertragung prüfen“ und danach „An Heizung übertragen“ bestätigst.</p>
         <p id="schedule-message" class="schedule-message" role="status" aria-live="polite"></p>
@@ -91,5 +92,7 @@
     <p class="editor-error" data-transfer-error role="status" aria-live="polite"></p>
     <div class="editor-footer"><button type="button" class="schedule-button quiet" data-cancel-transfer>Abbrechen</button><button type="button" class="schedule-button primary" data-confirm-transfer disabled>An Heizung übertragen</button></div>
   </dialog>
+  <dialog id="heating-help" class="heating-help" aria-labelledby="heating-help-title"><header><div><span class="eyebrow">WERT VERSTEHEN</span><h2 id="heating-help-title"></h2></div><button type="button" class="schedule-button quiet" data-help-close>Schließen</button></header><div data-help-content class="help-body"></div><footer>Diese Hilfe ändert keine Heizungsparameter.</footer></dialog>
+  <dialog id="heating-guide" class="heating-help heating-guide" aria-labelledby="heating-guide-title"><header><div><span class="eyebrow">EINRICHTUNG & INTERPRETATION</span><h2 id="heating-guide-title" tabindex="-1"></h2></div><button type="button" class="schedule-button quiet" data-guide-close>Schließen</button></header><nav data-guide-progress aria-label="Einrichtungsschritte"></nav><div data-guide-content class="help-body"></div><footer><span>Werte beim Öffnen · keine Übertragung</span><div><button type="button" class="schedule-button quiet" data-guide-back>Zurück</button><button type="button" class="schedule-button primary" data-guide-next>Weiter</button></div></footer></dialog>
 </body>
 </html>

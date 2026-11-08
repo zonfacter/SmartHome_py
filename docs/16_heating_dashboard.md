@@ -306,3 +306,22 @@ not an atomic bus snapshot; no pre-installation history is fabricated. The
 floor. The UI shows the latest eight and labels inference limits explicitly.
 The same current structured diagnosis is exported as a read-only JSON string
 under `0_userdata.0.heizung.<eg|og>.pump_diagnosis`. No heating SET was added.
+
+## Kontexthilfe und Einrichtung
+
+Fragezeichen an den Heizkreis-Einstellungen und Diagnosezeilen öffnen einen
+zentralen, per Tastatur bedienbaren Dialog. Er zeigt Bedeutung, Wirkung,
+Interpretationsgrenzen und den beim Öffnen gelesenen Wert samt Datenqualität.
+Die Bereiche EG/M, OG/K und Anlage bleiben getrennt. Der Dialog wird vom
+laufenden Fünf-Sekunden-Refresh nicht neu aufgebaut; nach dem Schließen wird
+der Fokus an den zugehörigen Auslöser zurückgegeben.
+
+„Einrichtung & Werte verstehen“ führt durch vier Schritte mit einer beim
+Öffnen aufgenommenen Momentaufnahme: Anlagenaufteilung, Fühler-/Datenqualität,
+vorhandene Vorgaben, Beobachtungsablauf. Die Hilfe unterscheidet insbesondere
+Raumsollwert und Messwert, Tado-Anzeige und Reglerfühler, gespeicherten Faktor
+und wirksame Funktion sowie KON und eine tatsächlich aktive Schnellabsenkung.
+Sie schlägt keine pauschalen Zahlenwerte vor, speichert keine Konfiguration
+und führt keine Schreibbefehle aus. Unbekannte Signalattribute bleiben offen.
+Alle Hilfetexte werden als lokale statische Datei ausgeliefert. Nur der
+bewusst anklickbare Herstellerlink öffnet eine externe Dokumentation.

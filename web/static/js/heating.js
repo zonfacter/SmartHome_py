@@ -20,8 +20,8 @@
     el.classList.toggle('is-stale', metric?.quality === 'stale');
     el.title = metric?.quality === 'stale' ? 'Letzter Messwert ist veraltet' : metric?.quality === 'unavailable' ? 'Kein gültiger Messwert vom Regler' : '';
   }
-  function setting(label, metric) {
-    return `<div class="setting"><span>${escape(label)}</span><strong>${escape(text(metric))}${valid(metric) && metric.unit ? ' ' + escape(metric.unit) : ''}</strong></div>`;
+  function setting(label, metric, key, area) {
+    return `<div class="setting"><span>${escape(label)} ${HeatingHelp.button(key,area,label)}</span><strong>${escape(text(metric))}${valid(metric) && metric.unit ? ' ' + escape(metric.unit) : ''}</strong></div>`;
   }
   function floorCard(area) {
     const floor = snapshot.floors[area], m = floor.metrics, eg = area === 'eg';
@@ -31,10 +31,10 @@
     const mixerText = open === true && close === true ? 'Mischermeldung prüfen' : open === true ? 'Mischer öffnet' : close === true ? 'Mischer schließt' : open === false && close === false ? 'Mischerantrieb aus' : 'Mischer nicht verfügbar';
     const low = value(m.flow_min), high = value(m.flow_max), actual = value(m.flow_actual);
     const position = numeric(low) && numeric(high) && numeric(actual) && high > low ? Math.min(100, Math.max(0, (actual - low) / (high - low) * 100)) : null;
-    const basic = [setting('Heizkurve', m.curve),setting('Raumeinfluss', m.room_influence),setting('Komfortsollwert',m.nominal),setting('Adaption',m.adaptation)].join('');
-    const detail = ['parallel','room_gain','differential','summer','reduced','frost','boost','overrun','flow_min','flow_max'].filter(k=>m[k]).map(k=>setting(m[k].label,m[k])).join('');
+    const basic = [['curve','Heizkurve'],['room_influence','Raumeinfluss'],['nominal','Komfortsollwert'],['adaptation','Adaption']].map(([key,label])=>setting(label,m[key],key,area)).join('');
+    const detail = ['parallel','room_gain','differential','summer','reduced','frost','boost','overrun','flow_min','flow_max','quick_setback','remote_switch'].filter(k=>m[k]).map(k=>setting(m[k].label,m[k],k,area)).join('');
     return `<article class="floor-card ${area} ${expanded.has(area) ? 'expanded' : ''}"><div class="floor-header"><div class="floor-avatar">${area.toUpperCase()}</div><div><h3>${escape(floor.name)}</h3><p>${eg ? 'Fußbodenheizung · gemischter Heizkreis' : 'Heizkörper · eigener Heizkreis'}</p></div><span class="floor-controller">${escape(floor.controller)}</span></div>
-      <div class="floor-body"><div class="floor-reading"><div><div class="reading-caption">${eg ? 'Vorlauftemperatur' : 'Aktueller Raumsollwert'}</div><div class="reading-number">${escape(text(current))}<small>°C</small></div></div><div class="target">${eg ? 'Vorlaufsollwert' : 'Kesseltemperatur'}<br><strong>${escape(text(target))}</strong> °C</div></div>
+      <div class="floor-body"><div class="floor-reading"><div><div class="reading-caption">${eg ? 'Vorlauftemperatur' : 'Aktueller Raumsollwert'} ${HeatingHelp.button(eg?'flow_actual':'room_setpoint',area,eg?'Vorlauftemperatur':'Aktueller Raumsollwert')}</div><div class="reading-number">${escape(text(current))}<small>°C</small></div></div><div class="target">${eg ? 'Vorlaufsollwert' : 'Kesseltemperatur'} ${HeatingHelp.button(eg?'flow_setpoint':'boiler',eg?area:'anlage',eg?'Vorlaufsollwert':'Kesseltemperatur')}<br><strong>${escape(text(target))}</strong> °C</div></div>
       <div class="status-pills"><span class="pill ${pump === true ? 'on' : ''}">${pump === true ? 'Pumpe ein' : pump === false ? 'Pumpe aus' : 'Pumpe unbekannt'}</span><span class="pill ${value(m.mode) === 'Automatik' ? 'on' : ''}">${escape(text(m.mode))}</span>${eg ? `<span class="pill ${open || close ? 'on' : ''}">${mixerText}</span>` : ''}</div>
       ${eg ? `<div class="temperature-range"><div class="range-track">${position !== null ? `<i class="range-marker" style="left:calc(${position.toFixed(1)}% - 5px)"></i>` : ''}</div><div class="range-labels"><span>Min. ${escape(text(m.flow_min))} °C</span><span>Max. ${escape(text(m.flow_max))} °C</span></div></div>` : '<p class="sensor-note" style="margin-bottom:20px">Der Raumsollwert ist die Vorgabe des Reglers. Gemessene Raumtemperaturen findest du weiter unten bei Tado.</p>'}
       <div class="settings">${basic}<div class="detail-settings">${detail}</div></div>
@@ -44,10 +44,12 @@
   function renderFloors() {
     if (!snapshot) return;
     const focusedDetails = document.activeElement?.dataset.details;
+    const focusedHelp=document.activeElement?.dataset.heatingHelp,focusedArea=document.activeElement?.dataset.helpArea;
     $('floor-grid').innerHTML = ['eg','og'].filter(f=>view === 'overview' || view === f).map(floorCard).join('');
     $('floor-grid').style.gridTemplateColumns = view === 'overview' ? '' : 'minmax(0,1fr)';
     document.querySelectorAll('[data-details]').forEach(button=>button.addEventListener('click',()=>{const area=button.dataset.details; expanded.has(area) ? expanded.delete(area) : expanded.add(area); renderFloors();}));
     if (focusedDetails) document.querySelector(`[data-details="${focusedDetails}"]`)?.focus({preventScroll:true});
+    if(focusedHelp&&focusedArea)$('floor-grid').querySelector(`[data-heating-help="${focusedHelp}"][data-help-area="${focusedArea}"]`)?.focus({preventScroll:true});
   }
   function renderRooms() {
     if (!snapshot) return;
@@ -61,6 +63,7 @@
   function renderSchedule() { scheduleView.render(snapshot, view); }
   const diagnostics=new HeatingDiagnostics.View($('diagnostics'));
   const pumps=new HeatingPumps.View($('pump-diagnostics'));
+  const help=new HeatingHelp.View($('heating-help'),$('heating-guide'));
   function render() {
     const p = snapshot.plant, connected = snapshot.connection.connected;
     stat('boiler',p.boiler); stat('dhw',p.dhw); stat('outside',snapshot.floors.eg.metrics.outside); stat('burner',p.burner,'');
@@ -75,7 +78,7 @@
     const io = snapshot.iobroker.connected;
     $('io-light').classList.toggle('online',io); $('io-status').textContent = io ? 'ioBroker verbunden · Heizungswerte synchronisiert' : 'ioBroker nicht verbunden';
     $('updated').textContent = snapshot.connection.last_success ? 'Letzte Heizungsabfrage ' + formatTime(snapshot.connection.last_success) : 'Warte auf Heizungsdaten';
-    renderFloors(); renderRooms(); renderSchedule(); diagnostics.render(snapshot,view); pumps.render(snapshot,view);
+    help.update(snapshot,view); renderFloors(); renderRooms(); renderSchedule(); diagnostics.render(snapshot,view); pumps.render(snapshot,view);
   }
   async function load() {
     if (inFlight) return;
@@ -119,7 +122,7 @@
     $('page-title').innerHTML=(view==='eg'?'Erdgeschoss':view==='og'?'Obergeschoss':'Heizungsübersicht')+'<span>.</span>';
     $('page-subtitle').textContent=view==='eg'?'Fußbodenheizung · Eurocontrol M':view==='og'?'Heizkörper · Eurocontrol K':'Fußbodenheizung im EG. Heizkörper im OG. Alles an einem Ort.';
     const url=new URL(location); view==='overview'?url.searchParams.delete('etage'):url.searchParams.set('etage',view); window.history.replaceState(null,'',url);
-    renderFloors();renderRooms();renderSchedule();diagnostics.render(snapshot,view);pumps.render(snapshot,view);history();
+    help.update(snapshot,view);renderFloors();renderRooms();renderSchedule();diagnostics.render(snapshot,view);pumps.render(snapshot,view);history();
     window.scrollTo(0,0);
   }
   document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>selectView(b.dataset.view)));

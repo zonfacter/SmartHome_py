@@ -12,8 +12,8 @@ window.HeatingDiagnostics=(()=>{
     if(typeof v==='string')return v;
     return number(v,['counter','burner_hours','minutes','error_priority','gain'].includes(item.kind)?0:1)+(item.unit?' '+item.unit:'');
   }
-  function rows(metrics,keys){
-    return keys.filter(k=>metrics[k]).map(k=>`<div class="diagnostic-row"><span>${esc(metrics[k].label)}</span><strong class="${metrics[k].quality==='valid'?'':'muted'}">${esc(display(metrics[k]))}</strong></div>`).join('');
+  function rows(metrics,keys,area='anlage'){
+    return keys.filter(k=>metrics[k]).map(k=>`<div class="diagnostic-row"><span>${esc(metrics[k].label)} ${HeatingHelp.button(k,area,metrics[k].label)}</span><strong class="${metrics[k].quality==='valid'?'':'muted'}">${esc(display(metrics[k]))}</strong></div>`).join('');
   }
   class View{
     constructor(container){this.container=container;this.stats=null;this.failed=false;this.sequence=0;}
@@ -22,6 +22,7 @@ window.HeatingDiagnostics=(()=>{
       this.snapshot=snapshot;
       const open=new Set([...this.container.querySelectorAll('details[open]')].map(d=>d.dataset.diagnostic));
       const focused=document.activeElement?.closest('details')?.dataset.diagnostic;
+      const focusedHelp=document.activeElement?.dataset.heatingHelp,focusedArea=document.activeElement?.dataset.helpArea;
       const p=snapshot.plant;
       let html='<div class="diagnostic-grid">';
       html+=`<article class="diagnostic-card"><h3>Kessel & Brenner</h3><p>Eurocontrol K · gemeldete Regelparameter</p>${rows(p,['boiler_min','boiler_max','boiler_differential','burner_min_run','burner_on_threshold','burner_off_threshold'])}</article>`;
@@ -30,10 +31,11 @@ window.HeatingDiagnostics=(()=>{
       for(const area of ['eg','og'].filter(a=>view==='overview'||view===a)){
         const floor=snapshot.floors[area],m=floor.metrics,error=value(m.error_code);
         const status=error===0?'Keine Fehlermeldung':error===null?'Fehlerstatus unbekannt':'Fehlercode '+error;
-        html+=`<article class="diagnostic-card ${area}"><div class="diagnostic-heading"><h3>${area.toUpperCase()} · ${esc(floor.controller)}</h3><span class="diagnostic-status ${error===0?'ok':error>0?'alert':''}">${esc(status)}</span></div>${rows(m,['clock','error_code','error_priority','relay_test','lpb_power','plant_frost','building','changeover_source','overrun','pump_function'])}<h4>Wetter & Fühler</h4>${rows(m,['outside','outside_local','outside_attenuated','outside_composite','room_actual'])}<p class="diagnostic-note">Der lokale Außenfühler kann fehlen, obwohl die Außentemperatur über LPB verfügbar ist. Der Speisungsstatus ist keine Spannungsmessung.</p><details data-diagnostic="${area}" ${open.has(area)?'open':''}><summary>LPB-Rohdiagnose · Zuordnung offen</summary><p>Werte und Zusatzkennzeichen sind hier unverändert dargestellt. Daraus wird keine aktive Sperre oder Ursache für einen Pumpenstopp abgeleitet.</p>${rows(m,Object.keys(m).filter(k=>k.endsWith('_raw')))}</details></article>`;
+        html+=`<article class="diagnostic-card ${area}"><div class="diagnostic-heading"><h3>${area.toUpperCase()} · ${esc(floor.controller)}</h3><span class="diagnostic-status ${error===0?'ok':error>0?'alert':''}">${esc(status)}</span></div>${rows(m,['clock','error_code','error_priority','relay_test','lpb_power','plant_frost','building','changeover_source','overrun','pump_function'],area)}<h4>Wetter & Fühler</h4>${rows(m,['outside','outside_local','outside_attenuated','outside_composite','room_actual'],area)}<p class="diagnostic-note">Der lokale Außenfühler kann fehlen, obwohl die Außentemperatur über LPB verfügbar ist. Der Speisungsstatus ist keine Spannungsmessung.</p><details data-diagnostic="${area}" ${open.has(area)?'open':''}><summary>LPB-Rohdiagnose · Zuordnung offen</summary><p>Werte und Zusatzkennzeichen sind hier unverändert dargestellt. Daraus wird keine aktive Sperre oder Ursache für einen Pumpenstopp abgeleitet.</p>${rows(m,Object.keys(m).filter(k=>k.endsWith('_raw')),area)}</details></article>`;
       }
       this.container.innerHTML=html+'</div>';
       if(focused)this.container.querySelector(`details[data-diagnostic="${focused}"] summary`)?.focus({preventScroll:true});
+      if(focusedHelp&&focusedArea)this.container.querySelector(`[data-heating-help="${focusedHelp}"][data-help-area="${focusedArea}"]`)?.focus({preventScroll:true});
       document.getElementById('burner-hours').textContent=display(p.burner_hours);
       document.getElementById('lifetime-starts').textContent='Startzähler aktuell: '+display(p.starts);
     }
