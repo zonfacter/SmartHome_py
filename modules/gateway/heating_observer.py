@@ -329,7 +329,7 @@ class HeatingObserver:
         samples=[]
         for bucket in buckets.values():
             measured_values=bucket.pop('values')
-            bucket.update(temperature=round(sum(measured_values)/len(measured_values),3) if measured_values else None,
+            bucket.update(temperature=sum(measured_values)/len(measured_values) if measured_values else None,
                           minimum=min(measured_values) if measured_values else None,maximum=max(measured_values) if measured_values else None,count=len(measured_values))
             samples.append(bucket)
         last=rows[-1] if rows else None

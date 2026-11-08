@@ -151,7 +151,7 @@ class ObserverTests(unittest.TestCase):
             observer=HeatingObserver(root,Path(root)/'data.db',{'enabled':True})
             with closing(sqlite3.connect(observer.db_path)) as db,db:
                 db.execute('CREATE TABLE heating_samples(ts INTEGER PRIMARY KEY,payload TEXT)')
-                for ts,value in ((1000,42),(1060,45),(1120,99),(1180,99)):
+                for ts,value in ((1000,42.015625),(1060,45.015625),(1120,99),(1180,99)):
                     db.execute('INSERT INTO heating_samples VALUES (?,?)',(ts,json.dumps({'anlage.dhw':value})))
                 for ts,value,q in ((1120,50,'valid'),(1180,55,'valid'),(1240,60,'stale'),(1300,48,'valid'),(2000,40,'valid')):
                     db.execute('INSERT INTO heating_observations VALUES (?,?)',(ts,json.dumps({'plant':{'dhw':{'q':q,'v':value}}})))
@@ -159,6 +159,7 @@ class ObserverTests(unittest.TestCase):
             self.assertEqual(history['valid_samples'],6)
             self.assertEqual((history['minimum'],history['maximum']),(40,55))
             self.assertEqual(history['latest'],{'ts':2000,'temperature':40})
+            self.assertTrue(all(s['temperature'] is None or s['minimum']<=s['temperature']<=s['maximum'] for s in history['samples']))
             self.assertTrue(history['samples'][-1]['break_before'])
             self.assertTrue(any(s['temperature'] is None or s['break_before'] for s in history['samples'][1:]))
 
