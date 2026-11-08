@@ -36,7 +36,7 @@ window.HeatingDhwView=(()=>{
         svg+=`<g><title>${time(row.from)} – ${time(row.to)}: Mittel ${number(row.temperature)} °C, Minimum ${number(row.minimum)} °C, Maximum ${number(row.maximum)} °C (${row.count} Messungen)</title><line x1="${x(row.ts)}" x2="${x(row.ts)}" y1="${y(row.minimum)}" y2="${y(row.maximum)}" stroke="#269274" stroke-opacity=".3" stroke-width="3"/><circle cx="${x(row.ts)}" cy="${y(row.temperature)}" r="2" fill="#269274"/></g>`;
       }
       svg+=`<path d="${path}" fill="none" stroke="#269274" stroke-width="2"/>`;
-      for(let i=0;i<4;i++){const stamp=first+span*i/3,label=data.days===1?time(stamp).split(', ').at(-1):time(stamp).split(', ')[0];svg+=`<text x="${x(stamp)}" y="190" font-size="10" fill="var(--muted)" text-anchor="${i===0?'start':i===3?'end':'middle'}">${label}</text>`;}
+      for(let i=0;i<4;i++){const stamp=first+span*i/3,label=span<36*3600?time(stamp).split(', ').at(-1):time(stamp).split(', ')[0];svg+=`<text x="${x(stamp)}" y="190" font-size="10" fill="var(--muted)" text-anchor="${i===0?'start':i===3?'end':'middle'}">${label}</text>`;}
       target.innerHTML=svg+'</svg>';
     }
   }

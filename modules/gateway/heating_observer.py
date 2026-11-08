@@ -315,10 +315,11 @@ class HeatingObserver:
             else:first=None;rows=[]
             # Older measured plant history is available before room observation began.
             legacy=db.execute("SELECT ts,json_extract(payload,'$.\"anlage.dhw\"') FROM heating_samples WHERE ts>=? AND ts<? ORDER BY ts",(cutoff,min(first,now+1) if first is not None else now+1)).fetchall()
-        rows=legacy+rows;seconds=math.ceil(days*86400/720);buckets={};previous=None;values=[]
+        rows=legacy+rows;origin=rows[0][0] if rows else cutoff
+        seconds=max(1,math.ceil((now-origin+1)/720));buckets={};previous=None;values=[]
         for ts,value in rows:
             if ts>now:continue
-            index=min(719,(ts-cutoff)//seconds)
+            index=min(719,(ts-origin)//seconds)
             bucket=buckets.setdefault(index,{'ts':ts,'from':ts,'to':ts,'values':[],'break_before':False})
             bucket['ts']=bucket['to']=ts
             valid=numeric(value) and 0<=value<=120
