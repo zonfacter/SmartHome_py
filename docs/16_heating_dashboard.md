@@ -62,6 +62,25 @@ aktiv. Die K-Zuordnung wird bis zu einem eigenen kontrollierten Test nicht
 aus diesem M-Versuch geändert. Die Niveau-Bitmaske ist durch diesen ersten
 Zustandswechsel noch nicht vollständig bestimmt.
 
+Der anschließende Test schloss Bereitschaft (gegen 00:09 Uhr) und Rückkehr auf
+Automatik (00:18 Uhr) ein. Die M lieferte bei Bereitschaft Betriebsart `00 00`,
+Niveau `00 01`, Raumsoll 6 °C und anschließend Pumpenkontakt Aus. Nach dem
+Rückwechsel war der ursprüngliche Zustand wiederhergestellt: Betriebsart
+`00 01`, Niveau `01 01`, Raumsoll 8 °C, Pumpenkontakt Aus und keine gültige
+lokale Heizanforderung (`08 40 00 02`). Beim Dauerbetrieb waren Niveau `02 01`,
+20,5 °C und ein eingeschalteter Kontakt beobachtet worden. Damit sind die
+ersten Niveau-Bytes 0/1/2 an dieser M als Frostschutz/reduziert/Komfort
+beobachtet; die Bedeutung des unveränderten zweiten Bytes bleibt offen.
+Automatik ist eine Betriebsart und kann zeitabhängig andere Niveaus wählen.
+Die untersuchten Sperr-/Zwangsfelder ergaben dabei keine neue Bitzuordnung.
+
+Ausgewählte, prüfbare Telegramme und ein herstellerbezogener Objektindex werden
+im [BSB-LAN-Beitrag](https://github.com/zonfacter/BSB-LAN/tree/codex/eurocontrol-lpb-research/docs/development)
+bereitgestellt. Der BSB-LAN-Branch enthält Firmware-Erweiterungen, Parser und
+Protokollbefunde; diese SmartHome-Anwendung enthält die externe Oberfläche,
+Aufzeichnung, ioBroker-Anbindung und Beobachtungsmodelle. Private Konfiguration,
+Gaszählerstände und Messdatenbanken gehören in keines der öffentlichen Repositories.
+
 Die explizite LPB-500-Definition wird jetzt auch mit den passenden vier Byte
 langen VG-BW- und VM-Anforderungen (`250001F4`, `190001F4`) abgeglichen.
 Bits 0/1 stehen für Gültigkeit/Zubringerpumpe, Bits 2/3 für absoluten/gleitenden
