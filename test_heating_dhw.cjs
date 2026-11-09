@@ -2,7 +2,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
-const context={window:{}};
+const context={window:{},HeatingLive:{update:(target,html)=>{target.innerHTML=html;}}};
 vm.runInNewContext(fs.readFileSync('web/static/js/heating_dhw.js','utf8'),context);
 function view(){
   const targets=Object.fromEntries(['dhw-pump-chart','dhw-pump-events','dhw-history-chart'].map(k=>[k,{innerHTML:'',textContent:'',clientWidth:600}]));

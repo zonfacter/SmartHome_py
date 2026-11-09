@@ -16,7 +16,7 @@
   if (['eg','og'].includes(initialView)) view = initialView;
 
   function stat(id, metric, unit = '°C') {
-    const el = $(id); el.innerHTML = escape(text(metric)) + (unit ? `<small>${escape(unit)}</small>` : '');
+    const el = $(id); HeatingLive.update(el,escape(text(metric)) + (unit ? `<small>${escape(unit)}</small>` : ''));
     el.classList.toggle('is-stale', metric?.quality === 'stale');
     el.title = metric?.quality === 'stale' ? 'Letzter Messwert ist veraltet' : metric?.quality === 'unavailable' ? 'Kein gültiger Messwert vom Regler' : '';
   }
@@ -45,16 +45,16 @@
     if (!snapshot) return;
     const focusedDetails = document.activeElement?.dataset.details;
     const focusedHelp=document.activeElement?.dataset.heatingHelp,focusedArea=document.activeElement?.dataset.helpArea;
-    $('floor-grid').innerHTML = ['eg','og'].filter(f=>view === 'overview' || view === f).map(floorCard).join('');
+    HeatingLive.update($('floor-grid'),['eg','og'].filter(f=>view === 'overview' || view === f).map(floorCard).join(''));
     $('floor-grid').style.gridTemplateColumns = view === 'overview' ? '' : 'minmax(0,1fr)';
-    document.querySelectorAll('[data-details]').forEach(button=>button.addEventListener('click',()=>{const area=button.dataset.details; expanded.has(area) ? expanded.delete(area) : expanded.add(area); renderFloors();}));
     if (focusedDetails) document.querySelector(`[data-details="${focusedDetails}"]`)?.focus({preventScroll:true});
     if(focusedHelp&&focusedArea)$('floor-grid').querySelector(`[data-heating-help="${focusedHelp}"][data-help-area="${focusedArea}"]`)?.focus({preventScroll:true});
   }
+  $('floor-grid').addEventListener('click',event=>{const button=event.target.closest('[data-details]');if(!button)return;const area=button.dataset.details;expanded.has(area)?expanded.delete(area):expanded.add(area);renderFloors();});
   function renderRooms() {
     if (!snapshot) return;
     const rooms = snapshot.rooms.filter(r=>view === 'overview' || r.floor === view);
-    $('rooms-grid').innerHTML = rooms.length ? rooms.map(room=>`<article class="room-card ${room.stale ? 'stale' : ''}"><div class="room-top"><span>${escape(room.name)}</span><span class="room-floor">${room.floor === 'eg' ? 'Erdgeschoss' : room.floor === 'og' ? 'Obergeschoss' : room.floor === 'kg' ? 'Keller' : 'Etage offen'}</span></div><div class="room-temp">${number(room.temperature)}<small>°C</small></div><div class="room-bottom"><span>${numeric(room.setpoint) ? 'Soll ' + number(room.setpoint) + ' °C' : 'Kein Raumsollwert'}</span><span>${room.stale ? 'Veraltet' : numeric(room.humidity) ? number(room.humidity,0) + ' % Feuchte' : 'Tado'}</span></div></article>`).join('') : '<div class="panel empty-rooms">'+ (snapshot.iobroker.connected ? (view === 'overview' ? 'Keine Tado-Raumtemperaturen verfügbar.' : 'Dieser Etage sind noch keine Tado-Räume zugeordnet.') : 'Raumtemperaturen sind verfügbar, sobald ioBroker verbunden ist.') + '</div>';
+    HeatingLive.update($('rooms-grid'),rooms.length ? rooms.map(room=>`<article data-live-key="${escape(room.id)}" class="room-card ${room.stale ? 'stale' : ''}"><div class="room-top"><span>${escape(room.name)}</span><span class="room-floor">${room.floor === 'eg' ? 'Erdgeschoss' : room.floor === 'og' ? 'Obergeschoss' : room.floor === 'kg' ? 'Keller' : 'Etage offen'}</span></div><div class="room-temp">${number(room.temperature)}<small>°C</small></div><div class="room-bottom"><span>${numeric(room.setpoint) ? 'Soll ' + number(room.setpoint) + ' °C' : 'Kein Raumsollwert'}</span><span>${room.stale ? 'Veraltet' : numeric(room.humidity) ? number(room.humidity,0) + ' % Feuchte' : 'Tado'}</span></div></article>`).join('') : '<div class="panel empty-rooms">'+ (snapshot.iobroker.connected ? (view === 'overview' ? 'Keine Tado-Raumtemperaturen verfügbar.' : 'Dieser Etage sind noch keine Tado-Räume zugeordnet.') : 'Raumtemperaturen sind verfügbar, sobald ioBroker verbunden ist.') + '</div>');
     const connected = snapshot.iobroker.tado_connected;
     $('tado-status').textContent = connected ? '● Über ioBroker verbunden' : 'Tado nicht verbunden';
     $('tado-status').classList.toggle('online',!!connected);
@@ -73,7 +73,7 @@
     $('burner').title = 'Gemeldete Relaiskontakte K4/K5, keine Flammenmessung';
     $('dhw-target').textContent = 'Soll ' + text(p.dhw_setpoint) + ' °C' + (valid(p.dhw_pump) ? ' · Ladepumpe ' + (p.dhw_pump.value ? 'ein' : 'aus') : '');
     $('burner-starts').textContent = valid(p.starts) ? number(p.starts.value,0) + ' Brennerstarts' : 'Kein Zählerwert verfügbar';
-    $('live-tag').classList.toggle('online',connected); $('live-tag').querySelector('span').textContent = connected ? 'Heizung verbunden' : 'Heizung offline';
+    $('live-tag').classList.toggle('online',connected); $('live-tag').querySelector('span').textContent = connected ? snapshot.connection.degraded?'Verbunden · Teilwerte fehlen':'Heizung verbunden' : 'Heizung offline';
     $('nav-light').classList.toggle('online',connected); $('nav-status').textContent = connected ? 'K und M verbunden' : 'Verbindung unterbrochen';
     $('connection-note').hidden = connected;
     $('connection-note').textContent = !snapshot.enabled ? 'Die Heizungsanbindung ist noch nicht eingerichtet.' : (snapshot.connection.message + '. Vorhandene Werte werden nach Ablauf ihrer Gültigkeit als veraltet markiert.');
@@ -82,14 +82,14 @@
     $('updated').textContent = snapshot.connection.last_success ? 'Letzte Heizungsabfrage ' + formatTime(snapshot.connection.last_success) : 'Warte auf Heizungsdaten';
     help.update(snapshot,view); renderFloors(); renderRooms(); renderSchedule(); diagnostics.render(snapshot,view); pumps.render(snapshot,view);
   }
-  async function load() {
+  async function load(manual=false) {
     if (inFlight) return;
-    inFlight=true; $('refresh').disabled=true;
+    inFlight=true; if(manual)$('refresh').disabled=true;
       try { const response=await fetch('/api/heating/state',{cache:'no-store'}); if(!response.ok) throw Error(); snapshot=await response.json(); render();
         if(initialAnchorPending){initialAnchorPending=false;const id=location.hash.slice(1);if(['warmwasser-verlauf','beobachtung','pumpendiagnose','brennerstatistik','reglerdiagnose','schedule-table'].includes(id))requestAnimationFrame(()=>$(id)?.scrollIntoView({block:'start'}));}
       }
     catch { $('connection-note').hidden=false; $('connection-note').textContent='Die SmartHome-VM ist gerade nicht erreichbar. Anzeige wird automatisch erneut geladen.'; $('live-tag').classList.remove('online'); $('live-tag').querySelector('span').textContent='Anzeige offline'; }
-    finally { inFlight=false; $('refresh').disabled=false; }
+    finally { inFlight=false;if(manual)$('refresh').disabled=false; }
   }
   async function history() {
     const sequence=++historySequence;
@@ -100,7 +100,7 @@
       const weather=$('history-series').value==='weather',area=view==='og'?'og':'eg';
       const series=weather?[[area+'.outside','#269274','Aktuell'],[area+'.outside_attenuated','#dda56e','Gedämpft'],[area+'.outside_composite','#7c89bb','Gemischt']]:[['eg.flow_actual','#269274','EG · Vorlauf'],['anlage.boiler','#dda56e','Kesseltemperatur']];
       $('history-description').textContent=weather?'Außentemperatur · '+area.toUpperCase():'Vorlauf im Erdgeschoss und Kesseltemperatur';
-      $('history-legend').innerHTML=series.map(([,color,label])=>'<span><i style="background:'+color+'"></i>'+label+'</span>').join('');
+      HeatingLive.update($('history-legend'),series.map(([,color,label])=>'<span><i style="background:'+color+'"></i>'+label+'</span>').join(''));
       if(samples.length<2) return;
       const w=Math.max(320,$('history-chart').clientWidth),h=178,left=37,right=12,top=13,bottom=24;
       const values=samples.flatMap(s=>series.map(([key])=>s[key])).filter(numeric); if(!values.length){$('history-chart').innerHTML='<div class="empty-chart"><strong>Für diese Größen entsteht der Verlauf ab jetzt.</strong><span>Fehlende historische Werte werden nicht ergänzt.</span></div>';return;}
@@ -115,7 +115,7 @@
         svg+=`<path d="${path}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`;
       }
       for(let i=0;i<5;i++){const ts=first+span*i/4;svg+=`<text x="${x(ts)}" y="${h-3}" fill="var(--muted)" font-size="9" text-anchor="${i===0?'start':i===4?'end':'middle'}">${formatTime(ts)}</text>`;}
-      $('history-chart').innerHTML=svg+'</svg>';
+      HeatingLive.update($('history-chart'),svg+'</svg>');
     } catch { /* Keep the last visible history when the VM is briefly unavailable. */ }
   }
   function selectView(next) {
@@ -129,7 +129,7 @@
   }
   document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>selectView(b.dataset.view)));
   document.querySelectorAll('[data-hours]').forEach(b=>b.addEventListener('click',()=>{hours=Number(b.dataset.hours);document.querySelectorAll('[data-hours]').forEach(c=>c.classList.toggle('selected',c.dataset.hours===b.dataset.hours));history();diagnostics.load(hours);pumps.load(hours);}));
-  $('refresh').addEventListener('click',()=>{load();diagnostics.load(hours);pumps.load(hours);observer.load();dhwHistory.load();});
+  $('refresh').addEventListener('click',()=>{load(true);diagnostics.load(hours);pumps.load(hours);observer.load();dhwHistory.load();});
   $('history-series').addEventListener('change',history);
   document.addEventListener('heating-schedules-updated',load);
   $('theme').addEventListener('click',()=>{theme=theme==='dark'?'light':'dark';document.body.dataset.theme=theme;localStorage.setItem('heating-theme',theme);});

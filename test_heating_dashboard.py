@@ -137,6 +137,53 @@ class HeatingTests(unittest.TestCase):
         self.assertEqual(calls,['/JI'])
         self.assertFalse(service.snapshot()['connection']['connected'])
 
+    def test_one_bad_bus_object_does_not_discard_fresh_temperature_measurements(self):
+        (self.root/'config').mkdir(exist_ok=True)
+        (self.root/'config/heating_observer.json').write_text('{"enabled":true,"mode":"observe"}')
+        def fetch(path):
+            if path=='/JI':return {'bus':'LPB','busaddr':66,'busdevices':[{'dev_id':0,'dev_fam':22,'dev_var':254},{'dev_id':1,'dev_fam':23,'dev_var':254}]}
+            coid,target=path.split(',')[1].split('!');target=int(target)
+            if coid=='110001F7' and target==0:raise ValueError('corrupt frame')
+            if coid=='05000462':return response(target,coid,b'\0\x0b\0')
+            return response(target,coid,b'\7',kind=8)
+        service=HeatingService(self.root,config={'enabled':True},fetch=fetch)
+        service.last_slow=service.last_schedule=time.time()
+        old=service.metrics['og.producer_lock_raw'];old.update(value='00 00',updated_at=123,quality='valid')
+        service.poll();snapshot=service.snapshot()
+        if service.observer.worker:service.observer.worker.join(timeout=5)
+        self.assertTrue(snapshot['connection']['connected']);self.assertTrue(snapshot['connection']['degraded'])
+        self.assertEqual(snapshot['plant']['dhw']['value'],44)
+        self.assertEqual(snapshot['plant']['dhw']['quality'],'valid')
+        self.assertEqual((old['quality'],old['updated_at']),('error',123))
+        with sqlite3.connect(service.db_path) as db:
+            stored=json.loads(db.execute('SELECT payload FROM heating_observations').fetchone()[0])
+        db.close()
+        self.assertEqual(stored['plant']['dhw']['q'],'valid')
+
+    def test_complete_bus_outage_stops_after_three_requests(self):
+        calls=[]
+        def fetch(path):
+            calls.append(path)
+            if path=='/JI':return {'bus':'LPB','busaddr':66,'busdevices':[{'dev_id':0,'dev_fam':22,'dev_var':254},{'dev_id':1,'dev_fam':23,'dev_var':254}]}
+            raise TimeoutError('offline')
+        service=HeatingService(self.root,config={'enabled':True},fetch=fetch)
+        service.poll()
+        self.assertEqual(len(calls),4)
+        self.assertFalse(service.snapshot()['connection']['connected'])
+        self.assertEqual(len(service.snapshot()['connection']['failed_objects']),3)
+
+    def test_one_bad_schedule_day_does_not_discard_other_days_or_measurements(self):
+        def fetch(path):
+            coid,target=path.split(',')[1].split('!');target=int(target)
+            if coid=='05000A8C' and target==1:raise ValueError('corrupt schedule')
+            if coid.startswith('05000A'):return response(target,coid,bytes.fromhex('06 00 08 00 80 00 00 00 80 00 00 00'))
+            return response(target,coid,b'\7',kind=8)
+        service=HeatingService(self.root,config={'enabled':True},fetch=fetch);service.own_address=66
+        service.last_slow=time.time();service.poll()
+        self.assertEqual(service.schedules['eg'][0]['quality'],'error')
+        self.assertEqual(service.schedules['eg'][1]['quality'],'valid')
+        self.assertEqual(service.schedules['og'][6]['quality'],'valid')
+
     def test_cache_marks_old_values_stale(self):
         service=HeatingService(self.root,config={})
         service.metrics['eg.flow_actual'].update(value=28.1,quality='valid',updated_at=time.time()-200)

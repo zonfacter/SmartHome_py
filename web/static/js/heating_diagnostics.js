@@ -33,7 +33,7 @@ window.HeatingDiagnostics=(()=>{
         const status=error===0?'Keine Fehlermeldung':error===null?'Fehlerstatus unbekannt':'Fehlercode '+error;
         html+=`<article class="diagnostic-card ${area}"><div class="diagnostic-heading"><h3>${area.toUpperCase()} · ${esc(floor.controller)}</h3><span class="diagnostic-status ${error===0?'ok':error>0?'alert':''}">${esc(status)}</span></div>${rows(m,['clock','error_code','error_priority','relay_test','lpb_power','plant_frost','building','changeover_source','overrun','pump_function'],area)}<h4>Wetter & Fühler</h4>${rows(m,['outside','outside_local','outside_attenuated','outside_composite','room_actual'],area)}<p class="diagnostic-note">Der lokale Außenfühler kann fehlen, obwohl die Außentemperatur über LPB verfügbar ist. Der Speisungsstatus ist keine Spannungsmessung.</p><details data-diagnostic="${area}" ${open.has(area)?'open':''}><summary>LPB-Rohdiagnose · Zuordnung offen</summary><p>Werte und Zusatzkennzeichen sind hier unverändert dargestellt. Daraus wird keine aktive Sperre oder Ursache für einen Pumpenstopp abgeleitet.</p>${rows(m,Object.keys(m).filter(k=>k.endsWith('_raw')),area)}</details></article>`;
       }
-      this.container.innerHTML=html+'</div>';
+      HeatingLive.update(this.container,html+'</div>');
       if(focused)this.container.querySelector(`details[data-diagnostic="${focused}"] summary`)?.focus({preventScroll:true});
       if(focusedHelp&&focusedArea)this.container.querySelector(`[data-heating-help="${focusedHelp}"][data-help-area="${focusedArea}"]`)?.focus({preventScroll:true});
       document.getElementById('burner-hours').textContent=display(p.burner_hours);
@@ -57,7 +57,7 @@ window.HeatingDiagnostics=(()=>{
       document.getElementById('cycle-coverage').textContent=`${number(data.coverage_seconds/60,0)} min von ${data.hours} h beobachtet · ${number(data.coverage_percent,1)} % Datenabdeckung`;
       document.getElementById('cycle-meter').style.width=Math.min(100,data.coverage_percent)+'%';
       const max=Math.max(1,...data.bins.map(b=>b.starts||0));
-      document.getElementById('cycle-chart').innerHTML=data.bins.map(b=>`<div class="cycle-bin ${b.starts===null?'unknown':''}" title="${time(b.ts)}: ${b.starts===null?'Keine vollständigen Messintervalle':b.starts+' Starts; '+number(b.coverage_seconds/60,0)+' min beobachtet'}"><span>${b.starts===null?'—':b.starts}</span><i style="height:${b.starts===null?12:Math.max(3,b.starts/max*74)}px"></i><small>${time(b.ts)}</small></div>`).join('');
+      HeatingLive.update(document.getElementById('cycle-chart'),data.bins.map(b=>`<div class="cycle-bin ${b.starts===null?'unknown':''}" title="${time(b.ts)}: ${b.starts===null?'Keine vollständigen Messintervalle':b.starts+' Starts; '+number(b.coverage_seconds/60,0)+' min beobachtet'}"><span>${b.starts===null?'—':b.starts}</span><i style="height:${b.starts===null?12:Math.max(3,b.starts/max*74)}px"></i><small>${time(b.ts)}</small></div>`).join(''));
       note.textContent=(this.failed?'Statistikabruf fehlgeschlagen; letzter Stand wird angezeigt. ':'')+`Beobachtete Relaislaufzeit: ${number(data.relay_runtime_minutes,1)} min. `+(data.counter_resets?`${data.counter_resets} Zählerrücksetzung(en) ausgelassen. `:'')+'Starts und Laufzeit beziehen sich nur auf gemeinsam gültige Messintervalle. Relaiskontakte messen keine Flamme; Relaisminuten/Start sind keine vollständigen Brennerzyklen.';
     }
   }

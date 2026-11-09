@@ -100,7 +100,7 @@
         b.classList.toggle('selected',b.dataset.scheduleMode===this.mode);
         b.setAttribute('aria-pressed',String(b.dataset.scheduleMode===this.mode));
       });
-      this.container.innerHTML=['eg','og'].filter(a=>view==='overview'||view===a).map(area=>this.board(area)).join('');
+      HeatingLive.update(this.container,['eg','og'].filter(a=>view==='overview'||view===a).map(area=>this.board(area)).join(''));
       if (focusId) this.container.querySelector(`[data-schedule-action="${focusId[0]}"][data-area="${focusId[1]}"][data-day="${focusId[2]}"]`)?.focus({preventScroll:true});
     }
     board(area) {

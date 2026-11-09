@@ -25,7 +25,7 @@ window.HeatingDhwView=(()=>{
     pumps(data){
       const target=this.$('dhw-pump-chart'),eventsTarget=this.$('dhw-pump-events');
       const tracks=data.pumps||[],first=data.first_sample,last=data.last_sample;
-      if(!tracks.length||!first||last<=first){target.innerHTML='<p class="diagnostic-note">Noch keine aufgezeichneten Pumpenkontakte.</p>';eventsTarget.textContent='Noch keine Schaltwechsel aufgezeichnet.';return;}
+      if(!tracks.length||!first||last<=first){HeatingLive.update(target,'<p class="diagnostic-note">Noch keine aufgezeichneten Pumpenkontakte.</p>');eventsTarget.textContent='Noch keine Schaltwechsel aufgezeichnet.';return;}
       const w=Math.max(300,this.$('dhw-history-chart').clientWidth),span=last-first,x=t=>38+(t-first)/span*(w-52);
       const labels={eg:'EG · Heizkreispumpe',og:'OG · Heizkreispumpe',dhw:'Warmwasser · Ladepumpe'};
       let svg=`<svg viewBox="0 0 ${w} 150" role="img" aria-label="Pumpenrelais im zeitlichen Verlauf"><defs><pattern id="pump-history-unknown" patternUnits="userSpaceOnUse" width="6" height="6"><path d="M0 6L6 0" stroke="var(--muted)" stroke-opacity=".4"/></pattern></defs>`;
@@ -41,9 +41,9 @@ window.HeatingDhwView=(()=>{
         }
         events.push(...track.events.map(e=>({...e,label})));
       });
-      target.innerHTML=svg+'</svg>';
+      HeatingLive.update(target,svg+'</svg>');
       events.sort((a,b)=>b.to-a.to);
-      eventsTarget.innerHTML=events.length?'<table class="pump-switch-table"><thead><tr><th>Pumpe</th><th>Wechsel zwischen</th><th>Danach</th></tr></thead><tbody>'+events.map(e=>`<tr><td>${e.label}</td><td>${time(e.from)} – ${time(e.to)}</td><td>${e.state?'Ein':'Aus'}</td></tr>`).join('')+'</tbody></table>':'<p class="diagnostic-note">Keine sicher beobachteten Schaltwechsel im gewählten Zeitraum.</p>';
+      HeatingLive.update(eventsTarget,events.length?'<table class="pump-switch-table"><thead><tr><th>Pumpe</th><th>Wechsel zwischen</th><th>Danach</th></tr></thead><tbody>'+events.map(e=>`<tr><td>${e.label}</td><td>${time(e.from)} – ${time(e.to)}</td><td>${e.state?'Ein':'Aus'}</td></tr>`).join('')+'</tbody></table>':'<p class="diagnostic-note">Keine sicher beobachteten Schaltwechsel im gewählten Zeitraum.</p>');
     }
     chart(data){
       const target=this.$('dhw-history-chart'),rows=data.samples.filter(r=>typeof r.temperature==='number');
@@ -61,7 +61,7 @@ window.HeatingDhwView=(()=>{
       }
       svg+=`<path d="${path}" fill="none" stroke="#269274" stroke-width="2"/>`;
       for(let i=0;i<4;i++){const stamp=first+span*i/3,label=span<36*3600?time(stamp).split(', ').at(-1):time(stamp).split(', ')[0];svg+=`<text x="${x(stamp)}" y="190" font-size="10" fill="var(--muted)" text-anchor="${i===0?'start':i===3?'end':'middle'}">${label}</text>`;}
-      target.innerHTML=svg+'</svg>';
+      HeatingLive.update(target,svg+'</svg>');
     }
   }
   return {View};

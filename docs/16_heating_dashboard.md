@@ -8,6 +8,19 @@ ausgeliefert; für diese Ansicht werden keine CDN-Ressourcen benötigt.
 
 ## Einrichtung
 
+Live-Aktualisierungen verwenden `heating_live.js`: Text und Attribute werden
+in bestehenden DOM-Knoten geändert. Kacheln, offene Details, Fokus, Auswahl und
+Scrollposition werden bei Hintergrundabfragen nicht neu erzeugt. Der kleine
+Browser-Regressionstest `tests/heating_live.html` prüft das einschließlich SVG.
+
+Eine fehlerhafte LPB-Antwort betrifft nur die abgefragte Objektgruppe oder den
+betroffenen Wochenprogrammtag. Andere checksum-geprüfte Werte desselben Zyklus
+bleiben gültig. Teilfehler werden als `connection.degraded` und mit Objektkennung
+protokolliert. Nach drei aufeinanderfolgenden Abfragefehlern endet der Durchlauf,
+damit ein Ausfall nicht einen Timeout für jedes Objekt auslöst. Eine falsche
+Geräte-/Busidentität beendet weiterhin sämtliche Datenabfragen. Historische
+Lücken werden nicht nachträglich gefüllt und Frischegrenzen nicht erhöht.
+
 `config/heating.example.json` nach `config/heating.json` kopieren und die lokalen
 BSB-LAN-/ioBroker-Adressen eintragen. Diese Datei und die Verlaufsdatenbank sind
 Git-ignoriert. Ohne Konfiguration bleibt der Collector deaktiviert.

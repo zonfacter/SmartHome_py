@@ -38,11 +38,11 @@ window.HeatingObserverView=(()=>{
       this.$('observer-reference').textContent=`${reference.model||'Kesseltyp nicht hinterlegt'} · Belastung ${number(reference.rated_input_hi_kw)} kW (Hi), Wärmeleistung ${number(reference.rated_output_kw)} kW. Beispiel-Heizwert ${number(reference.assumed_hi_kwh_per_nm3)} kWh/Nm³, aktuelles Gas nicht vermessen. Volle Nennbelastung während jeder erfassten Relaisminute angenommen; Stufenleistung unbestätigt. Normvolumen, kein Gaszähler-/Abrechnungswert. Abgasverlust wird nicht als Nutzungsgrad verwendet.`;
       const note=!d.enabled?'Die Aufzeichnung ist deaktiviert.':d.error?'Aufzeichnung oder Lernen meldet '+d.error+'. Bestehende Reglerprogramme werden weiterhin eigenständig ausgeführt.':'Die VM zeichnet nach Dienststart auch ohne geöffneten Browser auf. Modelle werten frühestens drei Tage und 48 gültige Zeitfenster mit Heiz- und Abkühlphasen aus. Heizzeiten und Einstellungen werden nicht verändert.';
       this.$('observer-note').textContent=note;
-      this.$('observer-models').innerHTML=['eg','og','dhw'].map(area=>{
+      HeatingLive.update(this.$('observer-models'),['eg','og','dhw'].map(area=>{
         const m=d.models[area],rooms=m.rooms||[];
         const title=area==='eg'?'EG · Fußbodenheizung':area==='og'?'OG · Heizkörper':'Warmwasser · '+(m.tank_litres||'—')+' Liter';
         return `<article class="observer-model"><div class="diagnostic-heading"><h3>${title}</h3><span class="diagnostic-status ${m.state==='validated'?'ok':''}">${state[m.state]||'Sammelt Daten'}</span></div><p>${esc(m.input_note||'')}</p>${rooms.length?rooms.map(r=>`<div class="observer-model-row"><strong>${esc(r.name)}</strong><span>${state[r.state]||'Sammelt Daten'}${r.pairs!==undefined?' · '+r.pairs+' Zeitfenster':''}</span>${r.state!=='record_only'?progressView(r):''}<small>${esc(r.reason||'')}${r.validation_mae_c!==undefined?' Prüfabweichung: '+number(r.validation_mae_c,3)+' °C; Vergleich: '+number(r.persistence_mae_c,3)+' °C.':''}</small></div>`).join(''):`<div class="observer-model-row"><strong>${number(m.pairs||0,0)} gültige Zeitfenster</strong>${progressView(m)}<small>${esc(m.reason||'Raumdaten werden gesammelt.')}${m.validation_mae_c!==undefined?' Prüfabweichung: '+number(m.validation_mae_c,3)+' °C.':''}</small></div>`}</article>`;
-      }).join('');
+      }).join(''));
       this.rooms();this.chart();
     }
     rooms(){
@@ -74,7 +74,7 @@ window.HeatingObserverView=(()=>{
         svg+=`<path d="${path}" fill="none" stroke="${color}" stroke-width="2" stroke-dasharray="${dash}"/>`;
       }
       for(let i=0;i<4;i++)svg+=`<text x="${x(first+span*i/3)}" y="164" font-size="9" fill="var(--muted)" text-anchor="${i===0?'start':i===3?'end':'middle'}">${time(first+span*i/3).split(', ').at(-1)}</text>`;
-      this.$('observer-chart').innerHTML=svg+'</svg>';
+      HeatingLive.update(this.$('observer-chart'),svg+'</svg>');
     }
   }
   return {View,progress};

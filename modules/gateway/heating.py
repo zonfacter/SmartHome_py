@@ -193,11 +193,25 @@ class HeatingService:
                 if not point.slow or slow:
                     groups.setdefault((point.target, point.coid), []).append(point)
             successful = 0
+            failures = []
+            consecutive_failures = 0
             for (target, coid), definitions in groups.items():
                 if self.stop_event.is_set():
                     return
-                response = self.fetch(f'/JY06,{coid}!{target}')
-                payload = read_frame(response, target, coid, self.own_address)
+                try:
+                    response = self.fetch(f'/JY06,{coid}!{target}')
+                    payload = read_frame(response, target, coid, self.own_address)
+                    consecutive_failures = 0
+                except Exception as error:
+                    failures.append({'target':target,'object':coid,'error':type(error).__name__})
+                    consecutive_failures += 1
+                    with self.lock:
+                        for point in definitions:
+                            self.metrics[point.area+'.'+point.key]['quality']='error'
+                    logger.warning('Heating object read failed target=%s object=%s (%s)',target,coid,type(error).__name__)
+                    # Bound an outage to three failed requests, not a timeout per object.
+                    if consecutive_failures >= 3:break
+                    continue
                 for point in definitions:
                     try:
                         value = decode(point, payload)
@@ -207,15 +221,24 @@ class HeatingService:
                     with self.lock:
                         self.metrics[point.area + '.' + point.key].update(value=value, quality=quality, updated_at=time.time())
                 successful += payload is not None
-            if slow:
+            if slow and consecutive_failures < 3:
                 self.last_slow = now
-            if now - self.last_schedule > 900:
+            if consecutive_failures < 3 and now - self.last_schedule > 900:
                 for area,target in (('eg',1),('og',0)):
                     for day in range(7):
                         if self.stop_event.is_set():
                             return
                         coid=f'05000A{0x8C+day:02X}'
-                        payload=read_frame(self.fetch(f'/JY06,{coid}!{target}'),target,coid,self.own_address)
+                        try:
+                            payload=read_frame(self.fetch(f'/JY06,{coid}!{target}'),target,coid,self.own_address)
+                        except Exception as error:
+                            failures.append({'target':target,'object':coid,'error':type(error).__name__})
+                            with self.lock:self.schedules[area][day]['quality']='error'
+                            logger.warning('Heating schedule read failed target=%s object=%s (%s)',target,coid,type(error).__name__)
+                            consecutive_failures += 1
+                            if consecutive_failures >= 3:break
+                            continue
+                        consecutive_failures = 0
                         try:
                             periods=decode_schedule(payload)
                             quality='valid' if periods is not None else 'unavailable'
@@ -223,9 +246,13 @@ class HeatingService:
                             periods,quality=None,'error'
                         with self.lock:
                             self.schedules[area][day].update(periods=periods,quality=quality,updated_at=time.time())
-                self.last_schedule=now
+                    if consecutive_failures >= 3:break
+                if consecutive_failures < 3:self.last_schedule=now
             with self.lock:
-                self.connection = {'connected': True, 'message': 'LPB verbunden', 'last_success': time.time(), 'objects': successful}
+                self.connection = {'connected': successful>0,'degraded':bool(failures),
+                                   'message':'LPB verbunden · einzelne Abfragen fehlgeschlagen' if successful and failures else 'LPB verbunden' if successful else 'Keine bestätigten LPB-Messwerte',
+                                   'last_success':time.time() if successful else self.connection.get('last_success'),
+                                   'objects':successful,'failed_objects':failures}
         except Exception as error:
             with self.lock:
                 self.connection.update(connected=False, message='Heizungsbrücke nicht erreichbar' if not isinstance(error, ValueError) else 'Heizungsdaten konnten nicht bestätigt werden')
