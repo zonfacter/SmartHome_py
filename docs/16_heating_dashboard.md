@@ -49,6 +49,57 @@ Feldaufbau herangezogen:
 | `150001F8`, Reduktionssignal EM / 504 | Bit 0 gültig, Bit 1 zwingende Reduktion | Prozentwert allein beweist keinen Pumpenstopp |
 | `150001FB`, Zwangssignal EM / 507 | Bit 0 gültig, Bit 1 Zwang an alle statt nur Nachlauf | Bei T=0 ist das Prozentfeld kein zwingender Prozentbefehl |
 
+#### Zweiter Entschlüsselungsschritt
+
+Die explizite LPB-500-Definition wird jetzt auch mit den passenden vier Byte
+langen VG-BW- und VM-Anforderungen (`250001F4`, `190001F4`) abgeglichen.
+Bits 0/1 stehen für Gültigkeit/Zubringerpumpe, Bits 2/3 für absoluten/gleitenden
+Warmwasservorrang. Vorrangkennzeichen werden nur bei gesetztem Gültigkeitsbit
+als solche eingeordnet. Andere Bits bleiben offen; insbesondere werden neuere
+BW-/HK-/Legionellenmasken nicht pauschal auf die alten Regler übertragen.
+Eine angeforderte Zubringerpumpe ist nicht automatisch der lokale Q1-Kontakt.
+
+Zusätzlich wird `1500020A` / LPB 522 als Erzeugerstatus im Verbund ausgewertet.
+Die exakten K/M-Profile bestätigen das zwei Byte lange Attributfeld am Anfang
+des fünf Byte langen Blocks. Nur die dokumentierten Bits 0–5 und 8 werden
+eingeordnet. Bit 0 bedeutet hier **Erzeuger vorhanden**, nicht ein skalares
+Gültigkeitsbyte. Die übrigen zugeordneten Anzeigen betreffen ECO/Außengrenze,
+Störung, Schornsteinfegerfunktion, manuelle Sperre, Nichtverfügbarkeit wegen
+Warmwasserladung und Handbetrieb. Bei nicht bestätigter Erzeugerpräsenz werden
+die anderen Bits nicht als aktive Zustände verwendet. Leistungsfelder und
+`11000209` / LPB 521 erhalten daraus keine neue Interpretation.
+
+`assessment` ergänzt die Pumpendiagnose um einen begrenzten Zusammenhang
+(Heizanforderung, Nachlauf, Warmwasser-Reduktion, Erzeugerhinweis oder
+Absenkphase ohne gültige lokale Anforderung). Alter, Qualität und Zeitversatz
+werden für die jeweils tatsächlich verwendeten Signale geprüft. Mehr als
+30 Sekunden Versatz, mehr als 90 Sekunden Alter oder Zukunftszeitstempel
+führen zur Enthaltung. `cause_status` bleibt `unresolved`, da der eindeutige
+physische Schaltgrund nicht bewiesen ist. Im EG wird eine mögliche Begrenzung
+am Mischer von einem OG-Pumpenstopp unterschieden. Treffen Heizanforderung und
+Nachlauf zusammen, werden beide genannt.
+
+Die vorhandenen Busabfragen werden je Controller zusammenhängend gelesen;
+der gemeinsame K/Q3-Kontakt liegt unmittelbar vor dem M-Kontext. Geteilte
+Objekte werden weiterhin nur einmal je Runde gelesen. EM-Status 522 wird nun
+im schnellen Zyklus erfasst. Zukünftige Änderungsaufzeichnungen enthalten
+auch diesen Status, den bisherigen EE-Rohblock und EG-Mischerbefehle/Vorlauf.
+Dadurch entstehen keine nachträglich erfundenen historischen Statuswerte.
+
+Eine einzelne Leseprobe von M-Kandidat `0500065E` (Sperrsignalverstärkung,
+erst in späteren Profilen vorhanden) wurde abgewiesen. Sie wird nicht in die
+laufende Erfassung aufgenommen. Die übrigen Sperr-/Zwangsobjekte 503, 505,
+506 und Betriebsniveau 523 bleiben ohne behauptete Bitbelegung. Der Vergleich
+von Niveau 1/2 mit reduziertem/normalem Raumsollwert ergab einen Übergangsfall
+mit abweichenden Feldern; dies genügt nicht für eine sichere Protokollzuordnung.
+
+Die Herstellerquelle ist auch direkt verfügbar:
+[Brötje ISR MODBM, Seiten 34–35](https://polo.broetje.de/pdf/7715040%3D6%3Dpdf_%28bdr_a4_manual%29%3Dde-de_ma_modbm.pdf).
+Die Unterscheidung zwischen Pumpen- und Mischerbegrenzung ist ergänzend in
+[Siemens RVA46 CE1P2372E, S. 66 und 97](https://mhgheating.co.uk/wp-content/uploads/2012/04/RVA46-D.pdf)
+beschrieben; modellabhängige BMU-Funktionen und Schaltschwellen daraus werden
+nicht als bestätigte Wirkung dieser Installation ausgegeben.
+
 Die Auswertung enthält Quelle, Anwendungsgrenze, `protocol_valid`,
 `unknown_attribute_bits` und gegebenenfalls `mandatory`. Sie erscheint in
 "Signalwerte & Attribute" und im bereits vorhandenen lesbaren ioBroker-JSON

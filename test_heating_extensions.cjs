@@ -47,3 +47,21 @@ test('signal definition text is displayed and escaped without declaring a proven
   assert.ok(html.includes('&lt;script&gt;unsafe&lt;/script&gt;'));
   assert.ok(!html.includes('<script>unsafe'));
 });
+
+test('producer presence and contextual assessment are not rendered as a generic validity flag',()=>{
+  let html='';
+  const context={window:{},HeatingLive:{update:(_,s)=>{html=s;}},document:{activeElement:null}};
+  vm.runInNewContext(fs.readFileSync('web/static/js/heating_pumps.js','utf8'),context);
+  const view=new context.window.HeatingPumps.View({querySelectorAll:()=>[]});
+  view.render({floors:{eg:{controller:'M',pump_diagnosis:{summary:'Q1 ausgeschaltet',cause:'Offen',pump_contact:false,
+    facts:[],hints:[],limits:'Grenzen',read_skew_seconds:2,
+    assessment:{status:'consistent',summary:'Absenkung passt zum Kontakt',limit:'Keine eindeutige Ursache',read_skew_seconds:2},
+    signals:[{quality:'valid',label:'Erzeugerstatus',raw:'00 01 00 00 00',attributes_hex:'0x0001',attribute_bits:[0],
+      producer_present:true,interpretation:'Erzeuger vorhanden',lpb_object:522,unknown_attribute_bits:[],
+      definition_source:{url:'https://example.invalid',scope:'Grenzen'}}]}}}},'eg');
+  assert.ok(html.includes('Messwerte passen zusammen'));
+  assert.ok(html.includes('Absenkung passt zum Kontakt'));
+  assert.ok(html.includes('Erzeuger vorhanden: ja'));
+  assert.ok(!html.includes('Gültigkeitsbit: nicht gesetzt'));
+  assert.ok(html.includes('Keine eindeutige Ursache'));
+});

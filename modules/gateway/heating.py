@@ -192,6 +192,19 @@ class HeatingService:
             for point in POINTS:
                 if not point.slow or slow:
                     groups.setdefault((point.target, point.coid), []).append(point)
+            # Keep each controller's switching context close together, including
+            # K/Q3 immediately before the M context. No duplicate bus requests.
+            context_coids = ('05000074','05000593','0500000B','210001F4','250001F4',
+                             '190001F4','150001F8','150001FB','1500020A','05000667',
+                             '110001F7','190001F9','110001FA','2D00020B','05000488')
+            first = [(target, coid) for target in (0, 1) for coid in context_coids
+                     if (target, coid) in groups]
+            # M's own contact is read directly after K's combined contact block.
+            m_contact = (1, '05000488')
+            if m_contact in first:
+                first.remove(m_contact)
+                first.insert(next((i for i,k in enumerate(first) if k[0] == 1), len(first)), m_contact)
+            groups = {**{k: groups[k] for k in first}, **{k:v for k,v in groups.items() if k not in first}}
             successful = 0
             failures = []
             consecutive_failures = 0

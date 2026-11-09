@@ -80,12 +80,12 @@ def points():
             ('mixing_lock_raw','Mischerkreis-Sperrsignal · Rohdaten','190001F9','raw2'),
             ('forced_producer_raw','Erzeuger-Zwangssignal · Rohdaten','110001FA','raw2'),
             ('producer_status_raw','Erzeugerstatus · Rohdaten','11000209','raw9'),
-            ('mixer_status_raw','Mischerstatus · Rohdaten','1500020A','raw5'),
+            ('mixer_status_raw','Erzeugerstatus im Verbund · EM · Rohdaten','1500020A','raw5'),
             ('forced_mixer_raw','Mischer-Zwangssignal · Rohdaten','150001FB','raw2'),
             ('mixer_request_raw','Mischeranforderung · Rohdaten','190001F4','raw4'),
             ('transfer_lock_raw','Übertragungs-Sperrsignal · Rohdaten','150001F8','raw2'),
         ]:
-            add(area,target,key,label,command,kind,'',key in ('producer_status_raw','mixer_status_raw'))
+            add(area,target,key,label,command,kind,'',key == 'producer_status_raw')
         add(area,target,'status_level_raw','Betriebsniveau · Rohdaten','2D00020B','raw2','')
     add('og',0,'dhw_request_raw','Warmwasseranforderung · Rohdaten','250001F4','raw4','')
     add('eg',1,'producer_request_raw','Erzeugeranforderung · Rohdaten','150001F5','raw5','')
