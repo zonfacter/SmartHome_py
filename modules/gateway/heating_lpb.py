@@ -246,6 +246,11 @@ def decode(point, payload):
             raise ValueError('invalid boolean')
         return payload[1] == 255
     if kind == 'mode':
+        # Controlled M/RVA46 panel test: top continuous-operation button,
+        # separate emergency manual button OFF, code 4, active Y1 regulation.
+        # Do not transfer this observation to the K until its own panel test.
+        if point.target == 1 and payload[1] == 4:
+            return 'Dauerbetrieb'
         return {0: 'Bereitschaft', 1: 'Automatik', 4: 'Handbetrieb'}.get(payload[1], 'Unbekannt')
     enums={
         'relay_test':{0:'Inaktiv'},

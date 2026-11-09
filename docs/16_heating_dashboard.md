@@ -51,6 +51,17 @@ Feldaufbau herangezogen:
 
 #### Zweiter Entschlüsselungsschritt
 
+Kontrollierter M-Test ab 10.11.2026 00:00 Uhr: Der Nutzer bestätigte ausdrücklich
+die obere mittlere Taste Dauerbetrieb bei ausgeschalteter separater
+Handbetriebstaste. `05000074!1` lieferte `00 04`, Betriebsniveau `02 01`,
+Raumsoll 20,5 °C, Q1 Ein und zum Beginn Y1 Ein. Zuvor: Automatik, Niveau
+`01 01`, Raumsoll 8 °C, Q1 Aus. Die M-spezifische Darstellung von Code 4 wird
+deshalb auf **Dauerbetrieb** korrigiert; die bisherige Übersetzung als
+Handbetrieb war hier falsch. Die normale Reglerlogik und der Mischer bleiben
+aktiv. Die K-Zuordnung wird bis zu einem eigenen kontrollierten Test nicht
+aus diesem M-Versuch geändert. Die Niveau-Bitmaske ist durch diesen ersten
+Zustandswechsel noch nicht vollständig bestimmt.
+
 Die explizite LPB-500-Definition wird jetzt auch mit den passenden vier Byte
 langen VG-BW- und VM-Anforderungen (`250001F4`, `190001F4`) abgeglichen.
 Bits 0/1 stehen für Gültigkeit/Zubringerpumpe, Bits 2/3 für absoluten/gleitenden

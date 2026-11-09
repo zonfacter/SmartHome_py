@@ -155,9 +155,9 @@ def assess_context(area, metrics, plant, signals, phase, now):
                       [status['interpretation']], 'indication')
     lock = by_key.get('transfer_lock_raw',{})
     q3 = valid(plant,'dhw_pump')
-    if mode == 'Automatik' and q3 is True and lock.get('quality') != 'valid':
+    if mode in ('Automatik','Dauerbetrieb') and q3 is True and lock.get('quality') != 'valid':
         return result
-    if mode == 'Automatik' and lock.get('protocol_valid') and (lock.get('percent_field') or 0) > 0 and q3 is True:
+    if mode in ('Automatik','Dauerbetrieb') and lock.get('protocol_valid') and (lock.get('percent_field') or 0) > 0 and q3 is True:
         if not coherent(base_context + [('lock',metrics.get('transfer_lock_raw',{})),('Q3',plant.get('dhw_pump',{}))]):
             return result
         evidence = ['Warmwasser-Ladekontakt Q3 Ein',lock['interpretation']]

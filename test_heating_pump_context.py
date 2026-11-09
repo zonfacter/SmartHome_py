@@ -1,7 +1,7 @@
 """Protocol scope, temporal coherence and abstention for pump explanations."""
 import unittest
 
-from modules.gateway.heating_lpb import POINTS
+from modules.gateway.heating_lpb import POINTS, decode
 from modules.gateway.heating_pumps import split_signal, diagnose
 from test_heating_dashboard import response
 
@@ -11,6 +11,16 @@ def item(value, stamp=990, quality='valid'):
 
 
 class PumpContextTests(unittest.TestCase):
+    def test_controlled_m_code_four_is_continuous_not_emergency_manual(self):
+        points={(p.area,p.key):p for p in POINTS}
+        self.assertEqual(decode(points['eg','mode'],bytes.fromhex('00 04')),'Dauerbetrieb')
+        self.assertEqual(decode(points['og','mode'],bytes.fromhex('00 04')),'Handbetrieb')
+        d=self.context(pump=True,demand='0A 00 00 03',mode=item('Dauerbetrieb'))
+        self.assertEqual(d['assessment']['code'],'space_heating')
+        self.assertIsNone(d['phase'])
+        d=self.context(pump=False,lock='64 01',q3=True,mode=item('Dauerbetrieb'))
+        self.assertEqual(d['assessment']['code'],'dhw_restriction')
+
     def context(self, area='og', pump=False, demand='08 40 00 02', lock='00 00', q3=False, **extra):
         metrics={'pump':item(pump),'mode':item('Automatik'),
                  'space_request_raw':item(demand),'transfer_lock_raw':item(lock),**extra}
