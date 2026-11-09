@@ -502,8 +502,12 @@ def register_heating_routes(manager, root=None):
                 result=service.gas_meter.add(request.get_json(silent=True))
                 return jsonify(result),201 if result['inserted'] else 200
             result=service.gas_meter.summary()
+            result['calibration']=service.gas_meter.calibration(service.observer.energy_reference_between,result['readings'])
             interval=result['latest_interval']
-            if interval:interval['relay_reference']=service.observer.energy_reference_between(interval['from'],interval['to'])
+            if interval:
+                interval['relay_reference']=service.observer.energy_reference_between(interval['from'],interval['to'])
+                minutes=interval['relay_reference']['relay_minutes'];factor=result['calibration']['coefficient_m3_per_relay_hour']
+                interval['empirical_estimate_m3']=factor*minutes/60 if result['calibration']['state']=='provisional' and factor is not None and minutes is not None else None
             response=jsonify(result);response.headers['Cache-Control']='no-store';return response
         except MeterError as error:return jsonify({'message':str(error)}),error.status
 
@@ -546,6 +550,9 @@ def register_heating_routes(manager, root=None):
         if hours not in (1,6,24):return jsonify({'error':'invalid_hours'}),400
         result=service.observer.status()
         result['energy_reference']=service.observer.energy_reference(hours)
+        result['gas_calibration']=service.gas_meter.calibration(service.observer.energy_reference_between)
+        calibration=result['gas_calibration'];minutes=result['energy_reference']['relay_minutes'];factor=calibration['coefficient_m3_per_relay_hour']
+        result['empirical_gas_estimate_m3']=factor*minutes/60 if calibration['state']=='provisional' and factor is not None and minutes is not None and result['energy_reference']['coverage_percent']>=95 else None
         response=jsonify(result);response.headers['Cache-Control']='no-store';return response
 
     @app.route('/api/heating/observer/history')

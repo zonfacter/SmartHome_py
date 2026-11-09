@@ -8,10 +8,50 @@ from types import SimpleNamespace
 import unittest
 from flask import Flask
 from modules.gateway.heating import register_heating_routes
-from modules.gateway.heating_gas_meter import GasMeter,MeterError,parse_reading
+from modules.gateway.heating_gas_meter import GasMeter,MeterError,parse_reading,fit_meter_calibration
 
 
 class GasMeterTests(unittest.TestCase):
+    def test_calibration_weights_independent_long_intervals_and_checks_a_later_block(self):
+        readings=[{'ts':t,'volume_m3':v} for t,v in ((1000,0),(64780,3.658),(76000,4.244),(78040,4.385),(78340,4.447),(78700,4.503))]
+        calls=[]
+        def reference(a,b):
+            calls.append((a,b));return {'relay_minutes':299.42 if a==1000 else 49.78,'coverage_percent':100}
+        result=fit_meter_calibration(readings,reference)
+        self.assertEqual(result['state'],'provisional');self.assertEqual(result['used_intervals'],2)
+        self.assertEqual(calls,[(1000,64780),(64780,76000)])
+        self.assertAlmostEqual(result['coefficient_m3_per_relay_hour'],4.244*60/349.2)
+        self.assertAlmostEqual(result['cross_check']['predicted_m3'],3.658/299.42*49.78)
+        self.assertEqual(result['pending_since'],76000)
+
+    def test_frequent_readings_are_combined_without_overlapping_training_data(self):
+        readings=[{'ts':1000+i*1200,'volume_m3':i*.2} for i in range(7)]
+        calls=[]
+        def reference(a,b):calls.append((a,b));return {'relay_minutes':30,'coverage_percent':100}
+        result=fit_meter_calibration(readings,reference)
+        self.assertEqual(calls,[(1000,4600),(4600,8200)])
+        self.assertAlmostEqual(result['coefficient_m3_per_relay_hour'],1.2)
+        self.assertEqual(result['total_relay_minutes'],60)
+
+    def test_gaps_and_inconsistent_gas_to_relay_ratios_do_not_enable_estimates(self):
+        readings=[{'ts':1000+i*3600,'volume_m3':v} for i,v in enumerate((0,.2,1))]
+        bad=fit_meter_calibration(readings,lambda a,b:{'relay_minutes':30,'coverage_percent':100})
+        self.assertEqual(bad['state'],'inconsistent');self.assertIsNone(bad['coefficient_m3_per_relay_hour'])
+        missing=fit_meter_calibration(readings,lambda a,b:{'relay_minutes':30,'coverage_percent':90})
+        self.assertEqual(missing['used_intervals'],0)
+        self.assertIsNone(missing['coefficient_m3_per_relay_hour'])
+        zero=fit_meter_calibration([{'ts':1000,'volume_m3':0},{'ts':4600,'volume_m3':0}],lambda a,b:{'relay_minutes':30,'coverage_percent':100})
+        self.assertEqual(zero['state'],'inconsistent')
+
+    def test_calibration_survives_restart_and_expired_relay_archive(self):
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'db';meter=GasMeter(path)
+            readings=[{'ts':1000+i*3600,'volume_m3':i*.5} for i in range(3)]
+            model=meter.calibration(lambda a,b:{'relay_minutes':30,'coverage_percent':100},readings)
+            saved=GasMeter(path).calibration(lambda a,b:{'relay_minutes':None,'coverage_percent':0},readings)
+            self.assertEqual(saved['state'],'historical')
+            self.assertEqual(model['coefficient_m3_per_relay_hour'],saved['coefficient_m3_per_relay_hour'])
+
     def test_decimal_precision_berlin_timestamp_and_optional_intervals(self):
         with tempfile.TemporaryDirectory() as root:
             path=Path(root)/'data.db';meter=GasMeter(path)

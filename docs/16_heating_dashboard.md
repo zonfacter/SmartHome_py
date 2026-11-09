@@ -8,6 +8,19 @@ ausgeliefert; für diese Ansicht werden keine CDN-Ressourcen benötigt.
 
 ## Einrichtung
 
+Die Gasabschätzung kann aus manuellen Zählerständen empirisch kalibriert werden.
+Zeitlich getrennte Messblöcke dauern mindestens eine Stunde, enthalten mindestens
+zehn beobachtete Relaisminuten und benötigen mindestens 95 Prozent Messabdeckung.
+Häufigere Ablesungen werden zu nicht überlappenden Blöcken zusammengefasst.
+Mindestens zwei Blöcke und insgesamt 60 Relaisminuten sind erforderlich; bei
+mehr als 25 Prozent Streuung der Faktoren wird keine gemeinsame Schätzung genutzt.
+Der Faktor ist Gesamt-Zähler-m³ geteilt durch die erfassten Relaisstunden und bleibt
+vorläufig. Der letzte lange Block wird außerdem mit dem zuvor bestimmten Faktor
+gegengeprüft. Das Ergebnis bleibt in `heating_gas_calibration` dauerhaft gespeichert.
+Fehlen später die Rohdaten, wird es als historisch angezeigt und nicht automatisch
+für neue Schätzungen verwendet. Flammenlaufzeit und kWh-Nennleistungsrichtwerte
+werden durch diesen Zählerabgleich nicht kalibriert. Heizungsparameter bleiben unberührt.
+
 Live-Aktualisierungen verwenden `heating_live.js`: Text und Attribute werden
 in bestehenden DOM-Knoten geändert. Kacheln, offene Details, Fokus, Auswahl und
 Scrollposition werden bei Hintergrundabfragen nicht neu erzeugt. Der kleine

@@ -27,6 +27,7 @@
         <p id="meter-feedback" class="meter-feedback" role="status" aria-live="polite"></p>
         <p class="diagnostic-note" id="meter-hint">Den vollständigen, kumulativen Zählerstand eingeben, einschließlich der Nachkommastellen. Unregelmäßige Ablesungen sind ausreichend. Zwischenwerte werden nicht erfunden. Der Zähler misst die Gesamtanlage; EG, OG und Warmwasser lassen sich daraus nicht einzeln messen.</p>
         <div class="meter-comparison" id="meter-comparison">Der erste Stützwert bildet die Ausgangsbasis. Erst eine weitere Ablesung ergibt einen gemessenen Verbrauch.</div>
+        <div class="meter-comparison" id="meter-calibration" aria-label="Kalibrierung der Gasabschätzung">Kalibrierung wird aus den Stützwerten ermittelt.</div>
         <div class="pump-event-scroll"><table class="pump-event-table"><caption>Gespeicherte Ablesungen · neueste zuerst</caption><thead><tr><th>Ablesezeitpunkt</th><th>Zählerstand</th><th>Seit vorheriger Ablesung</th></tr></thead><tbody id="meter-readings"><tr><td colspan="3">Stützwerte werden geladen.</td></tr></tbody></table></div>
       </section>
       {% include '_heating_observer.html' %}

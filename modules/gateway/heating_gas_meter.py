@@ -3,6 +3,8 @@ from contextlib import closing
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import re
+import math
+import json
 import sqlite3
 import time
 from zoneinfo import ZoneInfo
@@ -41,11 +43,59 @@ def parse_reading(body,now=None):
     return ts,units
 
 
+def fit_meter_calibration(readings,reference):
+    """Non-overlapping long meter intervals; no inference of flame-on time."""
+    ordered=sorted(readings,key=lambda r:r['ts']);blocks=[];anchor=ordered[0] if ordered else None
+    for reading in ordered[1:]:
+        seconds=reading['ts']-anchor['ts']
+        if seconds<3600:continue
+        ref=reference(anchor['ts'],reading['ts']);minutes=ref.get('relay_minutes');coverage=ref.get('coverage_percent',0)
+        delta=round(reading['volume_m3']-anchor['volume_m3'],3)
+        reason='Messabdeckung unter 95 %' if coverage<95 else 'Weniger als 10 Relaisminuten' if minutes is None or minutes<10 else None
+        rate=delta*60/minutes if reason is None and minutes>0 else None
+        blocks.append({'from':anchor['ts'],'to':reading['ts'],'hours':seconds/3600,'measured_m3':delta,
+                       'relay_minutes':minutes,'coverage_percent':coverage,'eligible':reason is None,
+                       'excluded_reason':reason,'m3_per_relay_hour':rate})
+        anchor=reading
+    used=[b for b in blocks if b['eligible']];total=sum(b['relay_minutes'] for b in used)
+    measured=sum(b['measured_m3'] for b in used);candidate=measured*60/total if total else None
+    rates=[b['m3_per_relay_hour'] for b in used]
+    spread=(max(rates)-min(rates))/candidate*100 if candidate and rates else None
+    inconsistent=bool(used) and (any(r<=0 or not math.isfinite(r) for r in rates) or spread is not None and spread>25)
+    state='inconsistent' if inconsistent else 'provisional' if len(used)>=2 and total>=60 else 'collecting'
+    factor=candidate if state=='provisional' else None;check=None
+    if len(used)>=2 and sum(b['relay_minutes'] for b in used[:-1])>0:
+        prior=sum(b['measured_m3'] for b in used[:-1])*60/sum(b['relay_minutes'] for b in used[:-1]);last=used[-1]
+        predicted=prior*last['relay_minutes']/60
+        check={'from':last['from'],'to':last['to'],'predicted_m3':predicted,'measured_m3':last['measured_m3'],
+               'relative_error_percent':abs(predicted-last['measured_m3'])/last['measured_m3']*100 if last['measured_m3']>0 else None}
+    return {'version':1,'state':state,'coefficient_m3_per_relay_hour':factor,'used_intervals':len(used),
+            'total_relay_minutes':total,'total_measured_m3':measured,'factor_spread_percent':spread,
+            'cross_check':check,'blocks':blocks,'minimum_interval_hours':1,'minimum_coverage_percent':95,
+            'pending_since':anchor['ts'] if anchor and ordered[-1]['ts']>anchor['ts'] else None,
+            'limits':'Vorläufiger empirischer Abgleich des Gesamtzählers mit K4/K5-Relaiszeiten. Keine Flammenlaufzeit, keine gemessene Brennerleistung, keine Aufteilung auf EG, OG oder Warmwasser.'}
+
+
 class GasMeter:
     def __init__(self,db_path):
         self.db_path=db_path
         with closing(sqlite3.connect(db_path,timeout=5)) as db,db:
             db.execute('CREATE TABLE IF NOT EXISTS heating_gas_readings(ts INTEGER PRIMARY KEY,volume_milli_m3 INTEGER NOT NULL CHECK(volume_milli_m3>=0),created_at INTEGER NOT NULL)')
+            db.execute('CREATE TABLE IF NOT EXISTS heating_gas_calibration(id INTEGER PRIMARY KEY CHECK(id=1),payload TEXT NOT NULL)')
+
+    def calibration(self,reference,readings=None):
+        result=fit_meter_calibration(self.summary()['readings'] if readings is None else readings,reference)
+        with closing(sqlite3.connect(self.db_path,timeout=5)) as db,db:
+            if result['state']=='provisional':
+                payload=json.dumps(result,allow_nan=False)
+                old=db.execute('SELECT payload FROM heating_gas_calibration WHERE id=1').fetchone()
+                if not old or old[0]!=payload:db.execute('INSERT OR REPLACE INTO heating_gas_calibration VALUES (1,?)',(payload,))
+            elif result['state']=='collecting' and any(b['coverage_percent']<95 for b in result['blocks']):
+                old=db.execute('SELECT payload FROM heating_gas_calibration WHERE id=1').fetchone()
+                if old:
+                    saved=json.loads(old[0]);saved.update(state='historical',current_blocks=result['blocks'])
+                    return saved
+        return result
 
     def add(self,body,now=None):
         ts,units=parse_reading(body,now)

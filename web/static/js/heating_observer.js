@@ -32,8 +32,11 @@ window.HeatingObserverView=(()=>{
       this.$('observer-last').textContent='Letzte Aufzeichnung '+time(d.last_sample);
       this.$('observer-runtime').textContent=number(energy.relay_minutes)+' min';
       this.$('observer-energy').textContent=number(energy.rated_input_reference_kwh_hi,2)+' kWh (Hi)';
-      this.$('observer-gas').textContent=number(energy.gas_equivalent_nm3,3)+' Nm³';
+      const empirical=typeof d.empirical_gas_estimate_m3==='number';
+      this.$('observer-gas-label').textContent=empirical?'Gasabschätzung · vorläufig kalibriert':'Gasäquivalent · Beispiel-Heizwert';
+      this.$('observer-gas').textContent=number(empirical?d.empirical_gas_estimate_m3:energy.gas_equivalent_nm3,3)+(empirical?' m³':' Nm³');
       this.$('observer-energy-note').textContent=`Nur im beobachteten Abschnitt: ${number(energy.coverage_percent)} % Abdeckung des ${this.hours}-h-Fensters. Nennleistungsrechnung, nicht gemessener Verbrauch. Keine Hochrechnung für Datenlücken.`;
+      if(empirical)this.$('observer-energy-note').textContent+=` Die Gasabschätzung nutzt ${number(d.gas_calibration.coefficient_m3_per_relay_hour,3)} Zähler-m³ je Relaisstunde aus ${d.gas_calibration.used_intervals} längeren Messintervallen. Vorläufig; Relaiszeit ist keine Flammenlaufzeit. Der kWh-Nennleistungsrichtwert ist davon unabhängig und bleibt unkalibriert.`;
       const reference=d.assumptions||{};
       this.$('observer-reference').textContent=`${reference.model||'Kesseltyp nicht hinterlegt'} · Belastung ${number(reference.rated_input_hi_kw)} kW (Hi), Wärmeleistung ${number(reference.rated_output_kw)} kW. Beispiel-Heizwert ${number(reference.assumed_hi_kwh_per_nm3)} kWh/Nm³, aktuelles Gas nicht vermessen. Volle Nennbelastung während jeder erfassten Relaisminute angenommen; Stufenleistung unbestätigt. Normvolumen, kein Gaszähler-/Abrechnungswert. Abgasverlust wird nicht als Nutzungsgrad verwendet.`;
       const note=!d.enabled?'Die Aufzeichnung ist deaktiviert.':d.error?'Aufzeichnung oder Lernen meldet '+d.error+'. Bestehende Reglerprogramme werden weiterhin eigenständig ausgeführt.':'Die VM zeichnet nach Dienststart auch ohne geöffneten Browser auf. Modelle werten frühestens drei Tage und 48 gültige Zeitfenster mit Heiz- und Abkühlphasen aus. Heizzeiten und Einstellungen werden nicht verändert.';
