@@ -68,6 +68,12 @@ def points():
         add(area,target,'changeover_source','Sommer-/Winterumschaltung','05000611','changeover_'+area,'',True)
         add(area,target,'quick_setback','Schnellabsenkungsfaktor · KON','050005FB','factor','',True)
         add(area,target,'remote_switch','Telefon-/Fernschaltkontakt','050004B8','boolean','')
+        add(area,target,'startup_boost','Raumsollwertüberhöhung · Schnellaufheizung','05000602',unit='K',slow=True)
+        add(area,target,'adaptation_zaf1','Adaptionsempfindlichkeit · ZAF1','0500060D','integer8','',True)
+        add(area,target,'adaptation_zaf2','Adaptionsempfindlichkeit · ZAF2','0500060E','integer8','',True)
+        add(area,target,'plant_type','Anlagentyp · Reglercode','05000067','code8','',True)
+        add(area,target,'clock_source','Uhrzeitquelle','0500006D','clock_source','',True)
+        add(area,target,'outside_source','Außentemperaturquelle · LPB','05000082','outside_source','',True)
         for key,label,command,kind in [
             ('space_request_raw','Heizungsanforderung · Rohdaten','210001F4','raw4'),
             ('producer_lock_raw','Erzeuger-Sperrsignal · Rohdaten','110001F7','raw2'),
@@ -109,6 +115,14 @@ def points():
     add('anlage',0,'dhw_program','Warmwasserprogramm','05000722','dhw_program','',True)
     add('anlage',0,'dhw_priority','Warmwasserpriorität','05000721','dhw_priority','',True)
     add('anlage',0,'dhw_charging','Warmwasser-Ladeart','0500071F','dhw_charging','',True)
+    add('anlage',0,'dhw_request_source','Warmwasser-Anforderungsart','0500071E','dhw_request_source','',True)
+    add('anlage',0,'dhw_dedicated','Warmwasser-Trennschaltung','05000727','boolean','',True)
+    add('anlage',0,'boiler_min_oem','Kesselminimum · OEM-Grenze','0500092D',slow=True)
+    add('anlage',0,'burner_type','Brennerart · Konfiguration','05000930','burner_type','',True)
+    add('anlage',0,'stage2_release_integral','Stufe 2 · Freigabeintegral','05000932','integral','K·min',True)
+    add('anlage',0,'stage2_reset_integral','Stufe 2 · Rückstellintegral','05000933','integral','K·min',True)
+    add('anlage',0,'chimney_sweep','Schornsteinfegerfunktion','05000925','boolean','')
+    add('anlage',0,'boiler_mode','Kesselbetriebsart · Einstellung','05000924','boiler_mode','',True)
     return tuple(result)
 
 
@@ -116,7 +130,8 @@ POINTS = points()
 WEEKDAYS = tuple(zip(('monday','tuesday','wednesday','thursday','friday','saturday','sunday'),
                     ('Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag')))
 TEXT_KINDS = frozenset(('mode','clock','relay_test','building','changeover_eg','changeover_og',
-                        'pump_function','dhw_program','dhw_priority','dhw_charging'))
+                        'pump_function','dhw_program','dhw_priority','dhw_charging',
+                        'dhw_request_source','burner_type','boiler_mode','clock_source','outside_source'))
 RELAY_KINDS = frozenset(f'relay{i}' for i in range(8))
 
 
@@ -181,6 +196,14 @@ def decode(point, payload):
         if len(payload) != int(kind[3:]):
             raise ValueError('truncated diagnostic block')
         return payload.hex(' ').upper()
+    if kind == 'outside_source':
+        # Exact K/M APW: a two-field block, NOT a scalar validity byte + value.
+        if len(payload) != 2:
+            raise ValueError('truncated outside-source block')
+        segment, device = payload
+        if segment > 14 or device > 16:
+            return 'Quelle nicht zugeordnet · ' + payload.hex(' ').upper()
+        return f'Segment S{segment} · Gerät G{device}' if device else f'Segment S{segment} · Gerät nicht angegeben'
     if kind in ('error_code','error_priority'):
         if len(payload) != 2:
             raise ValueError('truncated error block')
@@ -206,7 +229,7 @@ def decode(point, payload):
         if value not in (0, 255):
             raise ValueError('invalid contact')
         return value == 255
-    length = 3 if kind in ('temperature', 'counter') else 2
+    length = 3 if kind in ('temperature', 'counter', 'integral') else 2
     if len(payload) != length or payload[0] not in (0, 1):
         raise ValueError('invalid scalar layout')
     if kind == 'enable':
@@ -233,6 +256,12 @@ def decode(point, payload):
         'dhw_program':{0:'24 Stunden',1:'Lokales Heizprogramm',2:'Lokales Heizprogramm − 1 h',3:'System-Heizprogramm − 1 h'},
         'dhw_priority':{0:'Absolut',1:'Gleitend',2:'Parallel'},
         'dhw_charging':{0:'Ladepumpe',255:'Umschaltventil'},
+        # Legacy COzwValB uses 00/FF on the wire, not panel values 0/1.
+        'dhw_request_source':{0:'Speicherfühler',255:'Thermostat'},
+        'burner_type':{0:'Einstufig',255:'Zweistufig'},
+        'boiler_mode':{0:'Dauerbetrieb',255:'Automatik'},
+        'clock_source':{0:'Eigene Regleruhr',1:'LPB · ohne Ferneinstellung',
+                        2:'LPB · mit Ferneinstellung',3:'Zeitmaster am LPB'},
     }
     if kind in enums:
         return enums[kind].get(payload[1],f'Code {payload[1]}')
@@ -240,6 +269,15 @@ def decode(point, payload):
         return payload[1] / 2
     if kind in ('counter', 'minutes'):
         return int.from_bytes(payload[1:], 'big')
+    if kind == 'integral':
+        value = int.from_bytes(payload[1:], 'big', signed=True)
+        if not 0 <= value <= 500:
+            raise ValueError('invalid stage-two integral')
+        return value
+    if kind == 'integer8':
+        return int.from_bytes(payload[1:], 'big', signed=True)
+    if kind == 'code8':
+        return payload[1]
     if kind == 'factor':
         if payload[1] > 20:
             raise ValueError('invalid quick setback factor')

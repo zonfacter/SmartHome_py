@@ -16,6 +16,14 @@ SIGNALS = (
     ('status_level_raw', 'Betriebsniveau Verbraucher · VE', 'level', 2),
 )
 
+# Only these exact object/layout combinations are covered by the reference.
+# No propagation to producer-group 503/506, VM 505, EM request 501 or level 523.
+LPB_DEFINITION_SOURCE = {
+    'title': 'Brötje ISR MODBM · 7715040-06 (24.07.2019), Seiten 34–35',
+    'url': 'https://forum.iobroker.net/assets/uploads/files/1676708238143-7715040-06-24072019-montageanleitung-modbus-busmodul-isr-modbm.pdf',
+    'scope': 'LPB-Objektdefinition aus späterer Herstellerunterlage; Feldaufbau mit K/M-Profil abgeglichen. Keine unabhängige Bestätigung sämtlicher Wirkungen der alten Regler.',
+}
+
 
 def valid(metrics, key):
     item = metrics.get(key, {})
@@ -51,6 +59,32 @@ def split_signal(key, label, kind, size, item):
         if kind == 'percent':
             result['percent_field'] = result['value_field'] if 0 <= result['value_field'] <= 100 else None
     result['attribute_bits'] = [bit for bit in range(16 if kind == 'request' else 8) if attribute & (1 << bit)]
+    definition = {'space_request_raw': (500, 'request', 4),
+                  'transfer_lock_raw': (504, 'percent', 2),
+                  'forced_mixer_raw': (507, 'percent', 2)}.get(key)
+    if definition and (kind, size) == definition[1:]:
+        result['lpb_object'] = definition[0]
+        result['definition_source'] = LPB_DEFINITION_SOURCE
+        result['protocol_valid'] = bool(attribute & 1)
+        result['unknown_attribute_bits'] = [bit for bit in result['attribute_bits'] if bit > 1]
+        if kind == 'request':
+            result['transport_pump_requested'] = bool(attribute & 2) if attribute & 1 else None
+            result['interpretation'] = ('Nach LPB-Definition gültige Wärmeanforderung.' if attribute & 1 else
+                                        'Nach LPB-Definition keine gültige Wärmeanforderung; das Temperaturfeld allein ist kein Bedarf.')
+        else:
+            mandatory = bool(attribute & 2) if attribute & 1 else None
+            result['mandatory'] = mandatory
+            if not attribute & 1:
+                result['interpretation'] = 'Nach LPB-Definition kein gültiges ' + ('Reduktionssignal.' if definition[0] == 504 else 'Zwangssignal.')
+            elif result['percent_field'] is None:
+                result['interpretation'] = 'Gültigkeitsbit gesetzt; Prozentfeld außerhalb des dokumentierten Bereichs. Wirkung offen.'
+            elif definition[0] == 504:
+                result['interpretation'] = f'Nach LPB-Definition gültige Reduktionsanforderung: {result["percent_field"]} %' + (' · zwingend.' if mandatory else ' · nicht zwingend.')
+            else:
+                result['interpretation'] = (f'Nach LPB-Definition Zwang an alle Verbraucher: {result["percent_field"]} %.' if mandatory else
+                                            'Nach LPB-Definition nur Nachlauf angefordert; das Prozentfeld allein ist kein zwingender Prozentbefehl.')
+        # effective deliberately remains None: a protocol flag does not establish
+        # the physical effect or a unique pump switching cause.
     return result
 
 
@@ -105,10 +139,19 @@ def diagnose(area, metrics, plant, days, now):
     if pump and mode == 'Automatik':
         hints.append('Neben Heizbedarf sind Nachlauf und Schutzfunktionen mögliche Auslöser. Der Relaiskontakt allein unterscheidet diese Gründe nicht.')
     signals = [split_signal(key, label, kind, size, metrics[key]) for key, label, kind, size in SIGNALS if key in metrics]
+    for signal in signals:
+        if 'protocol_valid' not in signal:
+            continue
+        if signal['key'] == 'space_request_raw':
+            facts.append(signal['interpretation'])
+        elif signal['protocol_valid'] and signal.get('percent_field') is not None:
+            facts.append(signal['interpretation'])
+            if signal['key'] == 'transfer_lock_raw' and dhw and signal['percent_field'] > 0:
+                hints.append('Warmwasserladung und Reduktionssignal treten zusammen auf. Das passt zu einer Einschränkung der Raumheizung; die genaue Ursache und Wirkung auf Q1 sind noch nicht eindeutig belegt.')
     zero_locks = [s for s in signals if s['key'] in ('producer_lock_raw', 'transfer_lock_raw', 'mixing_lock_raw')
                   and s['quality'] == 'valid' and s.get('value_field') == 0 and s['attributes_hex'] == '0x00']
     if len(zero_locks) == 3:
-        facts.append('Alle drei gelesenen Sperrblöcke enthalten 00 00. Das bestätigt keine aktive Sperre; die Attributbedeutung bleibt offen.')
+        facts.append('Alle drei gelesenen Sperrblöcke enthalten 00 00. Das bestätigt keine aktive Sperre; die übrigen Attributbedeutungen bleiben offen.')
     signal_keys = {s[0] for s in SIGNALS}
     times = [m.get('updated_at') for k, m in metrics.items() if k in signal_keys or k in ('pump', 'mode', 'room_setpoint', 'clock')]
     times = [t for t in times if type(t) in (int, float)]

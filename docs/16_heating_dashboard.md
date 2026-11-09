@@ -8,6 +8,71 @@ ausgeliefert; für diese Ansicht werden keine CDN-Ressourcen benötigt.
 
 ## Einrichtung
 
+### Zusätzliche lesende Diagnosefelder (09.11.2026)
+
+20 weitere Felder ergänzen die laufende Erfassung (insgesamt 133). Die
+Warmwasser-Anforderungsart `anlage.dhw_request_source` (`0500071E`) und
+die Brennerart `anlage.burner_type` (`05000930`) werden zuerst in den
+Diagnosekarten angezeigt. Die alten COzwValB-Werte verwenden auf dem Bus
+`00`/`FF`, nicht die Bedienfeldcodes 0/1. Nicht zugeordnete Werte bleiben
+`Code n`; deaktivierte Skalare bleiben unverfügbar.
+
+Weitere Felder: Warmwasser-Trennschaltung, OEM-Kesselminimum,
+Stufe-2-Freigabe-/Rückstellintegral, Kesselbetriebsart, Schornsteinfegerfunktion
+sowie pro Regler Schnellaufheizungszuschlag, ZAF1/ZAF2, Anlagentyp,
+Zeitquelle und Außentemperaturlieferant. Integrale werden in K·min mit
+Skalierung 1 gelesen; sie sind weder Temperaturen noch feste Wartezeiten.
+Die Außentemperaturquelle `05000082` enthält zwei Blockfelder (Segment,
+Gerät), ohne vorangestelltes skalares Gültigkeitsbyte.
+
+Die Konfiguration "Zweistufig" beweist weder die tatsächliche Verdrahtung noch
+eine gemessene Stufenleistung. Verbrauchs- und Lernmodelle werden daraus nicht
+geändert. "Trennschaltung" ist eine Kaskadenfunktion, keine
+Zirkulationsabschaltung oder Warmwasser-Zuordnung zu Heizkreisen.
+
+Alle Felder erscheinen automatisch unter `0_userdata.0.heizung.<area>.<key>`
+mit `common.read=true`, `common.write=false` und `ack=true`. Ein Fehler oder
+ungültiger Wert erzeugt `null` mit Qualitätskennzeichen. Neue Einstellungen
+werden im langsamen Fünf-Minuten-Zyklus gelesen; die Schornsteinfegerfunktion
+wird als Zustand im schnellen Zyklus erfasst. Es gibt keine neue Schreibroute.
+
+### Begrenzte Interpretation von LPB-Attributen
+
+Die Brötje-Herstelleranleitung ISR MODBM, 7715040-06 vom 24.07.2019,
+Seiten 34–35, beschreibt LPB-Objekte 500, 504 und 507. Diese spätere Unterlage
+wird nur bei passenden Objekten und dem in den K/M-Profilen bestätigten
+Feldaufbau herangezogen:
+
+| Abgefragtes Objekt | Eingeordnete Bits | Grenze |
+| --- | --- | --- |
+| `210001F4`, Heizungsanforderung / 500 | Bit 0 gültig, Bit 1 Zubringerpumpe angefordert | Weitere Attribute nicht zugeordnet |
+| `150001F8`, Reduktionssignal EM / 504 | Bit 0 gültig, Bit 1 zwingende Reduktion | Prozentwert allein beweist keinen Pumpenstopp |
+| `150001FB`, Zwangssignal EM / 507 | Bit 0 gültig, Bit 1 Zwang an alle statt nur Nachlauf | Bei T=0 ist das Prozentfeld kein zwingender Prozentbefehl |
+
+Die Auswertung enthält Quelle, Anwendungsgrenze, `protocol_valid`,
+`unknown_attribute_bits` und gegebenenfalls `mandatory`. Sie erscheint in
+"Signalwerte & Attribute" und im bereits vorhandenen lesbaren ioBroker-JSON
+`<eg|og>.pump_diagnosis`. `effective` bleibt bewusst `null` und
+`cause_status=unresolved`: Die Dokumentation und ein zeitlicher Zusammenhang
+beweisen nicht jede Wirkung der alten Eurocontrol oder den einzigen Schaltgrund.
+Die Zuordnung wird nicht auf Erzeugergruppen-Sperre 503, VM-Sperre 505,
+Erzeugerzwang 506, EM-Anforderung 501 oder Betriebsniveau 523 übertragen.
+
+Ein lokaler Snapshot mit 1371 Änderungsaufzeichnungen enthält 305 OG-Einträge
+mit Reduktion `64 01`; in allen war Q3 Ein und die OG-Pumpe Aus. Im EG waren
+bei demselben Signal sowohl laufende als auch stehende Pumpenkontakte zu sehen.
+Diese Häufigkeiten sind Ereigniszahlen, keine Zeitanteile, unabhängigen Versuche
+oder Kausalitätsbelege. Es wurden für den Vergleich keine Reglerwerte verstellt.
+
+Quellen: passendes Siemens-Profil K `D0016682.apw` (OV200.4),
+M `D0017684.apw` (OV200.6), lesender Geräteabgleich und
+[Brötje ISR MODBM, S. 34–35](https://forum.iobroker.net/assets/uploads/files/1676708238143-7715040-06-24072019-montageanleitung-modbus-busmodul-isr-modbm.pdf).
+SHA256 der Herstelleranleitung:
+`84bc5e6043d481b06ca5872ff83aeec8d6e9a174e1c64da89c0ac4c9a41414be`.
+Ergänzende Funktionsbeschreibungen in
+[Siemens RVA63/53, S. 124 und 131](https://www.hansa-heiztechnik.de/UserFiles/file/Download/Altgeraete/Regler-RVA63.pdf)
+haben andere Bedienzeilennummern; die Objektzuordnung stammt aus dem K/M-Profil.
+
 Die Gasabschätzung kann aus manuellen Zählerständen empirisch kalibriert werden.
 Zeitlich getrennte Messblöcke dauern mindestens eine Stunde, enthalten mindestens
 zehn beobachtete Relaisminuten und benötigen mindestens 95 Prozent Messabdeckung.
