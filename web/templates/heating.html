@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#163d38">
   <title>Heizung · SmartHome</title>
-  <link rel="stylesheet" href="/static/css/heating.css?v=14">
+  <link rel="stylesheet" href="/static/css/heating.css?v=15">
   <script defer src="/static/js/heating_help.js?v=9"></script>
   <script defer src="/static/js/heating_schedule.js?v=7"></script>
   <script defer src="/static/js/heating_diagnostics.js?v=9"></script>
   <script defer src="/static/js/heating_pumps.js?v=7"></script>
   <script defer src="/static/js/heating_observer.js?v=14"></script>
-  <script defer src="/static/js/heating_dhw.js?v=13"></script>
+  <script defer src="/static/js/heating_dhw.js?v=15"></script>
   <script defer src="/static/js/heating.js?v=12"></script>
 </head>
 <body>
@@ -31,6 +31,9 @@
         <div class="panel-heading"><div><span class="eyebrow">200-LITER-SPEICHER · LANGZEITVERLAUF</span><h2 id="dhw-history-heading">Warmwassertemperatur</h2></div><div class="segmented" aria-label="Warmwasser-Zeitraum"><button type="button" class="selected" data-dhw-days="1" aria-pressed="true">24 Std.</button><button type="button" data-dhw-days="7" aria-pressed="false">7 Tage</button><button type="button" data-dhw-days="30" aria-pressed="false">30 Tage</button><button type="button" data-dhw-days="90" aria-pressed="false">90 Tage</button></div></div>
         <div class="observer-overview"><article><span>Zuletzt gemessen</span><strong id="dhw-history-latest">—</strong></article><article><span>Minimum im Zeitraum</span><strong id="dhw-history-min">—</strong></article><article><span>Maximum im Zeitraum</span><strong id="dhw-history-max">—</strong></article></div>
         <div class="chart-container" id="dhw-history-chart"></div><p class="diagnostic-note">Gemessene Speichertemperatur · bei Verdichtung Mittelwert mit Minimum–Maximum je Abschnitt. Details am Messpunkt.</p><p class="diagnostic-note" id="dhw-history-note">Gespeicherte Messwerte werden geladen.</p>
+        <h3 class="pump-history-heading">Wann schalten die Pumpen?</h3><div id="dhw-pump-chart" class="pump-history-chart"></div>
+        <p class="diagnostic-note">Grün: Relais ein · Grau: aus · Orange: mehrere Zustände / Wechsel · Schraffiert: unbekannt. Gleiche Zeitachse wie die Temperaturkurve. Abgetastete Relaiskontakte, keine Durchflussmessung; die ausgeschaltete Wilo-Zirkulationspumpe hat keine Rückmeldung.</p>
+        <details class="pump-switch-details"><summary>Zuletzt beobachtete Schaltwechsel</summary><div id="dhw-pump-events"></div><p class="diagnostic-note">Der Wechsel liegt zwischen den beiden angegebenen Ablesezeiten. Nach Messlücken wird kein Schaltzeitpunkt erfunden. Je Pumpe die letzten 20 Wechsel im gewählten Zeitraum.</p></details>
       </section>
       <div class="section-heading"><div><span class="eyebrow">GETRENNT GEREGELT</span><h2>Deine Heizkreise</h2></div><span class="muted small">Messwerte und Einstellungen · nur lesend</span></div>
       <section class="floor-grid" id="floor-grid" aria-label="Heizkreise"></section>

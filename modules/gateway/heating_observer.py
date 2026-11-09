@@ -338,7 +338,37 @@ class HeatingObserver:
         return {'days':days,'retention_days':90,'bucket_seconds':seconds,'samples':samples,
                 'first_sample':rows[0][0] if rows else None,'last_sample':last[0] if last else None,
                 'minimum':min(values) if values else None,'maximum':max(values) if values else None,'latest':latest,
-                'valid_samples':len(values),'source':'Gemessener Speicherfühler; ältere Anlagenhistorie bis 30 Tage, Beobachtungsarchiv bis 90 Tage. Keine rückwirkend erzeugten Werte.'}
+                'valid_samples':len(values),'pumps':self.pump_history(rows[0][0],rows[-1][0],now) if rows else [],
+                'source':'Gemessener Speicherfühler; ältere Anlagenhistorie bis 30 Tage, Beobachtungsarchiv bis 90 Tage. Keine rückwirkend erzeugten Werte.'}
+
+    def pump_history(self,start,end,now):
+        """Sampled relay intervals: preserve uncertainty at changes and across gaps."""
+        labels=(('eg','EG · Heizkreispumpe'),('og','OG · Heizkreispumpe'),('dhw','Warmwasser · Ladepumpe'))
+        if not self.enabled:return []
+        paths=('$.floors.eg.pump','$.floors.og.pump','$.plant.dhw_pump')
+        fields=[f"CASE WHEN json_extract(payload,'{p}.q')='valid' AND json_type(payload,'{p}.v') IN ('true','false') THEN json_extract(payload,'{p}.v') END" for p in paths]
+        with closing(sqlite3.connect(self.db_path,timeout=5)) as db:
+            rows=db.execute('SELECT ts,'+','.join(fields)+' FROM heating_observations WHERE ts>=? AND ts<=? ORDER BY ts',(start-180,end)).fetchall()
+        width=max(1,math.ceil(max(1,end-start)/720));tracks=[]
+        for column,(key,label) in enumerate(labels,1):
+            buckets=[{'from':t,'to':min(end,t+width),'on_seconds':0,'off_seconds':0,'switches':0} for t in range(start,end,width)]
+            events=[]
+            for a,b in zip(rows,rows[1:]):
+                if not 0<b[0]-a[0]<=180 or a[column] is None or b[column] is None:continue
+                left,right=max(start,a[0]),min(end,b[0])
+                if right<=left:continue
+                if a[column]!=b[column]:
+                    events.append({'from':a[0],'to':b[0],'state':bool(b[column])})
+                    if buckets:buckets[min(len(buckets)-1,max(0,(b[0]-start)//width))]['switches']+=1
+                    continue
+                while left<right:
+                    bucket=buckets[(left-start)//width];stop=min(right,bucket['to'])
+                    bucket['on_seconds' if a[column] else 'off_seconds']+=stop-left;left=stop
+            for bucket in buckets:bucket['unknown_seconds']=bucket['to']-bucket['from']-bucket['on_seconds']-bucket['off_seconds']
+            latest=rows[-1] if rows else None
+            state=bool(latest[column]) if latest and latest[column] is not None and 0<=now-latest[0]<=180 else None
+            tracks.append({'key':key,'label':label,'state':state,'buckets':buckets,'switch_count':len(events),'events':events[-20:]})
+        return tracks
 
     def energy_reference_between(self,start,end):
         with closing(sqlite3.connect(self.db_path,timeout=5)) as db:

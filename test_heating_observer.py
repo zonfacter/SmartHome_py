@@ -185,5 +185,33 @@ class ObserverTests(unittest.TestCase):
                 register_heating_routes(SimpleNamespace(app=Flask(__name__)),root)
                 start.assert_called_once()
 
+    def test_pump_history_preserves_switch_intervals_and_does_not_bridge_gaps(self):
+        with tempfile.TemporaryDirectory() as root:
+            observer=HeatingObserver(root,Path(root)/'data.db',{'enabled':True})
+            for ts,pump in ((1000,False),(1060,False),(1120,True),(1180,True),(2000,False),(2060,False)):
+                snapshot=fixture();snapshot['floors']['eg']['metrics']['pump']=item(pump)
+                snapshot['plant']['dhw_pump']=item(True,'stale')
+                observer.record(snapshot,ts,False)
+            tracks={t['key']:t for t in observer.pump_history(1000,2060,2060)}
+            eg=tracks['eg'];self.assertEqual(eg['events'],[{'from':1060,'to':1120,'state':True}])
+            self.assertIs(eg['state'],False)
+            self.assertEqual(sum(b['on_seconds'] for b in eg['buckets']),60)
+            self.assertEqual(sum(b['off_seconds'] for b in eg['buckets']),120)
+            self.assertEqual(sum(b['unknown_seconds'] for b in eg['buckets']),880)
+            self.assertTrue(all(b['on_seconds']==b['off_seconds']==0 for b in tracks['dhw']['buckets']))
+            self.assertIsNone(tracks['dhw']['state'])
+            self.assertTrue(all(t['state'] is None for t in observer.pump_history(1000,2060,3000)))
+            self.assertTrue(all(len(t['buckets'])<=720 for t in tracks.values()))
+
+    def test_pump_history_rejects_numeric_boolean_and_clips_at_range_start(self):
+        with tempfile.TemporaryDirectory() as root:
+            observer=HeatingObserver(root,Path(root)/'data.db',{'enabled':True})
+            for ts,value in ((1000,False),(1060,False),(1120,1),(1180,True)):
+                snapshot=fixture();snapshot['floors']['eg']['metrics']['pump']=item(value)
+                observer.record(snapshot,ts,False)
+            eg=observer.pump_history(1030,1180,1180)[0]
+            self.assertEqual(sum(b['off_seconds'] for b in eg['buckets']),30)
+            self.assertEqual(eg['events'],[])
+
 
 if __name__=='__main__':unittest.main()

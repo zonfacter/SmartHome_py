@@ -398,6 +398,17 @@ Verdichtungsabschnitt bleiben Lücken. Alle Daten bleiben lokal auf der VM.
 ### Warmwasser-Langzeitverlauf
 
 Die eigene Karte `#warmwasser-verlauf` zeigt den gemessenen Speicherfühler für
+denselben Zeitraum wie drei zusätzliche Relais-Schaltspuren (EG Q1, OG Q1 und
+Warmwasser-Ladekontakt Q3). Gespeicherte Beobachtungen liefern die Kontakte;
+es gibt keine rückwirkend erfundenen Pumpenzustände und keine Wilo-Rückmeldung.
+Die Schaltliste nennt für jeden Wechsel das Intervall zwischen zwei Ablesungen
+(maximal 180 Sekunden Abstand), keinen vermeintlich exakten Schaltzeitpunkt.
+Ungültige Werte, Messlücken und das eigentliche Wechselintervall bleiben
+unbekannt. Die Spuren enthalten höchstens 720 Zeitabschnitte je Kontakt,
+mit Ein-/Aus-/unbekannten Sekunden und Wechselzähler; die letzten 20 Wechsel
+pro Kontakt werden zusätzlich aufgelistet. Diese Ergänzung ist rein lesend.
+
+Der Temperaturverlauf ist wählbar für
 24 Stunden, 7, 30 oder 90 Tage. `GET /api/heating/observer/dhw-history?days=1|7|30|90`
 liefert höchstens 720 Zeitabschnitte mit Mittelwert, Minimum, Maximum und Anzahl.
 Ältere tatsächlich gemessene Anlagenhistorie (bis 30 Tage) wird bis zum Beginn
