@@ -51,6 +51,8 @@ def observation(snapshot):
     result={'schema':VERSION,'floors':{area:compact(snapshot['floors'][area]['metrics'],FLOOR_KEYS) for area in ('eg','og')},
             'plant':compact(snapshot['plant'],PLANT_KEYS),'rooms':rooms,
             'sources':{'lpb_connected':bool(snapshot.get('connection',{}).get('connected')),'tado_connected':bool(connected)}}
+    if snapshot.get('external_sensors'):
+        result['external_sensors']=deepcopy(snapshot['external_sensors'])
     if not result['sources']['lpb_connected']:
         for metrics in [result['plant'],*result['floors'].values()]:
             for item in metrics.values():

@@ -1,0 +1,88 @@
+{
+  "channels": [
+    {
+      "key": "sensor_1",
+      "tag": "S1",
+      "label": "Fühler 1 · Zuordnung offen",
+      "role": "unknown",
+      "hardware_id": "",
+      "state_id": "",
+      "timestamp_id": "",
+      "availability_id": "",
+      "availability_value": true,
+      "max_age_seconds": 60
+    },
+    {
+      "key": "sensor_2",
+      "tag": "S2",
+      "label": "Fühler 2 · Zuordnung offen",
+      "role": "unknown",
+      "hardware_id": "",
+      "state_id": "",
+      "timestamp_id": "",
+      "availability_id": "",
+      "availability_value": true,
+      "max_age_seconds": 60
+    },
+    {
+      "key": "sensor_3",
+      "tag": "S3",
+      "label": "Fühler 3 · Zuordnung offen",
+      "role": "unknown",
+      "hardware_id": "",
+      "state_id": "",
+      "timestamp_id": "",
+      "availability_id": "",
+      "availability_value": true,
+      "max_age_seconds": 60
+    },
+    {
+      "key": "sensor_4",
+      "tag": "S4",
+      "label": "Fühler 4 · Zuordnung offen",
+      "role": "unknown",
+      "hardware_id": "",
+      "state_id": "",
+      "timestamp_id": "",
+      "availability_id": "",
+      "availability_value": true,
+      "max_age_seconds": 60
+    },
+    {
+      "key": "sensor_5",
+      "tag": "S5",
+      "label": "Fühler 5 · Zuordnung offen",
+      "role": "unknown",
+      "hardware_id": "",
+      "state_id": "",
+      "timestamp_id": "",
+      "availability_id": "",
+      "availability_value": true,
+      "max_age_seconds": 60
+    },
+    {
+      "key": "sensor_6",
+      "tag": "S6",
+      "label": "Fühler 6 · Zuordnung offen",
+      "role": "unknown",
+      "hardware_id": "",
+      "state_id": "",
+      "timestamp_id": "",
+      "availability_id": "",
+      "availability_value": true,
+      "max_age_seconds": 60
+    },
+    {
+      "key": "sensor_7",
+      "tag": "S7",
+      "label": "Fühler 7 · Zuordnung offen",
+      "role": "unknown",
+      "hardware_id": "",
+      "state_id": "",
+      "timestamp_id": "",
+      "availability_id": "",
+      "availability_value": true,
+      "max_age_seconds": 60
+    }
+  ]
+}

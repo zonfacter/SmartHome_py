@@ -36,6 +36,7 @@ Diese Dokumentation ist die **verbindliche aktive Doku ab v4.8.0**.
 - `15_error_recovery_actions.md`
 - `16_frontend_performance.md`
 - [Heizungsdashboard, LPB-Diagnose, Zeitprogramme und Lernübersicht](16_heating_dashboard.md)
+- [Anlagenplan, externe Fühler und Verlustdiagnose](17_heating_instrumentation.md)
 - `17_milestone_status.md`
 - `ADR/README.md`
 

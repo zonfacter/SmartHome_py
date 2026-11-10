@@ -20,6 +20,8 @@ from .heating_pumps import diagnose, event_payload, fingerprint
 from .heating_observer import HeatingObserver, numeric
 from .heating_gas_meter import GasMeter, MeterError
 from .heating_windows import TADO_SUFFIXES, observe as observe_window, refresh as refresh_window
+from .heating_instrumentation import Instrumentation
+from .heating_setup_routes import register_setup_routes
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +126,7 @@ class HeatingService:
         self.schedule_writer = ScheduleWriter(self.root, self.config, self.fetch, self._send_schedule, self.bus_lock, self._update_schedule_cache)
         self.observer = HeatingObserver(self.root,self.db_path)
         self.gas_meter = GasMeter(self.db_path)
+        self.instrumentation = Instrumentation(self.db_path,self.config.get('iobroker_url'),IoBroker,self.snapshot)
 
     @staticmethod
     def _empty(point):
@@ -148,6 +151,7 @@ class HeatingService:
             self.last_schedule=0
 
     def start(self):
+        self.instrumentation.start()
         with self.lock:
             if self.enabled and self.thread is None:
                 self.thread = threading.Thread(target=self._run, name='heating-cache', daemon=True)
@@ -155,6 +159,7 @@ class HeatingService:
 
     def stop(self):
         self.stop_event.set()
+        self.instrumentation.stop()
 
     def _run(self):
         while not self.stop_event.is_set():
@@ -299,6 +304,7 @@ class HeatingService:
                                for area, name, model in [('eg', 'Erdgeschoss', 'Eurocontrol M'), ('og', 'Obergeschoss', 'Eurocontrol K')]},
                     'plant': {k.split('.')[1]: v for k, v in metrics.items() if k.startswith('anlage.')},
                     'rooms': rooms, 'schedules': schedules}
+            result['external_sensors'] = self.instrumentation.snapshot() if hasattr(self,'instrumentation') else None
             for area,floor in result['floors'].items():
                 floor['pump_diagnosis']=diagnose(area,floor['metrics'],result['plant'],schedules[area],now)
             return result
@@ -501,6 +507,7 @@ class HeatingService:
 def register_heating_routes(manager, root=None):
     app = manager.app
     service = HeatingService(root or os.getcwd())
+    register_setup_routes(app,service)
 
     @app.route('/heizung')
     def heating_page():
