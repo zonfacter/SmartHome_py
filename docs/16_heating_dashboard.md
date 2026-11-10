@@ -238,6 +238,60 @@ Objekte fremder Integrationen werden nicht übernommen. Neue Objekte tragen
 `native.managed_by=smarthome-heating`.
 
 Die ioBroker-Anbindung sendet keine Stellbefehle, Tado-Schreibzugriffe oder Raumfühlereinspeisung.
+
+### Fensterzustände für das Beobachtungsmodell
+
+Die Aufzeichnung enthält ab Schema 2 je Raum `window` mit Zustand, Qualität,
+Quelle und Zeitbezug. Tado-Erkennung, Pausenbeginn/-ende und verbleibende
+Pausenzeit werden ausschließlich gelesen. Eine frische positive Erkennung
+schließt ein Lernfenster aus. `false`, `null` oder ein abgelaufener Timer
+bestätigen dagegen kein physisch geschlossenes Fenster.
+
+Belastbare Geschlossen-Zustände kommen aus ausdrücklich zugeordneten Kontakten
+in der privaten `config/heating.json`, zum Beispiel:
+
+```json
+"window_contacts": {
+  "tado.0.example.Rooms.1": [
+    {
+      "id": "zigbee.0.example.opened",
+      "open_value": true,
+      "availability_id": "zigbee.0.example.available",
+      "max_age_seconds": 86400
+    }
+  ]
+}
+```
+
+Die IDs sind Platzhalter. Bei einem `contact`-Datenpunkt, dessen `true` für
+geschlossen steht, muss `open_value` ausdrücklich `false` sein. Alle Fenster
+eines Raums müssen zugeordnet werden. Kontakte werden nicht allein aufgrund
+ähnlicher Namen automatisch verbunden. Die Zuordnung ist eine Änderung der
+Beobachterkonfiguration und schreibt keine Zustände an Zigbee oder Tado.
+
+Jeder Kontakt benötigt einen bestätigten booleschen Wert, einen gültigen
+Zeitstempel und eine passende Datenqualität. Das Standard-Höchstalter beträgt
+24 Stunden, individuell einstellbar zwischen einer Minute und sieben Tagen.
+Ein konfigurierter Verfügbarkeitsdatenpunkt muss zusätzlich frisch und `true`
+sein. Ereignisgetriebene Sensoren sollten entsprechend ihrer tatsächlichen
+Meldeweise geprüft werden; ein alter Wert wird nicht durch erneutes Lesen
+künstlich frisch. Nicht verfügbare, unbekannte oder zu alte Quellen bleiben
+unbekannt. Ein bestätigtes offenes Fenster genügt zum Ausschluss; für die
+Geschlossen-Bestätigung müssen alle zugeordneten Kontakte belastbar geschlossen
+sein. Nach dem letzten Kontaktwechsel werden 15 Minuten Erholung ausgespart.
+
+EG-/OG-Trainingsfenster werden über alle enthaltenen Beobachtungen einschließlich
+der Endpunkte geprüft. Ein kurzes Öffnen bleibt auch bei Fünf-Minuten-Verdichtung
+als Ausschluss erhalten. Alte Raumdaten ohne Fensterbeleg bleiben gespeichert,
+werden aber nicht für die neuen Raummodelle verwendet. Bereits gespeicherte
+Raummodelle ohne diese Filterversion werden bis zur erneuten Auswertung nicht
+als validiert ausgegeben. Das Warmwassermodell und seine Datenbasis bleiben
+unverändert. Die Lernübersicht zeigt Zustand und Ausschlusszahlen je Raum.
+
+Ohne passende Kontakte kann dadurch das Raumtraining pausieren, obwohl weiter
+Temperaturen aufgezeichnet werden. Das ist eine sichtbare Datenlücke und kein
+Grund, abgelaufene Tado-Pausen als geschlossene Fenster zu behandeln. Es gibt
+keine neue Stell-, Sollwert- oder Thermostat-Schreibfunktion.
 Der aktuelle Brennerstartzähler ist keine Energiemessung. Daten- und Status-API:
 `GET /api/heating/state`, `GET /api/heating/history?hours=1|6|24`.
 

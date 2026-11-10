@@ -5,6 +5,7 @@
   "poll_seconds": 30,
   "room_floors": {},
   "room_names": {},
+  "window_contacts": {},
   "schedule_writes_enabled": false,
   "bsb_mac": "00:00:00:00:00:00"
 }

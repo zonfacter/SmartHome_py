@@ -23,6 +23,7 @@ def fixture():
             'plant':{'dhw':item(50),'boiler':item(55),'dhw_pump':item(False),'burner':item(False),'burner_stage2':item(False)},
             'rooms':[{'id':'tado.0.test.Rooms.1','name':'Living','floor':'eg','type':'HEATING','temperature':20,
                       'setpoint':21,'humidity':45,'demand':0,'quality':{'temperature':'valid','setpoint':'valid','humidity':'valid','demand':'valid'},
+                      'window':{'state':'closed','quality':'valid','source':'contact','updated_at':0,'valid_until':1e12,'eligible_after':0,'training_allowed':True},
                       'timestamp':1,'stale':False}],
             'connection':{'connected':True},'iobroker':{'connected':True,'tado_connected':True}}
 

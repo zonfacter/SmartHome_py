@@ -6,6 +6,14 @@ window.HeatingObserverView=(()=>{
   const state={collecting:'Sammelt Daten',validated:'Modell geprüft',partly_validated:'Teilweise geprüft',not_validated:'Weitere Beobachtung nötig',record_only:'Nur Aufzeichnung'};
   const progress=model=>model.state==='validated'?100:Math.round(100*Math.min(1,(model.pairs||0)/48,(model.days||0)/3,(model.span_hours||0)/48,(model.heated_pairs||0)/6,(model.cooling_pairs||0)/6));
   const progressView=model=>`<div class="learning-progress"><progress max="100" value="${progress(model)}" aria-label="Datengrundlage ${progress(model)} Prozent"></progress><small>${model.pairs||0}/48 Zeitfenster · ${model.days||0}/3 Tage · ${number(model.span_hours||0)}/48 Std.<br>${model.heated_pairs||0}/6 Heizfenster · ${model.cooling_pairs||0}/6 Abkühlfenster</small></div>`;
+  const windowView=(window,filter={})=>{
+    const valid=window?.quality==='valid',state=valid&&(window.state==='open'||window.source==='contact')?window.state:'unknown';
+    const label=state==='open'?'Fenster offen · aktuell vom Lernen ausgeschlossen':state==='closed'?
+      window.training_allowed===true?'Fenster geschlossen · Trainingsfreigabe':'Fenster geschlossen · Erholungsphase':
+      'Fensterzustand unbekannt · aktuell vom Lernen ausgeschlossen';
+    const count=key=>Number.isFinite(filter[key])&&filter[key]>=0?Math.floor(filter[key]):0;
+    return `<small class="learning-window-status">${label}<br>Ausgesparte Zeitfenster: ${count('excluded_open')} Lüftung · ${count('excluded_unknown')} unbekannt · ${count('excluded_recovery')} Erholung</small>`;
+  };
   class View{
     constructor(container){
       this.container=container;this.data=null;this.samples=[];this.sequence=0;this.hours=24;
@@ -39,12 +47,12 @@ window.HeatingObserverView=(()=>{
       if(empirical)this.$('observer-energy-note').textContent+=` Die Gasabschätzung nutzt ${number(d.gas_calibration.coefficient_m3_per_relay_hour,3)} Zähler-m³ je Relaisstunde aus ${d.gas_calibration.used_intervals} längeren Messintervallen. Vorläufig; Relaiszeit ist keine Flammenlaufzeit. Der kWh-Nennleistungsrichtwert ist davon unabhängig und bleibt unkalibriert.`;
       const reference=d.assumptions||{};
       this.$('observer-reference').textContent=`${reference.model||'Kesseltyp nicht hinterlegt'} · Belastung ${number(reference.rated_input_hi_kw)} kW (Hi), Wärmeleistung ${number(reference.rated_output_kw)} kW. Beispiel-Heizwert ${number(reference.assumed_hi_kwh_per_nm3)} kWh/Nm³, aktuelles Gas nicht vermessen. Volle Nennbelastung während jeder erfassten Relaisminute angenommen; Stufenleistung unbestätigt. Normvolumen, kein Gaszähler-/Abrechnungswert. Abgasverlust wird nicht als Nutzungsgrad verwendet.`;
-      const note=!d.enabled?'Die Aufzeichnung ist deaktiviert.':d.error?'Aufzeichnung oder Lernen meldet '+d.error+'. Bestehende Reglerprogramme werden weiterhin eigenständig ausgeführt.':'Die VM zeichnet nach Dienststart auch ohne geöffneten Browser auf. Modelle werten frühestens drei Tage und 48 gültige Zeitfenster mit Heiz- und Abkühlphasen aus. Heizzeiten und Einstellungen werden nicht verändert.';
+      const note=!d.enabled?'Die Aufzeichnung ist deaktiviert.':d.error?'Aufzeichnung oder Lernen meldet '+d.error+'. Bestehende Reglerprogramme werden weiterhin eigenständig ausgeführt.':'Die VM zeichnet nach Dienststart auch ohne geöffneten Browser auf. Raummodelle lernen nur bei bestätigten geschlossenen Fenstern; Lüftung, unbekannte Zustände und 15 Minuten Erholung werden ausgespart. Ältere Raumdaten ohne Fensterbeleg bleiben im Verlauf, gehen aber nicht mehr ins Training ein. Mindestbasis: drei Tage und 48 gültige Zeitfenster. Heizzeiten und Einstellungen werden nicht verändert.';
       this.$('observer-note').textContent=note;
       HeatingLive.update(this.$('observer-models'),['eg','og','dhw'].map(area=>{
         const m=d.models[area],rooms=m.rooms||[];
         const title=area==='eg'?'EG · Fußbodenheizung':area==='og'?'OG · Heizkörper':'Warmwasser · '+(m.tank_litres||'—')+' Liter';
-        return `<article class="observer-model"><div class="diagnostic-heading"><h3>${title}</h3><span class="diagnostic-status ${m.state==='validated'?'ok':''}">${state[m.state]||'Sammelt Daten'}</span></div><p>${esc(m.input_note||'')}</p>${rooms.length?rooms.map(r=>`<div class="observer-model-row"><strong>${esc(r.name)}</strong><span>${state[r.state]||'Sammelt Daten'}${r.pairs!==undefined?' · '+r.pairs+' Zeitfenster':''}</span>${r.state!=='record_only'?progressView(r):''}<small>${esc(r.reason||'')}${r.validation_mae_c!==undefined?' Prüfabweichung: '+number(r.validation_mae_c,3)+' °C; Vergleich: '+number(r.persistence_mae_c,3)+' °C.':''}</small></div>`).join(''):`<div class="observer-model-row"><strong>${number(m.pairs||0,0)} gültige Zeitfenster</strong>${progressView(m)}<small>${esc(m.reason||'Raumdaten werden gesammelt.')}${m.validation_mae_c!==undefined?' Prüfabweichung: '+number(m.validation_mae_c,3)+' °C.':''}</small></div>`}</article>`;
+        return `<article class="observer-model"><div class="diagnostic-heading"><h3>${title}</h3><span class="diagnostic-status ${m.state==='validated'?'ok':''}">${state[m.state]||'Sammelt Daten'}</span></div><p>${esc(m.input_note||'')}</p>${rooms.length?rooms.map(r=>`<div class="observer-model-row"><strong>${esc(r.name)}</strong><span>${state[r.state]||'Sammelt Daten'}${r.pairs!==undefined?' · '+r.pairs+' Zeitfenster':''}</span>${r.state!=='record_only'?progressView(r)+windowView((d.rooms||[]).find(x=>x.id===r.id)?.window||r.window,r.window_filter):''}<small>${esc(r.reason||'')}${r.validation_mae_c!==undefined?' Prüfabweichung: '+number(r.validation_mae_c,3)+' °C; Vergleich: '+number(r.persistence_mae_c,3)+' °C.':''}</small></div>`).join(''):`<div class="observer-model-row"><strong>${number(m.pairs||0,0)} gültige Zeitfenster</strong>${progressView(m)}<small>${esc(m.reason||'Raumdaten werden gesammelt.')}${m.validation_mae_c!==undefined?' Prüfabweichung: '+number(m.validation_mae_c,3)+' °C.':''}</small></div>`}</article>`;
       }).join(''));
       this.rooms();this.chart();
     }
@@ -80,5 +88,5 @@ window.HeatingObserverView=(()=>{
       HeatingLive.update(this.$('observer-chart'),svg+'</svg>');
     }
   }
-  return {View,progress};
+  return {View,progress,windowView};
 })();

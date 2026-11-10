@@ -69,6 +69,11 @@ EG, OG und Warmwasser, Aufzeichnungsabdeckung, Raumkennungen und eine unkalibrie
 Nennleistungs-/Gasäquivalentrechnung. `mode:"observe"` und `can_control:false`
 sind fest. `observer/history?hours=1|6|24` liefert höchstens 360 Beobachtungen mit
 Tado-Ist-/Sollwerten, Feuchte, Heizbedarf, Quellenzeitpunkten und Datenqualität.
+Ab Beobachtungsschema 2 enthält jeder Raum `window` mit Zustand, Qualität,
+Quelle und Trainingsfreigabe. EG-/OG-Modelle liefern `window_policy` sowie je
+Raum `window_filter` mit Ausschlusszahlen. Nur belastbar geschlossene Kontakte
+geben Raum-Lernfenster frei; Tado-Timeouts bestätigen keine Schließung. Alte
+Raumdaten bleiben im Verlauf und werden ohne Fensterbeleg nicht neu trainiert.
 `observer/dhw-history?days=1|7|30|90` liefert den gemessenen Warmwasserverlauf
 in maximal 720 Abschnitten mit Mittelwert, Minimum, Maximum und Datenlücken.
 Die Routen lesen ausschließlich die lokale Datenbank; es gibt keine POST-Route.

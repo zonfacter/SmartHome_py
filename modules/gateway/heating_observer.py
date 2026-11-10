@@ -1,13 +1,15 @@
 """Local recording and thermal response learning. No bus, network or actuator API."""
 from contextlib import closing
+from copy import deepcopy
 import json
 import math
 from pathlib import Path
 import sqlite3
 import threading
 import time
+from .heating_windows import WINDOW_POLICY, exclusion as window_exclusion, refresh as refresh_window
 
-VERSION = 1
+VERSION = 2
 FLOOR_KEYS = ('pump','mode','flow_actual','flow_setpoint','room_setpoint','outside','outside_composite',
               'nominal','reduced','curve','parallel','flow_min','flow_max','room_influence','adaptation','quick_setback')
 PLANT_KEYS = ('boiler','dhw','dhw_setpoint','dhw_pump','burner','burner_stage2','burner_hours','starts')
@@ -44,7 +46,8 @@ def observation(snapshot):
                       'type':room.get('type'),'temperature':room.get('temperature'),
                       'setpoint':room.get('setpoint'),'humidity':room.get('humidity'),'demand':room.get('demand'),
                       'power':room.get('power'),'ac_power':room.get('ac_power'),'quality':quality,'timestamps':room.get('timestamps',{}),
-                      'timestamp':room.get('timestamp')})
+                      'timestamp':room.get('timestamp'),
+                      'window':refresh_window(room.get('window'),connected=bool(connected))})
     result={'schema':VERSION,'floors':{area:compact(snapshot['floors'][area]['metrics'],FLOOR_KEYS) for area in ('eg','og')},
             'plant':compact(snapshot['plant'],PLANT_KEYS),'rooms':rooms,
             'sources':{'lpb_connected':bool(snapshot.get('connection',{}).get('connected')),'tado_connected':bool(connected)}}
@@ -109,7 +112,7 @@ def learn(pairs, names):
     return result
 
 
-def thermal_pairs(records, area, room_id=None):
+def thermal_pairs(records, area, room_id=None, window_filter=None):
     """Nonoverlapping 15–30 minute windows; exclude gaps and invalid endpoints."""
     pairs=[];start=0
     def temperature(row):
@@ -123,6 +126,15 @@ def thermal_pairs(records, area, room_id=None):
         group=records[start:end+1];a,b=group[0],group[-1];start=end
         seconds=b['ts']-a['ts']
         if seconds>1800 or any(y['ts']-x['ts']>420 for x,y in zip(group,group[1:])):continue
+        if area != 'dhw':
+            reasons = [window_exclusion(next((r for r in row['data']['rooms'] if r['id']==room_id),{}).get('window'), row['ts'])
+                       for row in group]
+            reason = next((r for r in ('open','unknown','recovery') if r in reasons), None)
+            if window_filter is not None:
+                window_filter['candidate_windows'] = window_filter.get('candidate_windows',0)+1
+                key = 'excluded_'+reason if reason else 'closed_windows'
+                window_filter[key] = window_filter.get(key,0)+1
+            if reason:continue
         temps=[temperature(r) for r in group]
         if not all(numeric(t) for t in temps):continue
         t=temps[0];hours=seconds/3600
@@ -162,11 +174,18 @@ def fit_models(records,tank_litres=None):
             if room.get('type')!='HEATING':
                 rooms.append({'id':room['id'],'name':room['name'],'state':'record_only',
                               'reason':'Klima-/unbekannter Gerätetyp: nur Aufzeichnung, kein Gas-Heizmodell.'});continue
-            pairs=thermal_pairs(records,area,room['id'])
-            rooms.append({'id':room['id'],'name':room['name'],**learn(pairs,['drift_c_per_h','outside_delta','heat_proxy'])})
+            window_filter = {'policy':WINDOW_POLICY,'candidate_windows':0,'excluded_open':0,'excluded_unknown':0,'excluded_recovery':0,'closed_windows':0}
+            pairs=thermal_pairs(records,area,room['id'],window_filter)
+            model = learn(pairs,['drift_c_per_h','outside_delta','heat_proxy'])
+            if not pairs and window_filter['candidate_windows']:
+                model['reason'] = ('Lüftungsphasen sind vom Training ausgeschlossen.' if window_filter['excluded_open'] else
+                                   'Für das Raumtraining fehlen belastbare Geschlossen-Zustände der Fenster.' if window_filter['excluded_unknown'] else
+                                   'Nach dem Fensterschließen wird zunächst eine Erholungsphase ausgespart.')
+            rooms.append({'id':room['id'],'name':room['name'],**model,
+                          'window':deepcopy(room.get('window',{})),'window_filter':window_filter})
         eligible=[r for r in rooms if r['state']!='record_only'];validated=sum(r['state']=='validated' for r in eligible)
         group_state='validated' if eligible and validated==len(eligible) else 'partly_validated' if validated else 'collecting'
-        models[area]={'state':group_state,'rooms':rooms,
+        models[area]={'state':group_state,'rooms':rooms,'window_policy':WINDOW_POLICY,
                       'input_note':'EG: Vorlauf; OG: Kesseltemperatur als Versorgungsproxy, jeweils mit Q1 und Tado-Heizbedarf gewichtet. Kein gemessener Wärmestrom; Fremdwärme kann das Ergebnis beeinflussen.'}
     models['dhw']={**learn(thermal_pairs(records,'dhw'),['drift_c_per_h','ambient_proxy_delta','charge_proxy']),
                    'input_note':'Speicherfühler und Q3; angenommene Umgebung 20 °C, keine Zapfmengenmessung. Keine hygienische Bewertung.',
@@ -205,10 +224,13 @@ def runtime_reference(samples,hours,now,reference,max_gap=180):
 
 def merge_bucket(records):
     """Keep the last value, but preserve any invalid input within a reduced bucket."""
-    entries=[r['data'] for r in records];data=entries[-1]
+    entries=[r['data'] for r in records];data=deepcopy(entries[-1])
     if len(records)>1:
         for room in data['rooms']:
             source=[next((r for r in e['rooms'] if r['id']==room['id']),{}) for e in entries]
+            reasons = {window_exclusion(r.get('window'), row['ts']) for r,row in zip(source,records)}
+            room['window'] = deepcopy(room.get('window',{}))
+            room['window']['excluded_in_bucket'] = sorted(reason for reason in reasons if reason)
             for field in ('temperature','setpoint','humidity','demand'):
                 if any(r.get('quality',{}).get(field)!='valid' for r in source):
                     room[field]=None;room['quality'][field]='unavailable'
@@ -234,6 +256,8 @@ class HeatingObserver:
                 db.execute('CREATE TABLE IF NOT EXISTS heating_learning(area TEXT PRIMARY KEY,ts INTEGER NOT NULL,payload TEXT NOT NULL)')
                 row=db.execute('SELECT MAX(ts) FROM heating_observations').fetchone();self.last_record=row[0] or 0
                 row=db.execute('SELECT MAX(ts) FROM heating_learning').fetchone();self.last_fit=row[0] or 0
+                models=db.execute("SELECT payload FROM heating_learning WHERE area IN ('eg','og')").fetchall()
+                if any(json.loads(row[0]).get('window_policy') != WINDOW_POLICY for row in models):self.last_fit=0
 
     def record(self,snapshot,now=None,schedule_training=True):
         if not self.enabled:return False
@@ -281,11 +305,20 @@ class HeatingObserver:
         with closing(sqlite3.connect(self.db_path,timeout=5)) as db:
             count,first,last=db.execute('SELECT COUNT(*),MIN(ts),MAX(ts) FROM heating_observations').fetchone()
             models=db.execute('SELECT area,ts,payload FROM heating_learning').fetchall()
-            latest=db.execute('SELECT payload FROM heating_observations ORDER BY ts DESC LIMIT 1').fetchone()
+            latest=db.execute('SELECT ts,payload FROM heating_observations ORDER BY ts DESC LIMIT 1').fetchone()
         result.update(sample_count=count,first_sample=first,last_sample=last,span_hours=round((last-first)/3600,2) if count else 0,
                       trained_at=max((r[1] for r in models),default=None))
-        for area,ts,payload in models:result['models'][area]=json.loads(payload)
-        result['rooms']=json.loads(latest[0])['rooms'] if latest else []
+        latest_records=[{'ts':latest[0],'data':json.loads(latest[1])}] if latest else []
+        current_defaults=fit_models(latest_records,self.config.get('plant_reference',{}).get('dhw_tank_litres'))
+        result['training_update_required']=False
+        for area,ts,payload in models:
+            model=json.loads(payload)
+            if area in ('eg','og') and model.get('window_policy') != WINDOW_POLICY:
+                model=current_defaults[area];result['training_update_required']=True
+            result['models'][area]=model
+        result['rooms']=json.loads(latest[1])['rooms'] if latest else []
+        for room in result['rooms']:
+            room['window']=refresh_window(room.get('window'),connected=bool(last and time.time()-last<=180))
         return result
 
     def history(self,hours):

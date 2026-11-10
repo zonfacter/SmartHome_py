@@ -19,6 +19,7 @@ from .heating_statistics import summarize
 from .heating_pumps import diagnose, event_payload, fingerprint
 from .heating_observer import HeatingObserver, numeric
 from .heating_gas_meter import GasMeter, MeterError
+from .heating_windows import TADO_SUFFIXES, observe as observe_window, refresh as refresh_window
 
 logger = logging.getLogger(__name__)
 
@@ -289,6 +290,7 @@ class HeatingService:
                         day['quality']='stale'
             for room in rooms:
                 room['stale'] = not self.io_status.get('tado_connected') or now - room.get('timestamp', 0) > 900
+                room['window'] = refresh_window(room.get('window'), now, self.io_status.get('connected', False))
             result = {'enabled': self.enabled, 'read_only': not self.schedule_writer.enabled, 'server_time': now,
                     'schedule_control': {'enabled': self.schedule_writer.enabled, 'recovery_required': bool(self.schedule_writer.pending)},
                     'connection': deepcopy(self.connection), 'iobroker': deepcopy(self.io_status),
@@ -313,8 +315,19 @@ class HeatingService:
             tado_connected = any(v.get('val') is True for v in connection.values()) and any(v.get('val') is True for v in alive.values())
             readings = {}
             for suffix in ('sensorDataPoints.insideTemperature.celsius', 'sensorDataPoints.humidity.percentage', 'setting.temperature.celsius', 'name',
-                           'activityDataPoints.heatingPower.percentage','type','setting.power','activityDataPoints.acPower.value'):
+                           'activityDataPoints.heatingPower.percentage','type','setting.power','activityDataPoints.acPower.value',*TADO_SUFFIXES):
                 readings.update(bridge.call('getStates', 'tado.*.Rooms.*.' + suffix) or {})
+            mappings = self.config.get('window_contacts', {})
+            mappings = mappings if isinstance(mappings, dict) else {}
+            contact_states = {}
+            for contacts in mappings.values():
+                if not isinstance(contacts, list):continue
+                for contact in contacts:
+                    if not isinstance(contact, dict):continue
+                    for field in ('id','availability_id'):
+                        key = contact.get(field)
+                        if isinstance(key, str) and key and key not in contact_states:
+                            contact_states[key] = bridge.call('getState', key) or {}
             names = self.config.get('room_names', {})
             floors = self.config.get('room_floors', {})
             rooms = []
@@ -339,7 +352,9 @@ class HeatingService:
                     source=readings.get(prefix+'.'+suffix,{})
                     values[key],quality[key]=tado_number(source,low,high)
                     timestamps[key]=source.get('ts',0)/1000 if numeric(source.get('ts')) else None
-                rooms.append({'id':prefix,'name':str(name),'floor':floor,**values,'quality':quality,'timestamps':timestamps,
+                window = observe_window({key:readings.get(prefix+'.'+key,{}) for key in TADO_SUFFIXES},
+                                        mappings.get(prefix), contact_states)
+                rooms.append({'id':prefix,'name':str(name),'floor':floor,**values,'quality':quality,'timestamps':timestamps,'window':window,
                               'type':readings.get(prefix+'.type',{}).get('val'),
                               'power':readings.get(prefix+'.setting.power',{}).get('val'),
                               'ac_power':readings.get(prefix+'.activityDataPoints.acPower.value',{}).get('val'),
