@@ -1,0 +1,24 @@
+<!doctype html><html lang="de"><meta charset="utf-8"><title>Live-Aktualisierung · Regression</title>
+<h1>Live-Aktualisierung prüfen</h1><ol id="results"></ol><div id="fixture"></div>
+<script src="/static/js/heating_live.js"></script><script>
+const results=document.getElementById('results'),fixture=document.getElementById('fixture');let failures=0;
+function check(name,condition){const row=document.createElement('li');row.textContent=(condition?'PASS: ':'FAIL: ')+name;row.style.color=condition?'green':'red';results.append(row);if(!condition)failures++;}
+const html=value=>`<article data-live-key="eg"><h2>EG</h2><span>${value}</span><details data-pump-detail="eg-signals"><summary>Signale</summary><p>Lesbarer Text bleibt stehen</p></details><button>Details</button><input value="original"></article><article data-live-key="og"><h2>OG</h2></article>`;
+HeatingLive.update(fixture,html('28,8'));
+const card=fixture.firstElementChild,button=card.querySelector('button'),details=card.querySelector('details'),input=card.querySelector('input');
+let clicks=0;button.addEventListener('click',()=>clicks++);details.open=true;input.value='Benutzereingabe';input.focus();input.setSelectionRange(2,6);
+HeatingLive.update(fixture,html('28,9'));
+check('Kachel und Bedienelemente behalten ihre DOM-Identität',fixture.firstElementChild===card&&card.querySelector('button')===button);
+check('Geöffnete Details bleiben geöffnet',details.open&&card.querySelector('details')===details);
+check('Fokus und Eingabe bleiben erhalten',document.activeElement===input&&input.value==='Benutzereingabe'&&input.selectionStart===2&&input.selectionEnd===6);
+const text=details.querySelector('p').firstChild;const selection=getSelection(),range=document.createRange();range.setStart(text,0);range.setEnd(text,8);selection.removeAllRanges();selection.addRange(range);
+HeatingLive.update(fixture,html('29,0'));
+check('Textauswahl bleibt erhalten',selection.toString()==='Lesbarer');button.click();check('Ereignisbehandlung bleibt einmalig erhalten',clicks===1);
+check('Messwert wird trotzdem aktualisiert',card.querySelector('span').textContent==='29,0');
+const og=fixture.lastElementChild;HeatingLive.update(fixture,'<article data-live-key="og"><h2>OG aktualisiert</h2></article><article data-live-key="eg"><h2>EG</h2></article>');
+check('Geänderte Reihenfolge verwendet dieselben Kacheln',fixture.firstElementChild===og&&fixture.lastElementChild===card);
+HeatingLive.update(fixture,'<svg><g><text>30</text><path d="M0 0 L1 1"/></g></svg>');const svg=fixture.firstElementChild;
+HeatingLive.update(fixture,'<svg><g><text>31</text><path d="M0 0 L2 2"/></g></svg>');
+check('Diagramme behalten SVG-Namensraum und Identität',fixture.firstElementChild===svg&&svg.namespaceURI==='http://www.w3.org/2000/svg'&&svg.querySelector('text').textContent==='31');
+document.body.dataset.testResult=failures?'failed':'passed';fixture.hidden=true;
+</script></html>

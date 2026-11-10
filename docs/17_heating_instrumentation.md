@@ -1,0 +1,76 @@
+# Anlagenplan, externe Temperaturfühler und Verlustdiagnose
+
+Die Seite `/heizung/anlagenplan` ergänzt die externe SmartHome-Anwendung. Sie verändert keine BSB-LAN-Firmware und sendet weder LPB- noch Thermostat- oder Pumpenbefehle.
+
+## 2D-Anlagenplan
+
+Die Zeichenfläche beginnt leer. Die durchsuchbare Bibliothek zeigt die Schaltsymbole direkt als Vorschau: Kessel, Speicher mit Heizwendel, Heizungs-/Ladepumpe, Trinkwasser-Zirkulationspumpe, Absperrventil, Rückschlagventil, Dreiwegemischer, Heizkörper, Fußbodenheizkreis, Verteiler, Rohrknoten, Temperaturfühler, Beschriftung, Membran-Ausdehnungsgefäß, Wärmetauscher, separate VL-/RL-Anschlüsse, Sicherheitsventil, Entlüfter und Füll-/Entleeranschluss.
+
+Bauteile lassen sich verschieben, drehen, beschriften und mit Notizen versehen. Zum Verbinden den Leitungsmodus wählen und zwei beschriftete Anschlüsse anklicken. Neue Bauteile haben funktionsbezogene Ports: VL/RL an Kessel und Heizkreisen, zwei Anschlüsse an Pumpen und Ventilen, A/B/AB am Dreiwegemischer und WW/KW/Z sowie Lade-VL/Lade-RL am Speicher. Die Heizwendel ist grafisch vom Trinkwasser getrennt. Anschlusspositionen sind schematisch, keine Hersteller-Montagepositionen.
+
+Leitungen folgen verschobenen oder gedrehten Bauteilen. Im Eigenschaftenbereich lassen sich Leitungstyp, optionaler Richtungspfeil und zusätzliche Knicke festlegen; Knickpunkte sind verschiebbar. Vorlauf, Rücklauf, Warmwasser, Zirkulation und Kaltwasser haben getrennte Darstellungen. Ein Rohrbogen an einer Kreuzung kennzeichnet eine Überführung ohne Verbindung. Für Abzweige ausdrücklich einen Rohrknoten setzen und die Leitungen an dessen Anschlüsse führen. Farben und Pfeile dokumentieren die geplante Zuordnung und stellen keine gemessene Temperatur oder Fließrichtung dar.
+
+Planformat 2 speichert `port_layout` an Bauteilen und optional die dokumentierte Richtung `flow` an Leitungen. Format 1 und vorhandene Browserentwürfe bleiben lesbar: Alte Bauteile behalten ihre bisherigen vier Anschlusspositionen und verbundenen Leitungen. Neue Bauteile verwenden die beschrifteten Anschlüsse. Ein alter Port wird nicht automatisch zu VL, RL oder Trinkwasser umgedeutet.
+
+Die SVG-Symbole sind eigene Zeichnungen, orientiert an der [Bosch-Symbollegende auf Seite 45](https://bosch-ch-de.boschhc-documents.com/download/file/file/6721892050.pdf#page=45) und der [Caleffi-Leitungslegende](https://www.caleffi.com/en-us/blog/summary-and-appendix-0). Die Anwendung prüft Anschlüsse und Zeichnungsdaten, zertifiziert aber keine Hydraulik oder Installation.
+
+Rückgängig/Wiederholen, Zoom, Verschieben der Ansicht und „Alles anzeigen“ erleichtern die Bearbeitung. Die Pfeiltasten bewegen ein ausgewähltes Bauteil; Entf entfernt es samt angeschlossenen Leitungen. JSON-Export/-Import erlaubt eine lokale Sicherung und spätere Weiterbearbeitung; SVG-Export erstellt eine eigenständige Grafik. Im Browser wird ein ungespeicherter Entwurf gesichert und beim nächsten Laden zur Wiederherstellung angeboten. Der serverseitige Plan wird erst über **Plan speichern** geschrieben. Eine Versionsnummer verhindert das stille Überschreiben eines neueren Plans aus einem zweiten Browser.
+
+Der Plan ist ein vom Betreiber dokumentiertes Schema. Die Diagnose leitet daraus keine automatisch als bestätigt geltende Anlagenhydraulik ab.
+
+## Sieben neutrale Messkanäle
+
+Sieben Kanäle `sensor_1` bis `sensor_7` sind vorbereitet. Sie beginnen neutral mit „Zuordnung offen“ und ohne ioBroker-ID. Die Kanalnummer ist keine bestätigte Rohrfunktion. Im Plan werden diese Kanäle als S1–S7 markiert. Eindeutige Hardwareadressen können zusätzlich hinterlegt werden, damit die Identität auch bei einer späteren Umbenennung nachvollziehbar bleibt.
+
+Unter **Messstellen & Verlauf → ioBroker-IDs und Messstellen einrichten** können konkrete Temperatur-IDs, optional eine Messzeit-ID und eine Online-ID eingetragen werden. Datenpunkte werden ausschließlich über `getState` gelesen. Keine Objekte oder Zustände der Quelle werden geschrieben. Es werden keine MQTT-Kommandos versendet. Aufgabe und Beschriftung im ESP werden durch die Anwendung nicht automatisch geändert.
+
+Die Funktion wird separat ausdrücklich zugeordnet: Speicherlade-Vorlauf, Speicherlade-Rücklauf, Kesselvorlauf, Kesselrücklauf, OG-Vorlauf, OG-Rücklauf, EG-Rücklauf, Trinkwasser-Zirkulationsrücklauf oder Heizungsraumluft. Jede bestätigte Funktion darf nur einmal vergeben sein. Ein gemeinsamer Kesselrücklauf ist ausdrücklich **kein** bestätigter Rücklauf der Speicher-Heizwendel und ersetzt diesen nicht in der Ladeleitungs-Diagnose. Ohne bestätigte Funktion bleibt ein Kanal im Verlauf, wird aber nicht als eine bestimmte Rohrleitung interpretiert. Beim Identifizieren mit einem kontrollierten Temperaturreiz eine **Fühleridentifikation** als Versuchsnotiz erfassen. Temperaturverläufe und bestehende Namen liefern Hinweise, ersetzen jedoch keine physische Zuordnung.
+
+### Optionale ioBroker-Weiterleitung
+
+`tools/iobroker_temperature_bridge.js` bietet eine getrennt installierbare Hilfsfunktion für bis zu sieben ausdrücklich konfigurierte MQTT-Temperaturquellen. Sie wird nicht vom Webserver installiert oder ausgeführt. Beim Einrichten müssen die echten Quell- und Ziel-IDs privat ergänzt werden. Der vorhandene ioBroker-Schutz des Webservers wird dafür nicht erweitert.
+
+Im JavaScript-Adapter die Funktion mit `startTemperatureBridge({on, getStateAsync, setStateAsync, log}, mappings)` aufrufen. Jedes Mapping hat `source` und `target`; Ziele sind auf `0_userdata.0.Heizung.Temp.Temp_…` beschränkt. Vor dem Aktivieren bestehende Kopierskripte prüfen und sichern, um konkurrierende Schreiber zu vermeiden. Die Hilfsfunktion abonniert jede Aktualisierung (`change: 'any'`, einschließlich Fehlerqualität), übernimmt Bestätigung, Qualität und den ursprünglichen Quellzeitpunkt und liest beim Start einmal den vorhandenen Zustand. Gleiche Temperaturwerte dürfen den Messzeitpunkt aktualisieren; ein Neustart darf dagegen alte Werte nicht verjüngen. Ein verspäteter Startwert überschreibt keine neuere Messung. Fehlende/ungültige Zustände werden ungültig markiert. Es gibt keine periodische Neuerzeugung unveränderter Quellwerte und keine Rückschreibung an MQTT, Regler oder Thermostate.
+
+Referenz: [ioBroker JavaScript-Adapter: Ereignisabonnements und bestätigte Zustände](https://github.com/ioBroker/ioBroker.javascript/blob/master/docs/en/javascript.md). Ein einmaliges `setTimeout` ersetzt kein Messwertabonnement. Nach Installation müssen tatsächliche Ziel-Zeitstempel, Bestätigung und Qualität gegen die Quelle geprüft werden; erst danach die Webanwendung auf die neuen IDs umstellen.
+
+Das Beispiel `config/heating_instrumentation.example.json` zeigt die Datenstruktur für die Konfigurations-API; diese Datei wird nicht automatisch eingelesen. Die tatsächliche Zuordnung liegt privat in der SQLite-Datenbank. Reale IDs und Hardwareadressen gehören nicht in öffentliche Beispiele.
+
+## Messzeit, Qualität und Aufzeichnung
+
+Der separate Hintergrundleser fragt eingerichtete Kanäle ungefähr alle zehn Sekunden ab, unabhängig vom LPB-Polling und ohne offenen Browser. Lange Netzwerkantworten können das Raster verlängern. Ohne eingerichtete IDs gibt es keine Quellenabfragen und keine künstlich erzeugte Sensorhistorie.
+
+Temperaturen müssen endliche Zahlen in °C sein. Zeichenketten, boolesche Werte, Fehlerqualität, unbestätigte Zustände, ungültige Zeiten und veraltete Daten werden nicht als gültige Messungen gespeichert. Das Standardgültigkeitsalter beträgt 60 Sekunden und ist zwischen 20 und 3600 Sekunden einstellbar. Messzeit-IDs akzeptieren Unix-Sekunden, Unix-Millisekunden oder ISO-Zeit mit ausdrücklicher Zeitzone. Ohne zusätzliche Zeit-ID gilt der ioBroker-Zustandszeitpunkt; die Datenquelle muss diesen mit tatsächlichen Messungen aktualisieren. Ein erneut zugestellter alter MQTT-Retain-Wert darf nicht dadurch als aktuelle physische Messung gelten.
+
+Eine Online-ID darf boolesch oder textuell sein; der erwartete Wert wird ausdrücklich konfiguriert, beispielsweise `Connected`. MQTT-LWT ist ein gespeicherter Sitzungszustand und benötigt keinen periodisch erneuerten Zeitstempel. Die Temperaturmessung benötigt dennoch einen frischen Messzeitpunkt. Ein abweichender LWT-Zustand sperrt die Messung.
+
+Die Sensorhistorie bleibt bis zu 90 Tage lokal erhalten. Darstellung: 1/6/24 Stunden sowie 7/30/90 Tage. Für längere Verläufe aggregiert SQLite auf höchstens etwa 720 Zeitraster; Minima und Maxima bleiben enthalten, unvollständige Raster werden nicht mit einer erfundenen Mittelwertkurve überbrückt. Die hochauflösende Rohaufzeichnung kann bei durchgängigem Betrieb erheblichen Datenbankplatz benötigen; eine Verkleinerung der Grafik löscht keine Rohmessungen.
+
+Speicher- und Kesseltemperatur sowie Pumpenrelais werden als bereits vorhandener LPB-Kontext mit ihrem ursprünglichen Zeitstempel mitgeführt. Das erzeugt keine zusätzlichen Busabfragen. Ein zehn Sekunden alter Sensorpunkt macht den langsameren LPB-Kontext nicht zu einer neuen unabhängigen Messung. Kontext älter als 90 Sekunden oder mit unterbrochener Busverbindung wird ungültig.
+
+Die reguläre Minuten-Beobachtung enthält außerdem den aktuellen Stand der externen Fühler. Die bestehende thermische Regression wird dadurch nicht automatisch um ungeprüfte Koeffizienten erweitert und darf weiter nicht steuern.
+
+## Verlustdiagnose und Versuchsnotizen
+
+Die separate Diagnose gruppiert etwa zehnminütige, nicht überlappende Beobachtungsfenster nach EG-/OG-Relaisstatus, gemeldeter Zirkulationshahnstellung, Entnahmeangabe und 5-K-Band der Speichertemperatur. Sie benötigt gültigen Speicherfühler, Pumpenkontext und ausdrücklich zugeordnete, gültige Fühler für Lade-Vorlauf und Lade-Rücklauf. Pumpenwechsel, Speicherladungen, Lücken, gemeldete Entnahmen und manuelle Pumpen-/Fühlertests werden ausgespart. Eine geänderte Quell- oder Funktionszuordnung verbindet nicht stillschweigend unterschiedliche Messstellen.
+
+Starke Abkühlungen bleiben hier sichtbar; sie werden nicht automatisch als Zapfung verworfen. Nicht dokumentierte Entnahmen bleiben **unbekannt**, auch wenn kein Ereignis eingetragen wurde. „Keine Entnahme“ gilt nur für einen ausdrücklich gemeldeten, das gesamte Fenster abdeckenden Zeitraum. Eine zugleich gemeldete Entnahme hat Vorrang. Hahnstellungen gelten ab ihrem gemeldeten Zeitpunkt bis zur nächsten Meldung. Ein Hahnwechsel innerhalb des Fensters wird nicht einem konstanten Zustand zugeordnet. Die Zeiten werden ausdrücklich als Europe/Berlin behandelt; mehrdeutige bzw. fehlende Zeiten während einer Zeitumstellung werden abgelehnt.
+
+Die Tabelle zeigt Median des Abkühltrends am Speicherfühler, Ladeleitungs-Temperaturdifferenz, Kessel-minus-Speicher und die weiteren zugeordneten Fühlermittel. Positive Abkühltrends bedeuten sinkende Fühlertemperatur; negative bedeuten Erwärmung. Die Gruppen sind keine unabhängigen kontrollierten Versuche. Unterschiedliche Kesseltemperaturen, Ladehistorie, Wärmebedarf, Umgebung und unbekannte Entnahmen können das Ergebnis beeinflussen.
+
+Aus Pumpenrelais und Rohrtemperaturen folgen **keine gemessene Durchflussmenge, keine bestätigte Strömungsrichtung, keine Wärmeleistung und keine Gasersparnis**. Eine vermutete ungewollte Durchströmung bleibt ein Diagnosehinweis. Der Verrohrungsplan und zusätzliche Messungen erleichtern die Prüfung durch eine sachkundige Person.
+
+## Schnittstellen und Speicherung
+
+- `GET /api/heating/instrumentation`: aktuelle Messqualität, Originalmesszeiten, konfigurierte und identifizierte Kanäle.
+- `GET|PUT /api/heating/instrumentation/config`: sieben Messstellen; PUT mit `{revision,data:{channels:[...]}}`.
+- `GET /api/heating/instrumentation/history?hours=24`: Historie (1, 6, 24, 168, 720, 2160 Stunden).
+- `GET /api/heating/instrumentation/diagnosis?hours=24`: beschreibende Verlustdiagnose, maximal sieben Tage.
+- `GET|POST /api/heating/instrumentation/notes`: Betreiberangaben; keine Stellbefehle.
+- `GET|PUT /api/heating/piping-plan`: versioniertes, validiertes Schema mit Knoten und Leitungen.
+
+Lokale Änderungen benötigen JSON und `X-Heating-Setup: 1`; ein fremder Browser-Origin wird abgelehnt. Größenlimits, Schema-Prüfung und Versionskonflikte schützen vor beschädigten oder überschriebenen Plänen. Texte werden als Texte behandelt und im SVG/HTML maskiert; importiertes SVG/HTML oder beliebige ausführbare URLs werden nicht übernommen.
+
+Zusätzliche Tabellen in der bestehenden privaten `config/heating_history.db`: `heating_setup`, `heating_sensor_samples` und `heating_experiment_notes`. Die vorhandenen Reglerkonfigurationen und Wochenprogramme werden nicht verändert. Vor Installation erfolgt eine Sicherung der bestehenden Datenbank und der geänderten Quelldateien.
+
+Die Erweiterung gehört zur externen SmartHome-Anwendung, nicht zur BSB-LAN-Firmware. Umsetzung durch @zonfacter mit KI-Unterstützung; keine automatische Veröffentlichung beim Originalprojekt.

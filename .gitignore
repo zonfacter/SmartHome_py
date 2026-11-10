@@ -16,6 +16,10 @@ node_modules/
 config/system_logs.db
 config/ring_events.db
 config/cache/
+config/heating.json
+config/heating_observer.json
+config/heating_history.db
+config/heating_history.db-*
 *.log
 web/static/hls/
 
@@ -25,3 +29,5 @@ Thumbs.db
 
 # Environment
 .env
+
+/config/heating_schedule_transactions/

@@ -447,12 +447,17 @@ class WebManager(BaseModule):
 
         self._register_routes()
 
+        from modules.gateway.heating import register_heating_routes
+        self.heating_service = register_heating_routes(self, base_dir)
+
     def _is_protected_control_request(self) -> bool:
         """Definiert, welche Endpunkte Authentifizierung erzwingen."""
         path = str(getattr(request, 'path', '') or '')
         method = str(getattr(request, 'method', 'GET') or 'GET').upper()
 
         if path.startswith('/api/admin'):
+            return True
+        if path.startswith('/api/heating/schedule/') and method not in ('GET', 'HEAD', 'OPTIONS'):
             return True
 
         protected_exact = {
@@ -5143,6 +5148,9 @@ class WebManager(BaseModule):
     def shutdown(self):
         self.running = False
         self._stop_ring_event_monitor()
+
+        if getattr(self, 'heating_service', None):
+            self.heating_service.stop()
 
         # ⭐ v4.6.0: Stop Variable Polling
         if self.data_gateway:

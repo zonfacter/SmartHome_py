@@ -1,0 +1,23 @@
+  <svg class="svg-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+    <symbol id="house" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/><path d="M9 21v-8h6v8"/></symbol>
+    <symbol id="heat" viewBox="0 0 24 24"><path d="M8 3c-4 4 4 5 0 9M16 3c-4 4 4 5 0 9M3 16h18M5 16v5M10 16v5M15 16v5M20 16v5"/></symbol>
+    <symbol id="drop" viewBox="0 0 24 24"><path d="M12 3S5 11 5 15a7 7 0 0 0 14 0c0-4-7-12-7-12Z"/><path d="M8 15a4 4 0 0 0 4 4"/></symbol>
+    <symbol id="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></symbol>
+    <symbol id="flame" viewBox="0 0 24 24"><path d="M13 2c1 6-4 6-3 10 1-2 3-2 4-4 6 6 5 13-2 13-9 0-10-8-5-13 0 3 1 4 2 4-2-5 4-6 4-10Z"/></symbol>
+    <symbol id="refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.2 7A7 7 0 0 1 20 12M4 12a7 7 0 0 0 13.8 5"/></symbol>
+    <symbol id="arrow" viewBox="0 0 24 24"><path d="m10 6-6 6 6 6M4 12h16"/></symbol>
+    <symbol id="chart" viewBox="0 0 24 24"><path d="M4 3v17h17M7 14l4-5 4 3 5-7"/></symbol>
+    <symbol id="link" viewBox="0 0 24 24"><path d="m10 13 4-4M8 16l-2 2a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0M16 8l2-2a4 4 0 0 1 6 6l-5 5a4 4 0 0 1-6 0" transform="translate(2 0) scale(.85)"/></symbol>
+  </defs></svg>
+  <aside class="sidebar">
+    <a class="brand" href="/"><span class="brand-icon"><svg><use href="#house"/></svg></span><span>SmartHome<small>DEIN ZUHAUSE. VERBUNDEN.</small></span></a>
+    <div class="nav-label">WOHNEN & ENERGIE</div>
+    <a class="back-link" href="/"><svg><use href="#arrow"/></svg> SmartHome öffnen</a>
+    {% if learning_page or setup_page %}<a class="nav-item" data-view="overview" href="/heizung"><svg><use href="#heat"/></svg> Heizungsübersicht</a>{% else %}<button class="nav-item active" data-view="overview"><svg><use href="#heat"/></svg> Heizungsübersicht</button>{% endif %}
+    <a class="nav-item learning-nav{% if learning_page %} active{% endif %}" href="/heizung/lernen" aria-label="Machine Learning"{% if learning_page %} aria-current="page"{% endif %}><span class="floor-mark">ML</span><span class="nav-copy">Machine Learning</span></a>
+    <a class="nav-item{% if setup_page %} active{% endif %}" href="/heizung/anlagenplan"{% if setup_page %} aria-current="page"{% endif %}><span class="floor-mark">2D</span><span class="nav-copy">Anlagenplan & Sensoren</span></a>
+    <div class="nav-label floor-label">DEINE HEIZKREISE</div>
+    {% if learning_page or setup_page %}<a class="nav-item" href="/heizung?etage=eg"><span class="floor-mark">EG</span> Erdgeschoss</a>{% else %}<button class="nav-item" data-view="eg"><span class="floor-mark">EG</span> Erdgeschoss</button>{% endif %}
+    {% if learning_page or setup_page %}<a class="nav-item" href="/heizung?etage=og"><span class="floor-mark">OG</span> Obergeschoss</a>{% else %}<button class="nav-item" data-view="og"><span class="floor-mark">OG</span> Obergeschoss</button>{% endif %}
+    <div class="sidebar-bottom"><span class="connection-light" id="nav-light"></span><div>{{ 'Lernarchiv' if learning_page else 'Heizungszentrale' }}<small id="nav-status">{{ 'Aufzeichnung wird geprüft' if learning_page else 'Verbindung wird geprüft' }}</small></div><span class="local-tag">LOKAL</span></div>
+  </aside>

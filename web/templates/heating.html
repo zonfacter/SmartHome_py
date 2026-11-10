@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#163d38">
+  <title>Heizung · SmartHome</title>
+  <script defer src="/static/js/heating_live.js?v=1"></script>
+  <link rel="stylesheet" href="/static/css/heating.css?v=15">
+  <script defer src="/static/js/heating_help.js?v=10"></script>
+  <script defer src="/static/js/heating_schedule.js?v=7"></script>
+  <script defer src="/static/js/heating_diagnostics.js?v=10"></script>
+  <script defer src="/static/js/heating_pumps.js?v=9"></script>
+  <script defer src="/static/js/heating_observer.js?v=14"></script>
+  <script defer src="/static/js/heating_dhw.js?v=15"></script>
+  <script defer src="/static/js/heating.js?v=12"></script>
+</head>
+<body>
+  {% include '_heating_navigation.html' %}
+  <main>
+    <header class="topbar"><span>SmartHome <span class="slash">/</span> Heizung</span><div class="topbar-right"><span class="live-tag" id="live-tag"><i></i><span>Verbinde …</span></span><button class="icon-button" id="theme" aria-label="Farbschema wechseln"><svg><use href="#sun"/></svg></button></div></header>
+    <div class="content">
+      <div class="page-heading"><div><div class="eyebrow">WÄRME & WOHLBEFINDEN</div><h1 id="page-title">Heizungsübersicht<span>.</span></h1><p id="page-subtitle">Fußbodenheizung im EG. Heizkörper im OG. Alles an einem Ort.</p></div><button type="button" class="schedule-button help-start" data-open-heating-guide>Einrichtung & Werte verstehen</button><button class="refresh-button" id="refresh" aria-label="Anzeige aktualisieren"><svg><use href="#refresh"/></svg><span>Anzeige aktualisieren</span></button></div>
+      <div id="connection-note" class="notice" role="status" hidden></div>
+      <section class="stats-grid" aria-label="Heizungsanlage">
+        <article class="stat-card"><div class="stat-top"><span>Kesseltemperatur</span><span class="stat-icon amber"><svg><use href="#heat"/></svg></span></div><div class="stat-value" id="boiler">—<small>°C</small></div><div class="stat-foot">Eurocontrol K <span id="boiler-quality"></span></div></article>
+        <article class="stat-card"><div class="stat-top"><span>Warmwasser</span><span class="stat-icon blue"><svg><use href="#drop"/></svg></span></div><div class="stat-value" id="dhw">—<small>°C</small></div><div class="stat-foot" id="dhw-target">Sollwert wird gelesen</div></article>
+        <article class="stat-card"><div class="stat-top"><span>Außentemperatur</span><span class="stat-icon sand"><svg><use href="#sun"/></svg></span></div><div class="stat-value" id="outside">—<small>°C</small></div><div class="stat-foot">Reglerwert · Eurocontrol M</div></article>
+        <article class="stat-card"><div class="stat-top"><span>Brennerrelais</span><span class="stat-icon coral"><svg><use href="#flame"/></svg></span></div><div class="stat-value state-value" id="burner">—</div><div class="stat-foot" id="burner-starts">Starts werden gelesen</div></article>
+      </section>
+      <section class="panel observer-panel dhw-history-panel" id="warmwasser-verlauf" aria-labelledby="dhw-history-heading">
+        <div class="panel-heading"><div><span class="eyebrow">200-LITER-SPEICHER · LANGZEITVERLAUF</span><h2 id="dhw-history-heading">Warmwassertemperatur</h2></div><div class="segmented" aria-label="Warmwasser-Zeitraum"><button type="button" class="selected" data-dhw-days="1" aria-pressed="true">24 Std.</button><button type="button" data-dhw-days="7" aria-pressed="false">7 Tage</button><button type="button" data-dhw-days="30" aria-pressed="false">30 Tage</button><button type="button" data-dhw-days="90" aria-pressed="false">90 Tage</button></div></div>
+        <div class="observer-overview"><article><span>Zuletzt gemessen</span><strong id="dhw-history-latest">—</strong></article><article><span>Minimum im Zeitraum</span><strong id="dhw-history-min">—</strong></article><article><span>Maximum im Zeitraum</span><strong id="dhw-history-max">—</strong></article></div>
+        <div class="chart-container" id="dhw-history-chart"></div><p class="diagnostic-note">Gemessene Speichertemperatur · bei Verdichtung Mittelwert mit Minimum–Maximum je Abschnitt. Details am Messpunkt.</p><p class="diagnostic-note" id="dhw-history-note">Gespeicherte Messwerte werden geladen.</p>
+        <h3 class="pump-history-heading">Wann schalten die Pumpen?</h3><div id="dhw-pump-chart" class="pump-history-chart"></div>
+        <p class="diagnostic-note">Grün: Relais ein · Grau: aus · Orange: mehrere Zustände / Wechsel · Schraffiert: unbekannt. Gleiche Zeitachse wie die Temperaturkurve. Abgetastete Relaiskontakte, keine Durchflussmessung; die ausgeschaltete Wilo-Zirkulationspumpe hat keine Rückmeldung.</p>
+        <details class="pump-switch-details"><summary>Zuletzt beobachtete Schaltwechsel</summary><div id="dhw-pump-events"></div><p class="diagnostic-note">Der Wechsel liegt zwischen den beiden angegebenen Ablesezeiten. Nach Messlücken wird kein Schaltzeitpunkt erfunden. Je Pumpe die letzten 20 Wechsel im gewählten Zeitraum.</p></details>
+      </section>
+      <div class="section-heading"><div><span class="eyebrow">GETRENNT GEREGELT</span><h2>Deine Heizkreise</h2></div><span class="muted small">Messwerte und Einstellungen · nur lesend</span></div>
+      <section class="floor-grid" id="floor-grid" aria-label="Heizkreise"></section>
+      {% include '_heating_observer.html' %}
+      <section class="diagnostics-section" id="pumpendiagnose" aria-labelledby="pump-heading"><div class="section-heading"><div><span class="eyebrow">KONTAKT, ANFORDERUNG & KONTEXT</span><h2 id="pump-heading">Warum läuft die Pumpe? <button type="button" class="heating-help-trigger" data-heating-help="pump" data-help-area="eg" aria-label="Hilfe zu Pumpenkontakten" aria-haspopup="dialog">?</button></h2></div><span class="source-tag">Nur lesend · Ursachenprüfung</span></div><div id="pump-diagnostics" class="diagnostic-grid"></div></section>
+      <section class="panel cycle-panel" id="brennerstatistik" aria-labelledby="cycle-heading">
+        <div class="panel-heading"><div><h2 id="cycle-heading">Brennerstatistik</h2><p>Zähler der K und beobachtete Relaiskontakte</p></div><div class="segmented" aria-label="Statistikzeitraum"><button data-hours="1">1 Std.</button><button data-hours="6" class="selected">6 Std.</button><button data-hours="24">24 Std.</button></div></div>
+        <div class="cycle-stats"><article><span>Betriebsstunden gesamt</span><strong id="burner-hours">—</strong><small id="lifetime-starts">Startzähler wird gelesen</small></article><article><span>Beobachtete Starts</span><strong id="observed-starts">—</strong><small>Im gültig beobachteten Abschnitt</small></article><article><span>Starts / beobachtete Stunde</span><strong id="starts-per-hour">—</strong><small>Auf die Datenabdeckung bezogen</small></article><article><span>Relaisminuten / Start</span><strong id="minutes-per-start">—</strong><small>Abgetastete K4-/K5-Kontakte</small></article></div>
+        <div class="cycle-coverage"><span id="cycle-coverage">Messintervalle werden gesammelt</span><div><i id="cycle-meter"></i></div></div>
+        <div id="cycle-chart" class="cycle-chart" aria-label="Brennerstarts je beobachtetem Zeitabschnitt"></div><p id="cycle-note" class="diagnostic-note">Eine Datenbasis entsteht mit den nächsten Messungen.</p>
+      </section>
+      <section class="diagnostics-section" id="reglerdiagnose" aria-labelledby="diagnostics-heading"><div class="section-heading"><div><span class="eyebrow">AUS DEM SIEMENS-PROFIL</span><h2 id="diagnostics-heading">Anlage & Reglerdiagnose</h2></div><span class="source-tag">Nur lesend</span></div><div id="diagnostics"></div></section>
+      <section class="panel schedule-panel" aria-labelledby="schedule-heading">
+        <div class="panel-heading"><div><h2 id="schedule-heading">Heizzeiten der Woche <button type="button" class="heating-help-trigger" data-heating-help="schedule" data-help-area="anlage" aria-label="Hilfe zu Heizzeiten" aria-haspopup="dialog">?</button></h2><p>Eigene Zeitprogramme für Erdgeschoss und Obergeschoss</p></div><div class="segmented" aria-label="Darstellung der Heizzeiten"><button type="button" data-schedule-mode="grid" class="selected" aria-pressed="true">Wochenraster</button><button type="button" data-schedule-mode="list" aria-pressed="false">Zeitliste</button></div></div>
+        <div id="schedule-table" aria-label="Zeitfenster je Wochentag und Heizkreis"></div>
+        <p class="schedule-note">In Automatik gilt außerhalb der Komfortphasen die Absenkung. Pumpen und Brenner werden zusätzlich nach Wärmebedarf gesteuert. Entwürfe bleiben lokal, bis du „Übertragung prüfen“ und danach „An Heizung übertragen“ bestätigst.</p>
+        <p id="schedule-message" class="schedule-message" role="status" aria-live="polite"></p>
+      </section>
+      <section class="panel history-panel">
+        <div class="panel-heading"><div><h2>Temperaturverlauf</h2><p id="history-description">Vorlauf im Erdgeschoss und Kesseltemperatur</p></div><div class="segmented" aria-label="Verlaufszeitraum"><button data-hours="1">1 Std.</button><button data-hours="6" class="selected">6 Std.</button><button data-hours="24">24 Std.</button></div></div>
+        <label class="history-selector">Verlauf anzeigen<select id="history-series" aria-label="Verlauf anzeigen"><option value="heating">Heizung</option><option value="weather">Außentemperaturen</option></select></label><div class="chart-container" id="history-chart"><div class="empty-chart"><svg><use href="#chart"/></svg><strong>Ein Verlauf entsteht mit der Zeit</strong><span>Neue Messwerte werden auf der SmartHome-VM gespeichert.</span></div></div>
+        <div class="chart-legend" id="history-legend"><span><i class="teal-dot"></i>EG · Vorlauf</span><span><i class="amber-dot"></i>Kesseltemperatur</span><span class="history-note">30 Tage lokal gespeichert</span></div>
+      </section>
+      <section class="rooms-section"><div class="section-heading"><div><span class="eyebrow">TADO · VIA IOBROKER</span><h2>Die Temperatur in deinen Räumen</h2></div><span class="source-tag" id="tado-status">Verbindung wird geprüft</span></div><div class="rooms-grid" id="rooms-grid"><div class="panel empty-rooms">Raumtemperaturen werden geladen …</div></div><p class="rooms-note">Tado-Messwerte werden angezeigt und nicht als Raumfühler an die Heizungsregler gesendet.</p></section>
+      <footer><div><span class="connection-light" id="io-light"></span><span id="io-status">ioBroker wird verbunden</span></div><span id="updated">Warte auf den ersten Messwert</span><a href="/">Zur SmartHome-Zentrale ↗</a></footer>
+    </div>
+  </main>
+  <dialog id="schedule-editor" class="schedule-editor" aria-labelledby="schedule-editor-title" aria-describedby="schedule-editor-note">
+    <form novalidate>
+      <div class="editor-heading"><div><span class="eyebrow">WOCHENPROGRAMM · ENTWURF</span><h2 id="schedule-editor-title">Zeiten planen</h2></div><button type="button" class="schedule-button quiet" data-close-editor aria-label="Editor schließen">Schließen</button></div>
+      <p id="schedule-editor-note">Plane bis zu drei Komfortphasen pro Tag in Zehn-Minuten-Schritten. Speichere zuerst einen lokalen Entwurf. Die Übertragung zur Heizung folgt separat mit einer Vorschau der Änderungen.</p>
+      <label class="editor-day">Wochentag<select name="day" aria-label="Wochentag"><option value="0">Montag</option><option value="1">Dienstag</option><option value="2">Mittwoch</option><option value="3">Donnerstag</option><option value="4">Freitag</option><option value="5">Samstag</option><option value="6">Sonntag</option></select></label>
+      <div class="editor-times-heading"><span>Komfortphase</span><span>Beginn</span><span>Ende</span></div>
+      <div class="editor-period"><label><input type="checkbox" name="enabled0" data-period-enabled> Zeitfenster 1</label><input type="text" name="start0" inputmode="numeric" maxlength="5" placeholder="06:00" aria-label="Beginn Zeitfenster 1" autocomplete="off"><input type="text" name="end0" inputmode="numeric" maxlength="5" placeholder="20:00" aria-label="Ende Zeitfenster 1" autocomplete="off"></div>
+      <div class="editor-period"><label><input type="checkbox" name="enabled1" data-period-enabled> Zeitfenster 2</label><input type="text" name="start1" inputmode="numeric" maxlength="5" placeholder="06:00" aria-label="Beginn Zeitfenster 2" autocomplete="off"><input type="text" name="end1" inputmode="numeric" maxlength="5" placeholder="20:00" aria-label="Ende Zeitfenster 2" autocomplete="off"></div>
+      <div class="editor-period"><label><input type="checkbox" name="enabled2" data-period-enabled> Zeitfenster 3</label><input type="text" name="start2" inputmode="numeric" maxlength="5" placeholder="06:00" aria-label="Beginn Zeitfenster 3" autocomplete="off"><input type="text" name="end2" inputmode="numeric" maxlength="5" placeholder="20:00" aria-label="Ende Zeitfenster 3" autocomplete="off"></div>
+      <p class="editor-tip">Für das Tagesende 24:00 eingeben. Alle Zeitfenster aus = ganztägig Absenkung im Entwurf.</p>
+      <label class="editor-day">Diese Zeiten übernehmen für<select name="scope" aria-label="Zeiten kopieren auf"><option value="day">Nur den gewählten Tag</option><option value="weekdays">Montag bis Freitag</option><option value="weekend">Samstag und Sonntag</option><option value="week">Die ganze Woche</option></select></label>
+      <p class="editor-error" data-editor-error role="alert"></p>
+      <div class="editor-footer"><span>Keine Änderung am Regler</span><button type="submit" class="schedule-button primary">Im Entwurf speichern</button></div>
+    </form>
+  </dialog>
+  <dialog id="schedule-transfer" class="schedule-editor" aria-labelledby="schedule-transfer-title">
+    <div class="editor-heading"><div><span class="eyebrow">ZEITPROGRAMM · ÜBERNAHME</span><h2 id="schedule-transfer-title" data-transfer-title>Heizzeiten übertragen</h2></div></div>
+    <p>Nur die hier aufgeführten Tage des gewählten Heizkreises werden geändert. Die neuen Zeiten werden anschließend direkt am Regler ausgelesen und verglichen.</p>
+    <div data-transfer-content class="transfer-content"></div>
+    <p class="editor-error" data-transfer-error role="status" aria-live="polite"></p>
+    <div class="editor-footer"><button type="button" class="schedule-button quiet" data-cancel-transfer>Abbrechen</button><button type="button" class="schedule-button primary" data-confirm-transfer disabled>An Heizung übertragen</button></div>
+  </dialog>
+  <dialog id="heating-help" class="heating-help" aria-labelledby="heating-help-title"><header><div><span class="eyebrow">WERT VERSTEHEN</span><h2 id="heating-help-title"></h2></div><button type="button" class="schedule-button quiet" data-help-close>Schließen</button></header><div data-help-content class="help-body"></div><footer>Diese Hilfe ändert keine Heizungsparameter.</footer></dialog>
+  <dialog id="heating-guide" class="heating-help heating-guide" aria-labelledby="heating-guide-title"><header><div><span class="eyebrow">EINRICHTUNG & INTERPRETATION</span><h2 id="heating-guide-title" tabindex="-1"></h2></div><button type="button" class="schedule-button quiet" data-guide-close>Schließen</button></header><nav data-guide-progress aria-label="Einrichtungsschritte"></nav><div data-guide-content class="help-body"></div><footer><span>Werte beim Öffnen · keine Übertragung</span><div><button type="button" class="schedule-button quiet" data-guide-back>Zurück</button><button type="button" class="schedule-button primary" data-guide-next>Weiter</button></div></footer></dialog>
+</body>
+</html>
