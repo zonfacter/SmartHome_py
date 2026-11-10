@@ -16,7 +16,18 @@ ROLES = {'unknown':'Zuordnung offen','charge_supply':'Speicherlade-Vorlauf','cha
          'og_supply':'OG-Vorlauf','og_return':'OG-Rücklauf','eg_return':'EG-Rücklauf',
          'circulation_return':'Trinkwasser-Zirkulationsrücklauf','ambient':'Heizungsraum · Luft'}
 KINDS = ('boiler','tank','pump','circulation_pump','valve','check_valve','mixer','radiator',
-         'floor_heating','manifold','junction','sensor','label','expansion_vessel','heat_exchanger')
+         'floor_heating','manifold','junction','sensor','label','expansion_vessel','heat_exchanger',
+         'supply_connection','return_connection','safety_valve','air_vent','drain')
+HYDRONIC_PORTS = {
+    'boiler':('flow','return'),'tank':('dhw','circulation','cold','coil_flow','coil_return'),
+    'pump':('in','out'),'circulation_pump':('in','out'),'valve':('in','out'),'check_valve':('in','out'),
+    'mixer':('a','b','ab'),'radiator':('flow','return'),'floor_heating':('flow','return'),
+    'manifold':('in','out','branch_1','branch_2','branch_3'),'junction':('n','e','s','w'),
+    'sensor':('probe',),'label':(),'expansion_vessel':('connection',),
+    'heat_exchanger':('primary_flow','primary_return','secondary_flow','secondary_return'),
+    'supply_connection':('flow',),'return_connection':('return',),'safety_valve':('in','discharge'),
+    'air_vent':('connection',),'drain':('connection','drain')}
+PIPE_MEDIA = ('hot','cold','neutral','potable','dhw','dhw_circulation','cold_water')
 EVENT_KINDS = ('circulation_open','circulation_closed','draw','no_draw','pump_test','sensor_test')
 
 
@@ -65,9 +76,10 @@ def validate_config(data):
 
 def validate_plan(data):
     if not isinstance(data,dict):raise SetupError('Ungültiger Anlagenplan.')
+    if type(data.get('schema',1)) is not int or data.get('schema',1) not in (1,2):raise SetupError('Unbekannte Planversion.')
     nodes=data.get('nodes',[]);edges=data.get('edges',[])
     if not isinstance(nodes,list) or len(nodes)>180 or not isinstance(edges,list) or len(edges)>360:raise SetupError('Der Plan ist zu groß.')
-    result={'schema':1,'title':text(data.get('title','Meine Heizungsanlage'),100),'nodes':[],'edges':[]}
+    result={'schema':2,'title':text(data.get('title','Meine Heizungsanlage'),100),'nodes':[],'edges':[]}
     ids=set();sensors=set()
     def ident(v):
         if not isinstance(v,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,48}',v) or v in ids:raise SetupError('Bauteil-/Leitungs-IDs müssen eindeutig sein.')
@@ -79,20 +91,26 @@ def validate_plan(data):
         if not isinstance(n,dict) or n.get('type') not in KINDS:raise SetupError('Unbekanntes Bauteil.')
         rotation=n.get('rotation',0)
         if type(rotation) is not int or rotation not in (0,90,180,270):raise SetupError('Ungültige Drehung.')
+        layout=n.get('port_layout','legacy')
+        if layout not in ('legacy','hydronic'):raise SetupError('Unbekannte Anschlussanordnung.')
         c={'id':ident(n.get('id')),'type':n['type'],'label':text(n.get('label',''),100),'x':coordinate(n.get('x')),
-           'y':coordinate(n.get('y')),'rotation':rotation,'sensor':text(n.get('sensor',''),30),'note':text(n.get('note',''),500,True)}
+           'y':coordinate(n.get('y')),'rotation':rotation,'sensor':text(n.get('sensor',''),30),'note':text(n.get('note',''),500,True),'port_layout':layout}
         if c['sensor']:
             if c['type']!='sensor' or c['sensor'] not in {k for k,_,_ in CHANNELS} or c['sensor'] in sensors:raise SetupError('Eine Messstelle darf nur einer Fühlermarkierung zugeordnet sein.')
             sensors.add(c['sensor'])
         result['nodes'].append(c)
     node_ids={n['id'] for n in result['nodes']}
+    nodes={n['id']:n for n in result['nodes']}
     for e in edges:
         if not isinstance(e,dict):raise SetupError('Ungültige Leitung.')
-        c={'id':ident(e.get('id')),'label':text(e.get('label',''),80),'medium':e.get('medium','neutral'),'points':[]}
-        if c['medium'] not in ('hot','cold','neutral','potable'):raise SetupError('Ungültiger Leitungstyp.')
+        c={'id':ident(e.get('id')),'label':text(e.get('label',''),80),'medium':e.get('medium','neutral'),'flow':e.get('flow','none'),'points':[]}
+        if c['medium'] not in PIPE_MEDIA:raise SetupError('Ungültiger Leitungstyp.')
+        if c['flow'] not in ('none','forward','reverse'):raise SetupError('Ungültige dokumentierte Fließrichtung.')
         for end in ('from','to'):
             a=e.get(end)
-            if not isinstance(a,dict) or not isinstance(a.get('node'),str) or a.get('node') not in node_ids or a.get('port') not in ('n','e','s','w'):raise SetupError('Leitung benötigt zwei vorhandene Anschlüsse.')
+            if not isinstance(a,dict) or not isinstance(a.get('node'),str) or a.get('node') not in node_ids:raise SetupError('Leitung benötigt zwei vorhandene Anschlüsse.')
+            node=nodes[a['node']]
+            if a.get('port') not in (HYDRONIC_PORTS[node['type']] if node['port_layout']=='hydronic' else ('n','e','s','w')):raise SetupError('Anschluss passt nicht zum Bauteil.')
             c[end]={'node':a['node'],'port':a['port']}
         if c['from']==c['to']:raise SetupError('Eine Leitung benötigt verschiedene Anschlüsse.')
         points=e.get('points',[])

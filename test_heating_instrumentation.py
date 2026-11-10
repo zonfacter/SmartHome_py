@@ -23,6 +23,23 @@ def series():
             for i in range(120)]
 
 class Instruments(unittest.TestCase):
+    def test_semantic_ports_and_legacy_plan_compatibility(self):
+        legacy=validate_plan(plan())
+        self.assertEqual(legacy['nodes'][0]['port_layout'],'legacy')
+        self.assertEqual(legacy['edges'][0]['from']['port'],'e')
+        self.assertEqual(validate_plan(legacy),legacy)
+        data={'schema':2,'title':'Hydraulik','nodes':[
+            {'id':'b','type':'boiler','x':200,'y':200,'port_layout':'hydronic'},
+            {'id':'t','type':'tank','x':700,'y':500,'port_layout':'hydronic'}],
+            'edges':[{'id':'e','from':{'node':'b','port':'flow'},'to':{'node':'t','port':'coil_flow'},'medium':'hot','flow':'forward'}]}
+        validated=validate_plan(data)
+        self.assertEqual(validated['edges'][0]['flow'],'forward')
+        self.assertEqual(validate_plan(validated),validated)
+        for mutate in (lambda d:d['edges'][0]['to'].update(port='n'),lambda d:d['edges'][0].update(flow='inferred'),
+                       lambda d:d['nodes'][0].update(port_layout='automatic'),lambda d:d.update(schema=3)):
+            invalid=deepcopy(data);mutate(invalid)
+            with self.assertRaises(SetupError):validate_plan(invalid)
+
     def test_common_boiler_return_is_not_storage_coil_return(self):
         config={'channels':default_channels()}
         config['channels'][0]['role']='boiler_supply'

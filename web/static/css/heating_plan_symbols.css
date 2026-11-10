@@ -1,0 +1,14 @@
+.plan-workspace{grid-template-columns:200px minmax(320px,1fr) 210px}
+.plan-tools .plan-search-label{margin-bottom:12px}.plan-tools .plan-search-label input{width:100%;font-size:11px}
+#plan-library button{display:flex;align-items:center;gap:9px;min-height:62px;padding:7px 9px;font-size:11px;line-height:1.4}
+#plan-library button span{flex:1}.symbol-preview{width:46px;height:48px;flex:0 0 46px;overflow:visible}
+.symbol-preview .plan-node-shape{fill:var(--card);stroke:var(--ink);stroke-width:2.4}.symbol-preview path,.symbol-preview line{fill:none}
+.plan-node-shape .symbol-solid,.symbol-preview .symbol-solid{fill:var(--ink)!important}
+.plan-node-shape .symbol-letter,.symbol-preview .symbol-letter{fill:var(--ink);stroke:none;font:bold 13px "Segoe UI",sans-serif}
+#plan-canvas .port-label{font-size:10px;font-weight:650;pointer-events:none;paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+#plan-canvas .flow-arrow{stroke:none;pointer-events:none}
+#plan-port-info,#plan-edge-ends{padding:9px;background:var(--card);border:1px solid var(--line);border-radius:7px;overflow-wrap:anywhere}
+.plan-legend{display:flex;flex-wrap:wrap;gap:12px 20px;margin:16px 0;color:var(--muted);font-size:11px}.plan-legend span{display:inline-flex;gap:6px;align-items:center}.plan-legend svg{width:35px;height:12px;fill:none}
+.plan-help{margin:12px 0}.plan-help p{font-size:12px;line-height:1.8;color:var(--muted)}.plan-help a{color:var(--teal)}
+@media(max-width:1150px){.plan-workspace{grid-template-columns:175px minmax(240px,1fr)}}
+@media(max-width:700px){.plan-workspace{grid-template-columns:1fr}.plan-tools .plan-search-label{display:flex;width:100%;margin:0 0 6px}#plan-library{display:flex;width:100%;gap:6px;overflow-x:auto;padding-bottom:6px}#plan-library button{flex:0 0 150px;min-height:58px}.symbol-preview{width:35px;flex-basis:35px}.plan-tools{display:block}.plan-tools>button{margin:3px}}
