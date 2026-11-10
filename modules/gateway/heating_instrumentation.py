@@ -24,8 +24,8 @@ class SetupError(ValueError):
 
 
 def number(v):return type(v) in (int,float) and math.isfinite(v)
-def text(v, maximum=120):
-    if not isinstance(v,str) or len(v)>maximum or any(ord(c)<32 for c in v):raise SetupError('Ungültiger Text.')
+def text(v, maximum=120, multiline=False):
+    if not isinstance(v,str) or len(v)>maximum or any(ord(c)<32 and (not multiline or c not in '\n\r\t') for c in v):raise SetupError('Ungültiger Text.')
     return v.strip()
 def object_id(v):
     v=text(v,240)
@@ -79,7 +79,7 @@ def validate_plan(data):
         rotation=n.get('rotation',0)
         if type(rotation) is not int or rotation not in (0,90,180,270):raise SetupError('Ungültige Drehung.')
         c={'id':ident(n.get('id')),'type':n['type'],'label':text(n.get('label',''),100),'x':coordinate(n.get('x')),
-           'y':coordinate(n.get('y')),'rotation':rotation,'sensor':text(n.get('sensor',''),30),'note':text(n.get('note',''),500)}
+           'y':coordinate(n.get('y')),'rotation':rotation,'sensor':text(n.get('sensor',''),30),'note':text(n.get('note',''),500,True)}
         if c['sensor']:
             if c['type']!='sensor' or c['sensor'] not in {k for k,_,_ in CHANNELS} or c['sensor'] in sensors:raise SetupError('Eine Messstelle darf nur einer Fühlermarkierung zugeordnet sein.')
             sensors.add(c['sensor'])
@@ -114,6 +114,11 @@ def read_channel(config, states, now):
         stamp/=1000
         if not allow_old and now-stamp>config['max_age_seconds']:return None,'stale',stamp
         return s.get('val'),'valid',stamp
+    if config['availability_id']:
+        available,aq,_=checked(config['availability_id'],allow_old=True)
+        target=config.get('availability_value',True)
+        if aq!='valid' or type(available) is not type(target) or available!=target:
+            result['quality']=aq if aq!='valid' else 'offline';return result
     v,q,received=checked(config['state_id']);result.update(received_ts=received,quality=q)
     if q!='valid':return result
     low,high=(-30,70) if config.get('role')=='ambient' else (-55,125)
@@ -230,7 +235,9 @@ class Instrumentation:
 
     def history(self,hours,now=None):
         now=int(time.time() if now is None else now);start=now-hours*3600
-        seconds=max(10,math.ceil(hours*3600/720))
+        with closing(sqlite3.connect(self.db_path,timeout=5)) as db:
+            first=db.execute('SELECT MIN(ts) FROM heating_sensor_samples WHERE ts>=? AND ts<=?',(start,now)).fetchone()[0]
+        seconds=max(10,math.ceil((now-first+1)/720)) if first is not None else 10
         fields=[]
         for key,_,_ in CHANNELS:
             p=f'$.channels.{key}'
