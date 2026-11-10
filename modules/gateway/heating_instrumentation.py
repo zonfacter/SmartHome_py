@@ -12,6 +12,7 @@ import time
 
 CHANNELS = tuple((f'sensor_{i}',f'S{i}',f'Fühler {i} · Zuordnung offen') for i in range(1,8))
 ROLES = {'unknown':'Zuordnung offen','charge_supply':'Speicherlade-Vorlauf','charge_return':'Speicherlade-Rücklauf',
+         'boiler_supply':'Kesselvorlauf','boiler_return':'Kesselrücklauf',
          'og_supply':'OG-Vorlauf','og_return':'OG-Rücklauf','eg_return':'EG-Rücklauf',
          'circulation_return':'Trinkwasser-Zirkulationsrücklauf','ambient':'Heizungsraum · Luft'}
 KINDS = ('boiler','tank','pump','circulation_pump','valve','check_valve','mixer','radiator',

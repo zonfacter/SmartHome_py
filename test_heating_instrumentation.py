@@ -23,6 +23,16 @@ def series():
             for i in range(120)]
 
 class Instruments(unittest.TestCase):
+    def test_common_boiler_return_is_not_storage_coil_return(self):
+        config={'channels':default_channels()}
+        config['channels'][0]['role']='boiler_supply'
+        config['channels'][1]['role']='boiler_return'
+        self.assertEqual(validate_config(config)['channels'][1]['role'],'boiler_return')
+        rr=series()
+        for row in rr:
+            row['channels']['sensor_2']['role']='boiler_return'
+        self.assertEqual(loss_diagnosis(rr,[],24)['windows'],0)
+
     def test_sensor_freshness_actual_time_and_no_zero_fallback(self):
         c=configured();states={c['state_id']:state(42),c['timestamp_id']:state(NOW),c['availability_id']:state(True)}
         self.assertEqual(read_channel(c,states,NOW)['value'],42)
